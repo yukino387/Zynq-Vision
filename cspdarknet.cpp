@@ -8,7 +8,6 @@ static data_t* allocate_feature(data_t*& storage, int count) {
 }
 
 static void run_basic_conv(BasicConv* conv, data_t* input, data_t* output, int count) {
-    Xil_DCacheFlushRange((INTPTR)input, conv->ch_in * conv->h * conv->w * sizeof(data_t));
     Xil_DCacheFlushRange((INTPTR)output, count * sizeof(data_t));
     conv->forward(input, output);
     Xil_DCacheInvalidateRange((INTPTR)output, count * sizeof(data_t));
@@ -40,6 +39,7 @@ CSPDarkNet::~CSPDarkNet() {
 }
 
 void CSPDarkNet::forward(data_t* input, data_t* feat1, data_t* feat2) {
+    Xil_DCacheFlushRange((INTPTR)input, INPUT_COUNT * sizeof(data_t));
     run_basic_conv(basic_conv1, input, basic_conv1_out, CONV1_COUNT);
     run_basic_conv(basic_conv2, basic_conv1_out, basic_conv2_out, CONV2_COUNT);
     resblock1->forward(basic_conv2_out, tmp, resblock1_out);
