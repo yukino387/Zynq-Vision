@@ -160,8 +160,8 @@ void camera_to_input(const uint16_t* pixels, data_t* input) {
         const unsigned r = (r5 << 3) | (r5 >> 2);
         const unsigned g = (g6 << 2) | (g6 >> 4);
         const unsigned b = (b5 << 3) | (b5 >> 2);
-        input[i] = (r * 512 + 127) / 255;
-        input[CAMERA_PIXELS + i] = (g * 512 + 127) / 255;
-        input[2 * CAMERA_PIXELS + i] = (b * 512 + 127) / 255;
+        input[i] = (r << 1) + ((r + 64) >> 7);
+        input[CAMERA_PIXELS + i] = (g << 1) + ((g + 64) >> 7);
+        input[2 * CAMERA_PIXELS + i] = (b << 1) + ((b + 64) >> 7);
     }
 }
