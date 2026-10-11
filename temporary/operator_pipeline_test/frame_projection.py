@@ -17,25 +17,27 @@ old = traffic.count(13,32,8)
 blocks = sum((2*co//4)*(h//26)*(w//26)
              for _, (h,w,ci,co) in traffic.constructors('cspdarknet.cpp','Resblock_body'))
 old_pool = blocks * (10488/2) / 100000
-frequency = 142857.132
-new_pool = blocks * (10521/2) / frequency
 test = Path(__file__).resolve().parent / 'build'
 pool_rows = [int(value) for value in re.findall(r'transaction\s+\d+:\s+(\d+)',
              (test / 'pool_rows.transaction.rpt').read_text())]
 assert len(pool_rows) == 3
 row_cost = dict(zip((26,52,104), (pool_rows[0]/8,pool_rows[1]/8,pool_rows[2]/4)))
-row_pool = sum(2*co*row_cost[h] for _, (h,w,ci,co) in
-               traffic.constructors('cspdarknet.cpp','Resblock_body')) / frequency
+row_pool_cycles = sum(2*co*row_cost[h] for _, (h,w,ci,co) in
+                      traffic.constructors('cspdarknet.cpp','Resblock_body'))
 # Keep a conservative common upsampling cost in both variants.
 upsample = 183903 / 100000
 residual = inference - old[3]/100000 - old_pool - upsample
 assert residual > 0
 print(f'Calibration: {len(rows)} board records, inference={inference:.3f}ms cycle={cycle:.3f}ms')
-print('Actual candidate clock: 142.857132MHz. Projection gives no timing credit for the PS cache optimization.')
-for name, config, pooling in (('shared_dsp',(26,64,64,True,True),new_pool),
-                              ('pool_rows',(26,64,64,True,True),row_pool),
-                              ('shared44',(26,88,88,True,True,44,True),row_pool)):
-    gate = test / f'{name}_area_system_142/build/postroute_timing.rpt'
+print('Projection gives no timing credit for the PS cache optimization.')
+for name, config, pool_cycles, mhz in (
+        ('shared_dsp',(26,64,64,True,True),blocks*(10521/2),142.857132),
+        ('pool_rows',(26,64,64,True,True),row_pool_cycles,142.857132),
+        ('shared44',(26,88,88,True,True,44,True),row_pool_cycles,142.857132),
+        ('shared44_narrow',(26,88,88,True,True,44,True),row_pool_cycles,166.666672)):
+    frequency = mhz * 1000
+    pooling = pool_cycles / frequency
+    gate = test / f'{name}_area_system_{int(mhz)}/build/postroute_timing.rpt'
     if gate.is_file():
         summary = gate.read_text().split('WNS(ns)',1)[1].splitlines()[2].split()
         qualified = min(float(summary[i]) for i in (0,4,8)) >= 0
@@ -44,9 +46,11 @@ for name, config, pooling in (('shared_dsp',(26,64,64,True,True),new_pool),
         print(f'{name}: complete-system timing is not qualified yet')
     new = traffic.count(*config)
     ratio = sum(new[:3]) / sum(old[:3])
+    print(f'{name}: clock={mhz:.6f}MHz, ideal convolution={new[3]/frequency:.3f}ms, pooling={pooling:.3f}ms')
     for fixed_share in (0,0.25,0.5,1):
         projected = new[3]/frequency + pooling + upsample + (cycle-inference)
         projected += residual*(fixed_share+(1-fixed_share)*ratio)
         print(f'{name}: residual fixed share={fixed_share:.0%}: frame={projected:.3f}ms FPS={1000/projected:.3f}')
+    print(f'{name}: margin below 400ms with all old overhead retained={400-projected:.3f}ms')
 print('No whole-frame RTL or board measurement. The residual model includes control/memory stalls and cache work; scaling it by scheduled traffic is an assumption.')
-print('No candidate establishes sub-400ms across all residual-overhead assumptions.')
+print('A sub-400ms projection still requires physical qualification and assumes the new memory/control overhead does not exceed the retained baseline overhead.')
