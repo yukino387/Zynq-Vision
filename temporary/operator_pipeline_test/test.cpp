@@ -6,7 +6,7 @@ static int raw(data_t x) { return x.range(15, 0).to_int(); }
 
 static bool check(int h, int ci, int co, int k, int stride, int act, bool saturate=false) {
     const int oh = h / stride, pixels = oh * oh;
-    if (ci*h*h > 60000 || co*ci*k*k > 65536 || co > 128 || co*pixels > 100000) {
+    if (ci*h*h > 60000 || co*ci*k*k > 65536 || co > 512 || co*pixels > 100000) {
         std::cerr << "CASE exceeds configured AXI co-simulation depths\n";
         return false;
     }
@@ -104,6 +104,11 @@ static bool check_resize(int kernel, int channels, int h) {
 int main() {
     if (const char* quick = std::getenv("HLS_QUICK_COSIM")) {
         const int selected = std::atoi(quick);
+        if (selected == 18) {
+            bool ok = check(13, 4, 512, 3, 1, 1);
+            ok &= check(13, 256, 75, 1, 1, 0, true);
+            return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+        }
         if (selected == 17) {
             return check(104, 3, 32, 3, 2, 1) ? EXIT_SUCCESS : EXIT_FAILURE;
         }
