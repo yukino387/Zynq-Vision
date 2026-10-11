@@ -45,7 +45,6 @@ Yolo4_Tiny::~Yolo4_Tiny() {
 }
 
 void Yolo4_Tiny::forward(data_t* input, data_t* out0, data_t* out1) {
-    Xil_DCacheFlushRange((INTPTR)P4, P4_COUNT * sizeof(data_t));
     backbone->forward(input, P4 + 128 * 26 * 26, feat2);
     run_basic_conv(conv_forP5_conv, feat2, P5, P5_COUNT);
 
