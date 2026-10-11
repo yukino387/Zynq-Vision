@@ -6,7 +6,7 @@ import sys
 root = Path(__file__).resolve().parents[2]
 base = Path(__file__).resolve().parent / 'build'
 variant = sys.argv[1] if len(sys.argv) > 1 else 'compact'
-assert variant in ('compact', 'pooladdr')
+assert variant in ('compact', 'pooladdr', 'shared')
 stage = base / (variant+'_area_system_125')
 stage.mkdir(parents=True, exist_ok=True)
 ip = base / variant / 'solution/impl/ip'
