@@ -300,7 +300,10 @@ void std_conv(data_t* in1,data_t* in2,data_t* in3,data_t* in4,
     m=0;
     pingpong=true;
     cout<<"std_conv B1"<<endl; // for debug
-    memcpy((data_t*)bias_buff,(const data_t*)bias,sizeof(data_t)*ch_out); // PS -> PL, load bias
+    for (unsigned short index=0; index<ch_out; ++index) {
+#pragma HLS PIPELINE II=1
+        bias_buff[index/Tm][index%Tm] = bias[index];
+    } // PS -> PL, load bias
     cout<<"std_conv B2"<<endl; // for debug
     compute_output(fm_out1,bias_buff, in1,in2,in3,in4, w1,w2,w3,w4, m,fm_size,ch_in,ch_out,r,c,stride);
     cout<<"std_conv B3"<<endl; // for debug

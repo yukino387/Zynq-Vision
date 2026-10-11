@@ -196,7 +196,10 @@ void pwconv(data_t* in1,data_t* in2,data_t *in3,data_t* in4,
 #pragma HLS ARRAY_PARTITION variable=fm_out2 complete dim=1
     //
     bool pingpong;
-    memcpy((data_t*)bias_buff,(const data_t*)bias,sizeof(data_t)*M);
+    for (unsigned short index=0; index<M; ++index) {
+#pragma HLS PIPELINE II=1
+        bias_buff[index/Tm][index%Tm] = bias[index];
+    }
     //
     pingpong=true;
     basePixAddr=0;
