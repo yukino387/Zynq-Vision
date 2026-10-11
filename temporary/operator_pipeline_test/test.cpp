@@ -85,6 +85,11 @@ static bool check_resize(int kernel, int channels, int h) {
 int main() {
     if (const char* quick = std::getenv("HLS_QUICK_COSIM")) {
         const int selected = std::atoi(quick);
+        if (selected == 11) {
+            bool ok = check(26, 64, 64, 3, 1, 1);
+            ok &= check(13, 256, 75, 1, 1, 0, true);
+            return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+        }
         if (selected == 9) {
             bool ok = check(13, 8, 64, 3, 1, 1);
             ok &= check(13, 64, 75, 1, 1, 0, true);
