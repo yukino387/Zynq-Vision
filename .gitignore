@@ -1,0 +1,41 @@
+# Generated Vitis platform, BSP, IDE state and build directories
+/cnn_accelerator/
+/_ide/
+/.rigel_lopper/
+**/_ide/
+**/build/
+**/export/
+**/logs/
+.cache/
+__pycache__/
+*.pyc
+.compile_commands
+.clangd
+compile_commands.json
+.vitisWorkspace.json
+
+# Compiled software, hardware exports, model payloads and transient files
+*.o
+*.obj
+*.d
+*.elf
+*.map
+*.bit
+*.xsa
+*.pdi
+*.bin
+*.zip
+*.log
+*.lock
+*.before
+
+# Generated test fixtures and images copied from the author's package
+/temporary/**/pc_files/
+/temporary/**/expected.h
+/temporary/**/input_expected.h
+/temporary/**/*.jpg
+/temporary/**/*.jpeg
+/temporary/**/*.png
+
+# Vitis template documentation
+/cnn_app/src/README.txt

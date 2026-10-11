@@ -1,0 +1,73 @@
+{
+  "input": {
+    "image": "C:\\00_workplace\\fpga\\cnn_accelerator\\temporary\\image_inference_test\\street.jpg",
+    "original_size": [
+      1330,
+      1330
+    ],
+    "input_shape": [
+      3,
+      416,
+      416
+    ],
+    "preprocessing": "RGB; direct bicubic resize; float32 /255; CHW; round-away-from-zero *512",
+    "float_min": 0.0,
+    "float_max": 1.0,
+    "int16_min": 0,
+    "int16_max": 512,
+    "fnv1a": 544909935,
+    "count": 519168
+  },
+  "target": {
+    "test_errors": 0,
+    "test_loaded": 42,
+    "test_verified": 42,
+    "input_min": 0,
+    "input_max": 512,
+    "out0_min": -15897,
+    "out0_max": 5465,
+    "out1_min": -12136,
+    "out1_max": 5912,
+    "forward_us": 140569,
+    "timer_counts_per_second": 333333343,
+    "out0_changed": 12675,
+    "out1_changed": 50700
+  },
+  "outputs": [
+    {
+      "file": "C:\\00_workplace\\fpga\\cnn_accelerator\\temporary\\image_inference_test\\out0.bin",
+      "shape": [
+        75,
+        13,
+        13
+      ],
+      "layout": "CHW",
+      "dtype": "little-endian int16",
+      "count": 12675,
+      "bytes": 25350,
+      "min": -15897,
+      "max": 5465,
+      "zero_count": 2,
+      "sha256": "0ad1a9d0e0c33e6e0785ef8d29146b2628cd9541ad9efc95bd4e772d4dabbd71"
+    },
+    {
+      "file": "C:\\00_workplace\\fpga\\cnn_accelerator\\temporary\\image_inference_test\\out1.bin",
+      "shape": [
+        75,
+        26,
+        26
+      ],
+      "layout": "CHW",
+      "dtype": "little-endian int16",
+      "count": 50700,
+      "bytes": 101400,
+      "min": -12136,
+      "max": 5912,
+      "zero_count": 16,
+      "sha256": "13ea811552f16eeae75903d0565ad67f77fa07ac9360a53e35d30a4fc055bd7f"
+    }
+  ],
+  "forward_ms": 140.569,
+  "timing_scope": "Yolo4_Tiny::forward only, including its cache maintenance",
+  "validation": "Execution, weight/input checksums, output sizes/stats and buffer guards; no numerical reference or detection accuracy check"
+}
