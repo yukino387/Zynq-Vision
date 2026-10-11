@@ -6,8 +6,8 @@ import sys
 root = Path(__file__).resolve().parents[2]
 variant = sys.argv[1]
 frequency = int(sys.argv[2])
-if variant not in ('combined', 'pwphase') or frequency not in (100, 125):
-    raise ValueError('Expected combined/pwphase and 100/125 MHz')
+if variant not in ('combined', 'pwphase', 'output_phases') or frequency not in (100, 125):
+    raise ValueError('Expected combined/pwphase/output_phases and 100/125 MHz')
 base = Path(__file__).resolve().parent / 'build'
 source = root / 'hardware/camera'
 stage = base / f'{variant}_system_{frequency}'
