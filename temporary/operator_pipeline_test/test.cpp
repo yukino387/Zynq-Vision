@@ -68,8 +68,13 @@ static bool check(int h, int ci, int co, int k, int stride, int act, bool satura
 
 static bool check_resize(int kernel, int channels, int h) {
     const int oh = kernel == 2 ? h / 2 : h * 2;
+    if (channels*h*h > 60000 || channels*oh*oh > 100000) {
+        std::cerr << "RESIZE exceeds configured AXI co-simulation depths\n";
+        return false;
+    }
     std::vector<data_t> input(60000, 0), weights(65536, 0), bias(1024, 0);
-    std::vector<data_t> output(100000, 0), other2(100000, 0), other3(100000, 0), other4(100000, 0);
+    const data_t sentinel = data_t(31);
+    std::vector<data_t> output(100000, sentinel), other2(100000, sentinel), other3(100000, sentinel), other4(100000, sentinel);
     for (int i = 0; i < channels * h * h; ++i)
         input[i] = data_t((i * 31 % 257 - 192) / 64.0);
     conv(input.data(), input.data(), input.data(), input.data(),
@@ -87,6 +92,11 @@ static bool check_resize(int kernel, int channels, int h) {
         } else expected = input[n * h * h + (r / 2) * h + c / 2];
         if (raw(output[n * oh * oh + r * oh + c]) != raw(expected)) ++errors;
     }
+    for (int i = channels*oh*oh; i < 100000; ++i)
+        if (raw(output[i]) != raw(sentinel)) ++errors;
+    for (const auto* port : {&other2, &other3, &other4})
+        for (const auto value : *port)
+            if (raw(value) != raw(sentinel)) ++errors;
     std::cout << "RESIZE kernel=" << kernel << " channels=" << channels << " h=" << h << " errors=" << errors << '\n';
     return errors == 0;
 }
@@ -94,6 +104,12 @@ static bool check_resize(int kernel, int channels, int h) {
 int main() {
     if (const char* quick = std::getenv("HLS_QUICK_COSIM")) {
         const int selected = std::atoi(quick);
+        if (selected == 13) {
+            bool ok = check_resize(2, 8, 26);
+            ok &= check_resize(2, 8, 52);
+            ok &= check_resize(2, 4, 104);
+            return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+        }
         if (selected == 12) {
             bool ok = check(13, 8, 64, 3, 1, 1);
             ok &= check(13, 64, 64, 3, 1, 1);
