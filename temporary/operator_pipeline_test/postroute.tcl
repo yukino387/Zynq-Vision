@@ -1,6 +1,6 @@
 set base [file normalize [file join [file dirname [info script]] build]]
 set variant $::env(HLS_VARIANT)
-set stage [file join $base ${variant}_area_system_142 build]
+set stage [file join $base ${variant}_area_system_$::env(HLS_SYSTEM_MHZ) build]
 open_checkpoint [file join $stage routed.dcp]
 phys_opt_design -directive AggressiveExplore
 route_design

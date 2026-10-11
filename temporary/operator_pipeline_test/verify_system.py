@@ -5,11 +5,13 @@ import sys
 
 base = Path(__file__).resolve().parent / 'build'
 variant = sys.argv[1]
-stage = base / f'{variant}_area_system_142/build'
+mhz = int(sys.argv[2])
+target = {142:142.857132,166:166.666672}[mhz]
+stage = base / f'{variant}_area_system_{mhz}/build'
 assert (stage / 'postroute.dcp').is_file()
-log = (base / f'{variant}_area_system_142_console.log').read_text(errors='replace')
+log = (base / f'{variant}_area_system_{mhz}_console.log').read_text(errors='replace')
 actual = float(re.search(r'^ACTUAL_FCLK_MHZ=([\d.]+)$', log, re.MULTILINE)[1])
-assert abs(actual - 142.857132) < 0.001
+assert abs(actual - target) < 0.001
 timing = (stage / 'postroute_timing.rpt').read_text()
 assert 'Design State : Routed' in timing
 summary = timing.split('WNS(ns)',1)[1].splitlines()[2].split()
