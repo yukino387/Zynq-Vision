@@ -23,8 +23,9 @@ residual = inference - old[3]/100000 - old_pool - upsample
 assert residual > 0
 print(f'Calibration: {len(rows)} board records, inference={inference:.3f}ms cycle={cycle:.3f}ms')
 print('125MHz requires complete-system timing closure. Projection gives no timing credit for the PS cache optimization.')
-for name, pointwise in (('output_phases',16), ('pw24',24)):
-    new = traffic.count(26,64,pointwise,True)
+for name, config in (('output_phases',(26,64,16,True)), ('pw24',(26,64,24,True)),
+                     ('shared',(26,64,64,True,True))):
+    new = traffic.count(*config)
     ratio = sum(new[:3]) / sum(old[:3])
     for fixed_share in (0,0.25,0.5,1):
         projected = new[3]/125000 + new_pool + upsample + (cycle-inference)
