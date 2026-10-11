@@ -44,11 +44,11 @@ void load_input(data_t fm_in_buff[Tn][TRin][TCin],
 			#pragma HLS PIPELINE II=1   
 				int rr_offset=rr*fm_size;
 				#pragma HLS RESOURCE variable=rr_offset core=Mul_LUT
+				if(fm_row+rr>=P&&fm_row+rr<fm_size+P&&fm_col+cc>=P&&fm_col+cc<fm_size+P){
 			    tmp1=*(in1+base_addr1+rr_offset+cc);
 				tmp2=*(in2+base_addr1+size+rr_offset+cc);
 				tmp3=*(in3+base_addr1+2*size+rr_offset+cc);
 				tmp4=*(in4+base_addr1+3*size+rr_offset+cc);
-				if(fm_row+rr>=P&&fm_row+rr<fm_size+P&&fm_col+cc>=P&&fm_col+cc<fm_size+P){
 					fm_in_buff[0][rr][cc]=tmp1;
 					fm_in_buff[1][rr][cc]=tmp2;
 					fm_in_buff[2][rr][cc]=tmp3;
@@ -69,11 +69,11 @@ void load_input(data_t fm_in_buff[Tn][TRin][TCin],
 #pragma HLS PIPELINE II=1
     			int rr_offset=rr*fm_size;
     			#pragma HLS RESOURCE variable=rr_offset core=Mul_LUT
+                if(fm_row*2+rr>=P&&fm_row*2+rr<fm_size+P&&fm_col*2+cc>=P&&fm_col*2+cc<fm_size+P){
     			tmp1=*(in1+base_addr2+rr_offset+cc);
     			tmp2=*(in2+base_addr2+size+rr_offset+cc);
     		    tmp3=*(in3+base_addr2+2*size+rr_offset+cc);
     			tmp4=*(in4+base_addr2+3*size+rr_offset+cc);
-    			if(fm_row*2+rr>=P&&fm_row*2+rr<fm_size+P&&fm_col*2+cc>=P&&fm_col*2+cc<fm_size+P){
     				fm_in_buff[0][rr][cc]=tmp1;
 					fm_in_buff[1][rr][cc]=tmp2;
 					fm_in_buff[2][rr][cc]=tmp3;
@@ -159,7 +159,9 @@ void compute(data_t fm_in_buff[Tn][TRin][TCin],
 				#pragma HLS PIPELINE II=1    
     				for(mm=0;mm<Tm;mm++){
     					for(nn=0;nn<Tn;nn++){
-    						data_t mult=fm_in_buff[nn][rr*stride+kx][cc*stride+ky]*wt_buff[mm][nn][kx][ky];
+                        const unsigned short input_r = (stride == 2 ? rr << 1 : rr) + kx;
+                        const unsigned short input_c = (stride == 2 ? cc << 1 : cc) + ky;
+                        data_t mult=fm_in_buff[nn][input_r][input_c]*wt_buff[mm][nn][kx][ky];
     						data_t psum=mult+fm_out_buff[mm][rr][cc];
                             fm_out_buff[mm][rr][cc]=psum;
     					}

@@ -8,6 +8,19 @@ void conv(data_t* in1,data_t* in2,data_t* in3,data_t* in4,
 		  int ch_in,int ch_out,
 		  int fsize,int stride,int kernel,int act){
 // AXI4-Lite
+#pragma HLS INTERFACE s_axilite port=in1 bundle=CTRL offset=0x10
+#pragma HLS INTERFACE s_axilite port=in2 bundle=CTRL offset=0x18
+#pragma HLS INTERFACE s_axilite port=in3 bundle=CTRL offset=0x20
+#pragma HLS INTERFACE s_axilite port=in4 bundle=CTRL offset=0x28
+#pragma HLS INTERFACE s_axilite port=w1 bundle=CTRL offset=0x30
+#pragma HLS INTERFACE s_axilite port=w2 bundle=CTRL offset=0x38
+#pragma HLS INTERFACE s_axilite port=w3 bundle=CTRL offset=0x40
+#pragma HLS INTERFACE s_axilite port=w4 bundle=CTRL offset=0x48
+#pragma HLS INTERFACE s_axilite port=b bundle=CTRL offset=0x50
+#pragma HLS INTERFACE s_axilite port=out1 bundle=CTRL offset=0x58
+#pragma HLS INTERFACE s_axilite port=out2 bundle=CTRL offset=0x60
+#pragma HLS INTERFACE s_axilite port=out3 bundle=CTRL offset=0x68
+#pragma HLS INTERFACE s_axilite port=out4 bundle=CTRL offset=0x70
 #pragma HLS INTERFACE s_axilite port=ch_in bundle=CTRL
 #pragma HLS INTERFACE s_axilite port=ch_out bundle=CTRL
 #pragma HLS INTERFACE s_axilite port=fsize bundle=CTRL
@@ -25,10 +38,10 @@ void conv(data_t* in1,data_t* in2,data_t* in3,data_t* in4,
 #pragma HLS INTERFACE m_axi depth=65536 port=w3 offset=slave bundle=W3 max_read_burst_length=256
 #pragma HLS INTERFACE m_axi depth=65536 port=w4 offset=slave bundle=W4 max_read_burst_length=256
 #pragma HLS INTERFACE m_axi depth=128 port=b offset=slave bundle=W1 max_read_burst_length=256
-#pragma HLS INTERFACE m_axi port=out1 offset=slave bundle=FM1
-#pragma HLS INTERFACE m_axi port=out2 offset=slave bundle=FM2
-#pragma HLS INTERFACE m_axi port=out3 offset=slave bundle=FM3
-#pragma HLS INTERFACE m_axi port=out4 offset=slave bundle=FM4
+#pragma HLS INTERFACE m_axi depth=100000 port=out1 offset=slave bundle=FM1
+#pragma HLS INTERFACE m_axi depth=100000 port=out2 offset=slave bundle=FM2
+#pragma HLS INTERFACE m_axi depth=100000 port=out3 offset=slave bundle=FM3
+#pragma HLS INTERFACE m_axi depth=100000 port=out4 offset=slave bundle=FM4
 //
 	if(kernel==3){
 		cout<<"conv B1"<<endl;
