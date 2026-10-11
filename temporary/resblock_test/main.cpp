@@ -61,6 +61,11 @@ int main() {
             Xil_DCacheFlushRange((INTPTR)feat, sizeof(feat));
             Xil_DCacheFlushRange((INTPTR)output, sizeof(output));
             test_stage = 2;
+            BasicConv* layers[] = {block.conv1, block.conv2, block.conv3, block.conv4};
+            for (BasicConv* layer : layers) {
+                Xil_DCacheFlushRange((INTPTR)layer->weight, layer->ch_out * layer->ch_in * layer->k * layer->k * sizeof(data_t));
+                Xil_DCacheFlushRange((INTPTR)layer->bias, layer->ch_out * sizeof(data_t));
+            }
             block.forward(input, feat, output);
             test_stage = 3;
             Xil_DCacheInvalidateRange((INTPTR)feat, sizeof(feat));

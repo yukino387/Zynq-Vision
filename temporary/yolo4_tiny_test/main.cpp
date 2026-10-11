@@ -23,6 +23,8 @@ static void initialize_conv(BasicConv* layer, int bias) {
         layer->weight[(c * layer->ch_in + c % layer->ch_in) * kernel_area + kernel_area / 2] = 512;
         layer->bias[c] = bias;
     }
+    Xil_DCacheFlushRange((INTPTR)layer->weight, layer->ch_out * layer->ch_in * kernel_area * sizeof(data_t));
+    Xil_DCacheFlushRange((INTPTR)layer->bias, layer->ch_out * sizeof(data_t));
 }
 
 static void initialize_block(Resblock_body* block) {
@@ -74,6 +76,8 @@ static void initialize_prediction(data_t* weight, data_t* bias, int inputs) {
         weight[c * inputs + (c * 3) % inputs] = c % 2 ? -512 : 512;
         bias[c] = -32;
     }
+    Xil_DCacheFlushRange((INTPTR)weight, Yolo4_Tiny::OUT_CH * inputs * sizeof(data_t));
+    Xil_DCacheFlushRange((INTPTR)bias, Yolo4_Tiny::OUT_CH * sizeof(data_t));
 }
 
 int main() {
@@ -95,6 +99,7 @@ int main() {
         std::memset(net.yolo_headP4_basic_conv1->weight, 0, 256 * 384 * 9 * sizeof(data_t));
         for (int c = 0; c < 256; ++c)
             net.yolo_headP4_basic_conv1->weight[(c * 384 + (c * 5) % 384) * 9 + 4] = 512;
+        Xil_DCacheFlushRange((INTPTR)net.yolo_headP4_basic_conv1->weight, 256 * 384 * 9 * sizeof(data_t));
         initialize_prediction(net.yolo_headP5_w2, net.yolo_headP5_b2, 512);
         initialize_prediction(net.yolo_headP4_w2, net.yolo_headP4_b2, 256);
 

@@ -34,12 +34,6 @@ void Resblock_body::forward(data_t* input, data_t* feat, data_t* out) {
     const int count = ch_out * h * w;
     const int half = count / 2;
     Xil_DCacheFlushRange((INTPTR)input, ch_in * h * w * sizeof(data_t));
-    BasicConv* layers[] = {conv1, conv2, conv3, conv4};
-    for (BasicConv* layer : layers) {
-        Xil_DCacheFlushRange((INTPTR)layer->weight,
-                            layer->ch_out * layer->ch_in * layer->k * layer->k * sizeof(data_t));
-        Xil_DCacheFlushRange((INTPTR)layer->bias, layer->ch_out * sizeof(data_t));
-    }
     Xil_DCacheFlushRange((INTPTR)route, count * sizeof(data_t));
     Xil_DCacheFlushRange((INTPTR)conv3_out, count * sizeof(data_t));
     Xil_DCacheFlushRange((INTPTR)feat, count * sizeof(data_t));

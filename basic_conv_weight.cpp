@@ -1,5 +1,6 @@
 #include "basic_conv.h"
 #include "weight_loading.h"
+#include "xil_cache.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -69,6 +70,8 @@ bool load_weight_pair(const char* directory, const char* weight_file, const char
     if (success) {
         std::memcpy(weight, converted, weights * sizeof(data_t));
         std::memcpy(bias, converted + weights, biases * sizeof(data_t));
+        Xil_DCacheFlushRange(reinterpret_cast<INTPTR>(weight), weights * sizeof(data_t));
+        Xil_DCacheFlushRange(reinterpret_cast<INTPTR>(bias), biases * sizeof(data_t));
     }
     delete[] path;
     delete[] raw;

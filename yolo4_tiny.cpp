@@ -7,19 +7,13 @@ static data_t* allocate_feature(data_t*& storage, int count) {
                                       & ~static_cast<UINTPTR>(63U));
 }
 
-static void prepare_conv(data_t* input, int input_count,
-                         data_t* weight, int weight_count,
-                         data_t* bias, int channels, data_t* output, int output_count) {
+static void prepare_conv(data_t* input, int input_count, data_t* output, int output_count) {
     Xil_DCacheFlushRange((INTPTR)input, input_count * sizeof(data_t));
-    Xil_DCacheFlushRange((INTPTR)weight, weight_count * sizeof(data_t));
-    Xil_DCacheFlushRange((INTPTR)bias, channels * sizeof(data_t));
     Xil_DCacheFlushRange((INTPTR)output, output_count * sizeof(data_t));
 }
 
 static void run_basic_conv(BasicConv* layer, data_t* input, data_t* output, int output_count) {
-    prepare_conv(input, layer->ch_in * layer->h * layer->w,
-                 layer->weight, layer->ch_out * layer->ch_in * layer->k * layer->k,
-                 layer->bias, layer->ch_out, output, output_count);
+    prepare_conv(input, layer->ch_in * layer->h * layer->w, output, output_count);
     layer->forward(input, output);
     Xil_DCacheInvalidateRange((INTPTR)output, output_count * sizeof(data_t));
 }
@@ -61,8 +55,7 @@ void Yolo4_Tiny::forward(data_t* input, data_t* out0, data_t* out1) {
     run_basic_conv(conv_forP5_conv, feat2, P5, P5_COUNT);
 
     run_basic_conv(yolo_headP5_basic_conv1, P5, out0_tmp, FEAT2_COUNT);
-    prepare_conv(out0_tmp, FEAT2_COUNT, yolo_headP5_w2, OUT_CH * 512,
-                 yolo_headP5_b2, OUT_CH, out0, OUT0_COUNT);
+    prepare_conv(out0_tmp, FEAT2_COUNT, out0, OUT0_COUNT);
     conv_leakyrelu(512, OUT_CH, 0, 1, 1, 13, 13,
                    out0_tmp, yolo_headP5_w2, yolo_headP5_b2, out0, 0);
     Xil_DCacheInvalidateRange((INTPTR)out0, OUT0_COUNT * sizeof(data_t));
@@ -74,8 +67,7 @@ void Yolo4_Tiny::forward(data_t* input, data_t* out0, data_t* out1) {
     Xil_DCacheInvalidateRange((INTPTR)P4, P4_COUNT * sizeof(data_t));
 
     run_basic_conv(yolo_headP4_basic_conv1, P4, out1_tmp, HEAD_P4_COUNT);
-    prepare_conv(out1_tmp, HEAD_P4_COUNT, yolo_headP4_w2, OUT_CH * 256,
-                 yolo_headP4_b2, OUT_CH, out1, OUT1_COUNT);
+    prepare_conv(out1_tmp, HEAD_P4_COUNT, out1, OUT1_COUNT);
     conv_leakyrelu(256, OUT_CH, 0, 1, 1, 26, 26,
                    out1_tmp, yolo_headP4_w2, yolo_headP4_b2, out1, 0);
     Xil_DCacheInvalidateRange((INTPTR)out1, OUT1_COUNT * sizeof(data_t));

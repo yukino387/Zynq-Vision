@@ -9,9 +9,6 @@ static data_t* allocate_feature(data_t*& storage, int count) {
 
 static void run_basic_conv(BasicConv* conv, data_t* input, data_t* output, int count) {
     Xil_DCacheFlushRange((INTPTR)input, conv->ch_in * conv->h * conv->w * sizeof(data_t));
-    Xil_DCacheFlushRange((INTPTR)conv->weight,
-                        conv->ch_out * conv->ch_in * conv->k * conv->k * sizeof(data_t));
-    Xil_DCacheFlushRange((INTPTR)conv->bias, conv->ch_out * sizeof(data_t));
     Xil_DCacheFlushRange((INTPTR)output, count * sizeof(data_t));
     conv->forward(input, output);
     Xil_DCacheInvalidateRange((INTPTR)output, count * sizeof(data_t));

@@ -20,6 +20,8 @@ static void initialize_conv(BasicConv* layer, int bias) {
         layer->weight[(c * layer->ch_in + c % layer->ch_in) * kernel_area + kernel_area / 2] = 512;
         layer->bias[c] = bias;
     }
+    Xil_DCacheFlushRange((INTPTR)layer->weight, layer->ch_out * layer->ch_in * kernel_area * sizeof(data_t));
+    Xil_DCacheFlushRange((INTPTR)layer->bias, layer->ch_out * sizeof(data_t));
 }
 
 static void initialize_block(Resblock_body* block) {
