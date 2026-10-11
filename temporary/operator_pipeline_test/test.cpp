@@ -92,7 +92,8 @@ int main() {
             ok &= check_resize(0, 128, 13);
             return ok ? EXIT_SUCCESS : EXIT_FAILURE;
         }
-        bool ok = selected == 7 ? check(26, 8, 32, 3, 1, 0) :
+        bool ok = selected == 10 ? check(13, 8, 4, 1, 1, 0) :
+                  selected == 7 ? check(26, 8, 32, 3, 1, 0) :
                   selected == 6 ? check(13, 64, 75, 1, 1, 0, true) :
                   selected == 4 ? check_resize(2, 8, 26) :
                   selected == 5 ? check_resize(0, 128, 13) :

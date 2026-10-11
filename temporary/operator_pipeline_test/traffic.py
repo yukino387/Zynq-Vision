@@ -41,14 +41,16 @@ def count(spatial, standard, pointwise, output_phases=False):
             tiles = math.ceil(oh*ow/169)
             groups = math.ceil(co/pointwise)
             reads += tiles*groups*ci*169*2
-            cycles += tiles*groups*math.ceil(ci/4)*169*(pointwise//8)
+            phases = 1 if pointwise in (8,12) else 2
+            cycles += tiles*groups*math.ceil(ci/4)*169*phases
         weights += tiles*ci*co*k*k*2
         writes += oh*ow*co*2
     return reads, weights, writes, cycles
 
 
 for name, config in [('baseline',(13,32,8)), ('combined',(26,64,8)), ('pwphase',(26,64,16)),
-                     ('output_phases',(26,64,16,True))]:
+                     ('output_phases',(26,64,16,True)), ('pw12',(26,64,12,True)),
+                     ('pw24',(26,64,24,True))]:
     r,w,o,c = count(*config)
     print(f'{name}: input={r/1e6:.3f} MB weights={w/1e6:.3f} MB output={o/1e6:.3f} MB '
           f'total={(r+w+o)/1e6:.3f} MB compute_lower_bound_at_125MHz={c/125000:.3f} ms')

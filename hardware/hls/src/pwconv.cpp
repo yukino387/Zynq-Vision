@@ -207,9 +207,9 @@ void pwconv(data_t* in1,data_t* in2,data_t *in3,data_t* in4,
     next_basePixAddr=Tp;
     next_baseChannel=0;
     compute_output(fm_out1,bias_buff,in1,in2,in3,in4,weight,baseChannel,SIZE,N,M,basePixAddr);
-    while(true){
+    next_block(SIZE,M,basePixAddr,baseChannel,next_basePixAddr,next_baseChannel);
+    while(next_baseChannel<M){
 #pragma HLS LOOP_TRIPCOUNT min=119 max=119 avg=119
-    	next_block(SIZE,M,basePixAddr,baseChannel,next_basePixAddr,next_baseChannel);
     	if(pingpong){
     		compute_output(fm_out2,bias_buff,in1,in2,in3,in4,weight,next_baseChannel,SIZE,N,M,next_basePixAddr);
     		store_output(fm_out1,out,basePixAddr,baseChannel,SIZE,M,ACT);
@@ -223,8 +223,7 @@ void pwconv(data_t* in1,data_t* in2,data_t *in3,data_t* in4,
     	basePixAddr=next_basePixAddr;
     	baseChannel=next_baseChannel;
 		
-    	if(basePixAddr+Tp>=SIZE*SIZE&&baseChannel+Tm>=M)
-    		break;
+        next_block(SIZE,M,basePixAddr,baseChannel,next_basePixAddr,next_baseChannel);
     }
     if(pingpong){
 		store_output(fm_out1,out,basePixAddr,baseChannel,SIZE,M,ACT);
