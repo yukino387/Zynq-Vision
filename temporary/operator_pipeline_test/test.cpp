@@ -48,7 +48,8 @@ static bool check(int h, int ci, int co, int k, int stride, int act, bool satura
         const data_t* ports[] = {output.data(), output2.data(), output3.data(), output4.data()};
         const data_t actual = ports[k == 3 ? m % 4 : 0][m*pixels+r*oh+c];
         if (raw(actual) != raw(acc)) {
-            if (errors++ < 3) std::cout << "mismatch " << m << ',' << r << ',' << c << '\n';
+            if (errors++ < 3) std::cout << "mismatch " << m << ',' << r << ',' << c
+                << " actual=" << raw(actual) << " expected=" << raw(acc) << '\n';
         }
     }
     std::cout << "CASE h=" << h << " ci=" << ci << " co=" << co << " k=" << k
@@ -57,9 +58,12 @@ static bool check(int h, int ci, int co, int k, int stride, int act, bool satura
 }
 
 int main() {
-    if (std::getenv("HLS_QUICK_COSIM")) {
-        return check(26, 3, 64, 3, 2, 1) && check(13, 8, 16, 1, 1, 1)
-               ? EXIT_SUCCESS : EXIT_FAILURE;
+    if (const char* quick = std::getenv("HLS_QUICK_COSIM")) {
+        const int selected = std::atoi(quick);
+        bool ok = selected == 1 ? check(26, 3, 64, 3, 2, 1) :
+                  selected == 2 ? check(13, 8, 16, 1, 1, 1) :
+                                  check(26, 8, 64, 3, 1, 1);
+        return ok ? EXIT_SUCCESS : EXIT_FAILURE;
     }
     bool ok = true;
     ok &= check(26, 3, 64, 3, 2, 1);

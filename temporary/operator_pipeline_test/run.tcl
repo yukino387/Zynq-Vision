@@ -13,7 +13,9 @@ foreach name {top std_conv pwconv maxpool upsample} {
 add_files -tb [file join $root temporary operator_pipeline_test test.cpp]
 open_solution -reset solution -flow_target vivado
 set_part xc7z020clg400-2
-create_clock -period 10 -name default
+set period 10
+if {[info exists ::env(HLS_PERIOD)]} {set period $::env(HLS_PERIOD)}
+create_clock -period $period -name default
 config_interface -m_axi_addr64=false
 csim_design
 csynth_design
