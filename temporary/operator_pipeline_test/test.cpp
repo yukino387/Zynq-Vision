@@ -57,10 +57,37 @@ static bool check(int h, int ci, int co, int k, int stride, int act, bool satura
     return errors == 0;
 }
 
+static bool check_resize(int kernel, int channels, int h) {
+    const int oh = kernel == 2 ? h / 2 : h * 2;
+    std::vector<data_t> input(60000, 0), weights(65536, 0), bias(1024, 0);
+    std::vector<data_t> output(100000, 0), other2(100000, 0), other3(100000, 0), other4(100000, 0);
+    for (int i = 0; i < channels * h * h; ++i)
+        input[i] = data_t((i * 31 % 257 - 192) / 64.0);
+    conv(input.data(), input.data(), input.data(), input.data(),
+         weights.data(), weights.data(), weights.data(), weights.data(), bias.data(),
+         output.data(), other2.data(), other3.data(), other4.data(), channels, channels, h, 2, kernel, 0);
+    int errors = 0;
+    for (int n = 0; n < channels; ++n) for (int r = 0; r < oh; ++r) for (int c = 0; c < oh; ++c) {
+        data_t expected;
+        if (kernel == 2) {
+            expected = input[n * h * h + 2 * r * h + 2 * c];
+            for (int dr = 0; dr < 2; ++dr) for (int dc = 0; dc < 2; ++dc) {
+                data_t value = input[n * h * h + (2 * r + dr) * h + 2 * c + dc];
+                if (value > expected) expected = value;
+            }
+        } else expected = input[n * h * h + (r / 2) * h + c / 2];
+        if (raw(output[n * oh * oh + r * oh + c]) != raw(expected)) ++errors;
+    }
+    std::cout << "RESIZE kernel=" << kernel << " channels=" << channels << " h=" << h << " errors=" << errors << '\n';
+    return errors == 0;
+}
+
 int main() {
     if (const char* quick = std::getenv("HLS_QUICK_COSIM")) {
         const int selected = std::atoi(quick);
-        bool ok = selected == 1 ? check(26, 3, 64, 3, 2, 1) :
+        bool ok = selected == 4 ? check_resize(2, 8, 26) :
+                  selected == 5 ? check_resize(0, 128, 13) :
+                  selected == 1 ? check(26, 3, 64, 3, 2, 1) :
                   selected == 2 ? check(13, 8, 16, 1, 1, 1) :
                                   check(26, 8, 64, 3, 1, 1);
         return ok ? EXIT_SUCCESS : EXIT_FAILURE;
@@ -75,5 +102,8 @@ int main() {
     ok &= check(13, 8, 64, 3, 1, 1, true);
     ok &= check(13, 8, 75, 1, 1, 0, true);
     ok &= check(52, 8, 32, 3, 1, 1);
+    ok &= check_resize(2, 8, 26);
+    ok &= check_resize(2, 8, 52);
+    ok &= check_resize(0, 128, 13);
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }
