@@ -34,7 +34,8 @@ for name, config, pool_cycles, mhz in (
         ('shared_dsp',(26,64,64,True,True),blocks*(10521/2),142.857132),
         ('pool_rows',(26,64,64,True,True),row_pool_cycles,142.857132),
         ('shared44',(26,88,88,True,True,44,True),row_pool_cycles,142.857132),
-        ('shared44_narrow',(26,88,88,True,True,44,True),row_pool_cycles,166.666672)):
+        ('shared44_narrow',(26,88,88,True,True,44,True),row_pool_cycles,166.666672),
+        ('shared44_single',(26,44,44,True,True,44,True),row_pool_cycles,166.666672)):
     frequency = mhz * 1000
     pooling = pool_cycles / frequency
     gate = test / f'{name}_area_system_{int(mhz)}/build/postroute_timing.rpt'

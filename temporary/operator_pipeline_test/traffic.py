@@ -52,7 +52,8 @@ def count(spatial, standard, pointwise, output_phases=False, shared=False,
 for name, config in [('baseline',(13,32,8)), ('combined',(26,64,8)), ('pwphase',(26,64,16)),
                      ('output_phases',(26,64,16,True)), ('pw12',(26,64,12,True)),
                      ('pw24',(26,64,24,True)), ('shared',(26,64,64,True,True)),
-                     ('shared44',(26,88,88,True,True,44,True))]:
+                     ('shared44',(26,88,88,True,True,44,True)),
+                     ('shared44_single',(26,44,44,True,True,44,True))]:
     r,w,o,c = count(*config)
     print(f'{name}: input={r/1e6:.3f} MB weights={w/1e6:.3f} MB output={o/1e6:.3f} MB '
           f'total={(r+w+o)/1e6:.3f} MB compute_lower_bound_at_125MHz={c/125000:.3f} ms')
