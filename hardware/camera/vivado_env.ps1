@@ -1,0 +1,13 @@
+$env:XILINX_VIVADO = 'C:/AMDDesignTools/2026.1/Vivado'
+$env:PROCESSOR_ARCHITECTURE = 'AMD64'
+$env:RDI_APPROOT = $env:XILINX_VIVADO
+$env:HDI_APPROOT = $env:XILINX_VIVADO
+$env:RDI_BASEROOT = 'C:/AMDDesignTools/2026.1'
+$env:RDI_DATADIR = "$env:XILINX_VIVADO/data"
+$env:RDI_BINDIR = "$env:XILINX_VIVADO/bin"
+$env:RDI_LIBDIR = "$env:XILINX_VIVADO/lib/win64.o"
+$env:RDI_PLATFORM = 'win64'
+$env:RDI_OPT_EXT = '.o'
+$env:TCL_LIBRARY = "$env:XILINX_VIVADO\tps\tcl\tcl8.6"
+$env:RDI_JAVAROOT = 'C:\AMDDesignTools\2026.1\tps\win64\jre24.0.2_12'
+$env:PATH = "$env:RDI_LIBDIR;$env:XILINX_VIVADO\bin;$env:XILINX_VIVADO\bin\unwrapped\win64.o;$env:RDI_JAVAROOT\bin\server;$env:RDI_JAVAROOT\bin;$env:XILINX_VIVADO\tps\win64;$env:XILINX_VIVADO\tps\mingw\6.2.0\win64.o\nt\bin;$env:PATH"

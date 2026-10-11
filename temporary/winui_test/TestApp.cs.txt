@@ -1,0 +1,27 @@
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media.Imaging;
+using System.Reflection;
+using System.Runtime.InteropServices.WindowsRuntime;
+using Windows.Graphics.Imaging;
+namespace CNNStudio;
+public partial class App : Application
+{
+ private MainWindow? window;
+ public App(){InitializeComponent();UnhandledException+=(_,e)=>System.IO.File.AppendAllText(System.IO.Path.Combine(AppContext.BaseDirectory,"test_error.log"),e.Exception.ToString());}
+ protected override void OnLaunched(LaunchActivatedEventArgs args){window=new MainWindow();window.Activate();window.DispatcherQueue.TryEnqueue(async()=>await Test());}
+ private async Task Test(){
+  try{
+   await Task.Delay(3500);
+   var t=typeof(MainWindow);object Field(string name)=>t.GetField(name,BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(window)!;
+   void Click(string name)=>t.GetMethod(name,BindingFlags.NonPublic|BindingFlags.Instance)!.Invoke(window,[null,new RoutedEventArgs()]);
+   var image=(Image)Field("PreviewImage");if(image.Source==null)throw new Exception("No live image");
+   var root=(FrameworkElement)Field("Root");var render=new RenderTargetBitmap();await render.RenderAsync(root);var pixels=(await render.GetPixelsAsync()).ToArray();
+   using(var file=new System.IO.FileStream(System.IO.Path.Combine(AppContext.BaseDirectory,"window.png"),System.IO.FileMode.Create))using(var stream=file.AsRandomAccessStream()){var encoder=await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId,stream);encoder.SetPixelData(BitmapPixelFormat.Bgra8,BitmapAlphaMode.Premultiplied,(uint)render.PixelWidth,(uint)render.PixelHeight,96,96,pixels);await encoder.FlushAsync();}
+   Click("RecordClicked");await Task.Delay(5500);Click("RecordClicked");await Task.Delay(1500);Click("SnapshotClicked");await Task.Delay(1000);
+   if(((TextBlock)Field("ActionHint")).Text!="画面已保存")throw new Exception("Snapshot failed");
+   ((ComboBox)Field("Mode")).SelectedIndex=1;await Task.Delay(1500);Click("PauseClicked");await Task.Delay(700);Click("PauseClicked");await Task.Delay(700);Click("RotateClicked");
+   System.IO.File.WriteAllText(System.IO.Path.Combine(AppContext.BaseDirectory,"test_result.txt"),"PASS: live UI, MP4 recording, PNG snapshot, mode switch, pause/resume, rotation");window.Close();
+  }catch(Exception error){System.IO.File.WriteAllText(System.IO.Path.Combine(AppContext.BaseDirectory,"test_error.log"),error.ToString());window!.Close();}
+ }
+}

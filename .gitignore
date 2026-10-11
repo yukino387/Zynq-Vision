@@ -28,6 +28,7 @@ compile_commands.json
 *.log
 *.lock
 *.before
+/.Xil/
 
 # Generated test fixtures and images copied from the author's package
 /temporary/**/pc_files/
@@ -36,6 +37,28 @@ compile_commands.json
 /temporary/**/*.jpg
 /temporary/**/*.jpeg
 /temporary/**/*.png
+/temporary/camera_test/ov5640_reference.h
+/temporary/camera_inference_test/received/
 
 # Vitis template documentation
 /cnn_app/src/README.txt
+
+/camera/winui/obj/
+/temporary/winui_test/obj/
+/temporary/winui_test/bin/
+/temporary/winui_test/ui/
+
+# Local documentation is kept outside version control
+*.md
+*.rst
+*.adoc
+*.pdf
+*.doc
+*.docx
+README*
+
+# Generated validation reports and media
+/temporary/**/*_report.json
+/temporary/**/per_layer_stats.txt
+/temporary/winui_test/*.json
+/temporary/**/*.mp4
