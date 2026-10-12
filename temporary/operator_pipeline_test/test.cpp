@@ -72,7 +72,8 @@ static bool check_resize(int kernel, int channels, int h) {
         std::cerr << "RESIZE exceeds configured AXI co-simulation depths\n";
         return false;
     }
-    std::vector<data_t> input(60000, 0), weights(65536, 0), bias(1024, 0);
+    // Co-simulation serializes the full input-port depth for every operator.
+    std::vector<data_t> input(200000, 0), weights(65536, 0), bias(1024, 0);
     const data_t sentinel = data_t(31);
     std::vector<data_t> output(100000, sentinel), other2(100000, sentinel), other3(100000, sentinel), other4(100000, sentinel);
     for (int i = 0; i < channels * h * h; ++i)
