@@ -60,4 +60,9 @@ void load_input(data_t fm_in_buff[Tn][TRin][TCin],
 '''
 code = code[:start] + replacement + code[end:]
 path.write_bytes(code.encode('utf-8'))
+path = out / 'top.cpp'
+code = path.read_text(encoding='utf-8')
+assert code.count('depth=60000 port=in') == 4
+code = code.replace('depth=60000 port=in', 'depth=100000 port=in')
+path.write_bytes(code.encode('utf-8'))
 print(out)
