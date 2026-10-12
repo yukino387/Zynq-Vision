@@ -6,7 +6,7 @@ root = Path(__file__).resolve().parents[2]
 test = Path(__file__).resolve().parent
 bsp = root / 'vitis_live/camera_platform_live/export/camera_platform_live/sw/camera_domain'
 old_driver = bsp / 'hw_artifacts/drivers/conv_v1_0/src'
-new_driver = test / 'build/shared44_read_lanes/solution/impl/ip/drivers/conv_v1_0/src'
+new_driver = test / 'build/shared44_read_rows/solution/impl/ip/drivers/conv_v1_0/src'
 
 def addresses(path):
     return {name:int(value,16) for name,value in re.findall(

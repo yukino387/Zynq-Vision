@@ -12,7 +12,7 @@ cases = (
     'RESIZE kernel=0 channels=128 h=13 errors=0',
 )
 data = []
-names = ('shared44_single', 'shared44_single_fast', 'shared44_read_lanes')
+names = ('shared44_single', 'shared44_single_fast', 'shared44_read_lanes', 'shared44_read_rows')
 for name in names:
     log = (base / f'{name}_mixed_stall_cosim_console.log').read_text(errors='replace')
     assert 'C/RTL co-simulation finished: PASS' in log
