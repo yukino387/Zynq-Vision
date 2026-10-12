@@ -6,7 +6,7 @@ import sys
 root = Path(__file__).resolve().parents[2]
 base = Path(__file__).resolve().parent / 'build'
 variant = sys.argv[1] if len(sys.argv) > 1 else 'compact'
-assert variant in ('compact', 'pooladdr', 'shared', 'shared_dsp', 'pool_rows', 'shared44', 'shared44_narrow', 'shared44_single', 'shared44_single_fast', 'shared44_read_lanes')
+assert variant in ('compact', 'pooladdr', 'shared', 'shared_dsp', 'pool_rows', 'shared44', 'shared44_narrow', 'shared44_single', 'shared44_single_fast', 'shared44_read_lanes', 'shared44_read_rows')
 frequency = float(sys.argv[2]) if len(sys.argv) > 2 else (142.857132 if variant in ('shared_dsp', 'pool_rows', 'shared44', 'shared44_narrow', 'shared44_single', 'shared44_single_fast', 'shared44_read_lanes') else 125)
 assert frequency in (125,142.857132,166.666672)
 stage = base / (variant+f'_area_system_{int(frequency)}')
