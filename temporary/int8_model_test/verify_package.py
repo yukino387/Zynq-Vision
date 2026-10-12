@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import zipfile
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -14,6 +15,7 @@ import torch.nn.functional as F
 parser = argparse.ArgumentParser()
 parser.add_argument('package')
 parser.add_argument('gray_candidate_package')
+parser.add_argument('--output-dir', type=Path)
 args = parser.parse_args()
 torch.set_num_threads(4)
 
@@ -31,6 +33,14 @@ with zipfile.ZipFile(args.package) as archive:
         assert hashlib.sha256(read(name)).hexdigest() == expected, name
     config = json.loads(read('model_config.json'))
     quant = json.loads(read('quantization.json'))
+    if args.output_dir:
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        (args.output_dir / 'quantization.json').write_text(json.dumps(quant), encoding='utf-8')
+        for name in manifest:
+            if name.startswith('weights/'):
+                target = args.output_dir / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(read(name))
     assert quant['input_shape'] == [1, 224, 224]
     assert quant['zero_point'] == 0
     assert quant['output_shapes'] == [[33, 7, 7], [33, 14, 14]]
@@ -40,6 +50,8 @@ with zipfile.ZipFile(args.package) as archive:
         assert values.size == math.prod(shape), name
         return torch.from_numpy(values.reshape(shape))
     activations = {'input': tensor('golden_patches_4/input_quantized.bin', 'i1', [1, 1, 224, 224])}
+    if args.output_dir:
+        (args.output_dir / 'input.bin').write_bytes(activations['input'].numpy().tobytes())
     with zipfile.ZipFile(args.gray_candidate_package) as candidate:
         names = candidate.namelist()
         source = json.loads(read('source_manifest.json'))
@@ -103,6 +115,8 @@ with zipfile.ZipFile(args.package) as archive:
             else:
                 raise ValueError(node['op'])
             activations[name] = output
+            if args.output_dir:
+                (args.output_dir / (name + '.bin')).write_bytes(output.numpy().tobytes())
     for name, shape in zip(('out0', 'out1'), quant['output_shapes']):
         expected = tensor('golden_patches_4/' + name + '_quantized.bin', 'i1', [1] + shape)
         assert torch.equal(activations[name], expected), name
