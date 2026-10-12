@@ -1,12 +1,13 @@
 set source_dir [file dirname [file normalize [info script]]]
 set build_dir [file join $source_dir build]
 create_project camera_cnn $build_dir -part xc7z020clg400-2 -force
-set_property ip_repo_paths C:/00_workplace/hls/xilinx_com_hls_conv_1_0 [current_project]
+set_property ip_repo_paths [file join $source_dir ../hls/build/conv/solution/impl/ip] [current_project]
 update_ip_catalog
 add_files [file join $source_dir ov5640_capture.v]
 set_property XPM_LIBRARIES {XPM_FIFO} [current_project]
 source [file join $source_dir base_system.tcl]
 set ps [get_bd_cells processing_system7_0]
+set_property CONFIG.PCW_FPGA0_PERIPHERAL_FREQMHZ {142.857132} $ps
 set_property -dict [list CONFIG.PCW_ENET0_PERIPHERAL_ENABLE {1} CONFIG.PCW_ENET0_ENET0_IO {MIO 16 .. 27} CONFIG.PCW_ENET0_GRP_MDIO_ENABLE {1} CONFIG.PCW_ENET0_GRP_MDIO_IO {MIO 52 .. 53}] $ps
 set_property CONFIG.NUM_MI 3 [get_bd_cells axi_smc]
 set_property CONFIG.NUM_SI 3 [get_bd_cells smartconnect_0]
@@ -34,7 +35,12 @@ foreach name {cam_pclk cam_vsync cam_href cam_data cam_scl cam_sda cam_rst_n cam
 assign_bd_address -offset 0x41200000 -range 0x10000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs camera_gpio/S_AXI/Reg] -force
 assign_bd_address -offset 0x40400000 -range 0x10000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs camera_dma/S_AXI_LITE/Reg] -force
 assign_bd_address -offset 0x00000000 -range 0x40000000 -target_address_space [get_bd_addr_spaces camera_dma/Data_S2MM] [get_bd_addr_segs processing_system7_0/S_AXI_HP0/HP0_DDR_LOWOCM] -force
+connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins smartconnect_0/S02_ACLK]
+connect_bd_net [get_bd_pins rst_ps7_0_50M/peripheral_aresetn] [get_bd_pins smartconnect_0/S02_ARESETN]
 validate_bd_design
+set actual_frequency [get_property CONFIG.PCW_ACT_FPGA0_PERIPHERAL_FREQMHZ $ps]
+if {abs($actual_frequency-142.857132) > 0.001} {error "Unexpected actual FCLK frequency: $actual_frequency"}
+puts "ACTUAL_FCLK_MHZ=$actual_frequency"
 save_bd_design
 set_property synth_checkpoint_mode None [get_files system.bd]
 generate_target all [get_files system.bd]
@@ -54,6 +60,16 @@ report_utilization -file [file join $build_dir utilization.rpt]
 report_timing_summary -file [file join $build_dir timing.rpt]
 report_bus_skew -file [file join $build_dir bus_skew.rpt]
 write_checkpoint -force [file join $build_dir routed.dcp]
+phys_opt_design -directive AggressiveExplore
+route_design
+report_utilization -file [file join $build_dir utilization.rpt]
+set timing [report_timing_summary -file [file join $build_dir timing.rpt] -return_string]
+if {[string first {All user specified timing constraints are met.} $timing] < 0} {
+    error "Camera accelerator timing qualification failed"
+}
+set skew [report_bus_skew -file [file join $build_dir bus_skew.rpt] -return_string]
+if {[string first {VIOLATED} $skew] >= 0} {error "Camera FIFO bus-skew qualification failed"}
+write_checkpoint -force [file join $build_dir qualified.dcp]
 write_bitstream -force [file join $build_dir system_wrapper.bit]
 write_hw_platform -fixed -include_bit -force -file [file join $build_dir camera_cnn.xsa]
 exit

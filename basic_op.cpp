@@ -8,21 +8,21 @@ void conv_leakyrelu(int ch_in,int ch_out,int pad,int stride,int k,int h,int w,
 	(void)pad;
 	(void)w;
 	//Xil_DCacheFlushRange((u32)in,sizeof(data_t)*ch_in*h*w);//������ˢ����DDR
-	XConv_Set_in1_V(&conv_inst, (u32)in);
-	XConv_Set_in2_V(&conv_inst, (u32)in);
-	XConv_Set_in3_V(&conv_inst, (u32)in);
-	XConv_Set_in4_V(&conv_inst, (u32)in);
+	XConv_Set_in1(&conv_inst, (u32)in);
+	XConv_Set_in2(&conv_inst, (u32)in);
+	XConv_Set_in3(&conv_inst, (u32)in);
+	XConv_Set_in4(&conv_inst, (u32)in);
 
-	XConv_Set_w1_V(&conv_inst, (u32)weight);
-	XConv_Set_w2_V(&conv_inst, (u32)weight);
-	XConv_Set_w3_V(&conv_inst, (u32)weight);
-	XConv_Set_w4_V(&conv_inst, (u32)weight);
+	XConv_Set_w1_r(&conv_inst, (u32)weight);
+	XConv_Set_w2_r(&conv_inst, (u32)weight);
+	XConv_Set_w3_r(&conv_inst, (u32)weight);
+	XConv_Set_w4_r(&conv_inst, (u32)weight);
 
-	XConv_Set_b_V(&conv_inst, (u32)bias);
-	XConv_Set_out1_V(&conv_inst, (u32)out);
-	XConv_Set_out2_V(&conv_inst, (u32)out);
-	XConv_Set_out3_V(&conv_inst, (u32)out);
-	XConv_Set_out4_V(&conv_inst, (u32)out);
+	XConv_Set_b(&conv_inst, (u32)bias);
+	XConv_Set_out1(&conv_inst, (u32)out);
+	XConv_Set_out2(&conv_inst, (u32)out);
+	XConv_Set_out3(&conv_inst, (u32)out);
+	XConv_Set_out4(&conv_inst, (u32)out);
 
 	XConv_Set_ch_in(&conv_inst,ch_in);
 	XConv_Set_ch_out(&conv_inst,ch_out);
