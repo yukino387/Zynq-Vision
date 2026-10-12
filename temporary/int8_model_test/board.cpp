@@ -29,7 +29,7 @@ int main() {
     XTime_GetTime(&preprocessing_begin);
     gray_input(gray_pixels,gray_data);
     XTime_GetTime(&preprocessing_end);
-    preprocessing_us=(preprocessing_end-preprocessing_begin)*1000000u/COUNTS_PER_SECOND;
+    preprocessing_us=(preprocessing_end-preprocessing_begin)*1000000u/(COUNTS_PER_SECOND);
     uint32_t gray_hash=2166136261u;
     for(unsigned i=0;i<224*224;++i) gray_hash=(gray_hash^uint8_t(gray_data[i]))*16777619u;
     if(gray_hash!=gray_expected_hash) ++test_errors;
@@ -55,7 +55,7 @@ int main() {
             if(now-begin>2*COUNTS_PER_SECOND) { ++test_errors; test_stage=99; test_finished(); return 1; }
         }
         XTime_GetTime(&end);
-        forward_us[run]=(end-begin)*1000000u/COUNTS_PER_SECOND;
+        forward_us[run]=(end-begin)*1000000u/(COUNTS_PER_SECOND);
         Xil_DCacheInvalidateRange((INTPTR)features,sizeof(features));
         for (unsigned j=0;j<sizeof(checks)/sizeof(checks[0]);++j) {
             uint32_t hash=2166136261u;

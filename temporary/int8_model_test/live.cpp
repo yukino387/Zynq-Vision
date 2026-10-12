@@ -48,7 +48,7 @@ int main() {
     CameraStatus status={0x31545343,0,0x7020,0,0,0,0,0,0,0,0,0};
     unsigned current=0;
     bool pending=false;
-    auto microseconds=[](XTime ticks) { return uint32_t(ticks*1000000u/COUNTS_PER_SECOND); };
+    auto microseconds=[](XTime ticks) { return uint32_t(ticks*1000000u/(COUNTS_PER_SECOND)); };
     for(uint32_t frame=0;;++frame) {
         udp_poll();
         while(!udp_running()) { udp_poll(); usleep(1000); }
