@@ -110,19 +110,36 @@ void load_weight_lane(data_t bank[Tm/4][Tn][K][K], data_t* weights,
 #pragma HLS BIND_STORAGE variable=weight_cache type=ram_1p impl=bram
     const unsigned short elements = kernel == 1 ? 1 : 9;
     for(unsigned short group=0; group<Tm/4; ++group) {
+#pragma HLS LOOP_FLATTEN off
         const unsigned short channel=4*group+Lane;
         int block_offset=channel*ch_in_kk;
 #pragma HLS BIND_OP variable=block_offset op=mul impl=dsp latency=3
         const bool valid=m+channel<ch_out;
+        data_t values[Tn*K*K];
+        if (cache_enabled && cache_reuse) {
+            for(unsigned short k=0; k<Tn*elements; ++k) {
+#pragma HLS PIPELINE II=1
+                values[k]=weight_cache[Lane][group][n*elements+k];
+            }
+        } else if (valid) {
+            // Keep DDR reads unconditional and contiguous so HLS can form a burst.
+            for(unsigned short k=0; k<Tn*elements; ++k) {
+#pragma HLS PIPELINE II=1
+                values[k]=weights[base+block_offset+k];
+            }
+        } else {
+            for(unsigned short k=0; k<Tn*elements; ++k) {
+#pragma HLS PIPELINE II=1
+                values[k]=data_t(0);
+            }
+        }
         for(unsigned short k=0; k<Tn*elements; ++k) {
 #pragma HLS PIPELINE II=1
             const unsigned short nn=kernel == 1 ? k : k/9;
             const unsigned short i=kernel == 1 ? 0 : (k%9)/3;
             const unsigned short j=kernel == 1 ? 0 : k%3;
-            const unsigned short cache_index=n*elements+k;
-            const data_t value=cache_enabled && cache_reuse ? weight_cache[Lane][group][cache_index]
-                                      : (valid ? weights[base+block_offset+k] : data_t(0));
-            if (cache_enabled && !cache_reuse) weight_cache[Lane][group][cache_index]=value;
+            const data_t value=values[k];
+            if (cache_enabled && !cache_reuse) weight_cache[Lane][group][n*elements+k]=value;
             bank[group][nn][i][j]=n+nn<ch_in ? value : data_t(0);
         }
     }
@@ -384,5 +401,3 @@ const unsigned short tile = spatial_tile(o_fm_size);
         store_output(fm_out2,out1,out2,out3,out4,r,c,m,fm_size,stride,act,ch_out);
     }
 }
-
-

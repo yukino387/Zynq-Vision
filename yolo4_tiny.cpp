@@ -1,3 +1,4 @@
+#include "basic_op.h"
 #include "yolo4_tiny.h"
 #include "xil_cache.h"
 
@@ -41,22 +42,46 @@ Yolo4_Tiny::~Yolo4_Tiny() {
     for (data_t* buffer : storage) delete[] buffer;
 }
 
+static uint32_t offset(data_t* p) { return (reinterpret_cast<UINTPTR>(p)-0x00100000U)/2; }
+static void append(ConvCommand* program, int& count, BasicConv* layer, data_t* in, data_t* out) {
+    program[count++]={offset(in),offset(out),offset(layer->weight),offset(layer->bias),
+                      unsigned(layer->ch_in),unsigned(layer->ch_out),unsigned(layer->h),
+                      unsigned(layer->s),unsigned(layer->k),1};
+}
+static void resize(ConvCommand* program, int& count, data_t* in, data_t* out, int ch, int size, int mode) {
+    program[count++]={offset(in),offset(out),0,0,unsigned(ch),unsigned(ch),unsigned(size),0,unsigned(mode ? 2 : 0),0};
+}
+static void block(ConvCommand* program, int& count, Resblock_body* r, data_t* in, data_t* feat, data_t* out) {
+    const int n=r->ch_out*r->h*r->w;
+    append(program,count,r->conv1,in,r->route);
+    append(program,count,r->conv2,r->route+n/2,r->conv3_out+n/2);
+    append(program,count,r->conv3,r->conv3_out+n/2,r->conv3_out);
+    append(program,count,r->conv4,r->conv3_out,feat);
+    resize(program,count,r->route,out,r->ch_out,r->h,1);
+    resize(program,count,feat,out+n/4,r->ch_out,r->h,1);
+}
 void Yolo4_Tiny::forward(data_t* input, data_t* out0, data_t* out1) {
-    backbone->forward(input, P4 + 128 * 16 * 16, feat2);
-    conv_forP5_conv->forward(feat2, P5);
-
-    yolo_headP5_basic_conv1->forward(P5, out0_tmp);
-    Xil_DCacheFlushRange((INTPTR)out0, OUT0_COUNT * sizeof(data_t));
-    conv_leakyrelu(512, OUT_CH, 0, 1, 1, 8, 8,
-                   out0_tmp, yolo_headP5_w2, yolo_headP5_b2, out0, 0);
-    Xil_DCacheInvalidateRange((INTPTR)out0, OUT0_COUNT * sizeof(data_t));
-
-    upsample_conv->forward(P5, P5_Upsample);
-    sampling(P5_Upsample, P4, 128, 8, 0);
-
-    yolo_headP4_basic_conv1->forward(P4, out1_tmp);
-    Xil_DCacheFlushRange((INTPTR)out1, OUT1_COUNT * sizeof(data_t));
-    conv_leakyrelu(256, OUT_CH, 0, 1, 1, 16, 16,
-                   out1_tmp, yolo_headP4_w2, yolo_headP4_b2, out1, 0);
-    Xil_DCacheInvalidateRange((INTPTR)out1, OUT1_COUNT * sizeof(data_t));
+    ConvCommand program[28] __attribute__((aligned(64)));
+    int count=0;
+    append(program,count,backbone->basic_conv1,input,backbone->basic_conv1_out);
+    append(program,count,backbone->basic_conv2,backbone->basic_conv1_out,backbone->basic_conv2_out);
+    block(program,count,backbone->resblock1,backbone->basic_conv2_out,backbone->tmp,backbone->resblock1_out);
+    block(program,count,backbone->resblock2,backbone->resblock1_out,backbone->tmp,backbone->resblock2_out);
+    block(program,count,backbone->resblock3,backbone->resblock2_out,P4+128*16*16,backbone->resblock3_out);
+    append(program,count,backbone->basic_conv3,backbone->resblock3_out,feat2);
+    append(program,count,conv_forP5_conv,feat2,P5);
+    append(program,count,yolo_headP5_basic_conv1,P5,out0_tmp);
+    program[count++]={offset(out0_tmp),offset(out0),offset(yolo_headP5_w2),offset(yolo_headP5_b2),512,OUT_CH,8,1,1,0};
+    append(program,count,upsample_conv,P5,P5_Upsample);
+    resize(program,count,P5_Upsample,P4,128,8,0);
+    append(program,count,yolo_headP4_basic_conv1,P4,out1_tmp);
+    program[count++]={offset(out1_tmp),offset(out1),offset(yolo_headP4_w2),offset(yolo_headP4_b2),256,OUT_CH,16,1,1,0};
+    Xil_AssertVoid(count==28);
+    Xil_DCacheFlushRange((INTPTR)input,CSPDarkNet::INPUT_COUNT*sizeof(data_t));
+    Xil_DCacheFlushRange((INTPTR)out0,OUT0_COUNT*sizeof(data_t));
+    Xil_DCacheFlushRange((INTPTR)out1,OUT1_COUNT*sizeof(data_t));
+    Xil_DCacheFlushRange((INTPTR)program,sizeof(program));
+    conv_run_program(program,count);
+    Xil_DCacheInvalidateRange((INTPTR)out0,OUT0_COUNT*sizeof(data_t));
+    Xil_DCacheInvalidateRange((INTPTR)out1,OUT1_COUNT*sizeof(data_t));
 }

@@ -1,6 +1,17 @@
 #include"top.h"
 
 
+static void execute_layer(data_t* in1, data_t* in2, data_t* in3, data_t* in4,
+                          data_t* w1, data_t* w2, data_t* w3, data_t* w4,
+                          data_t* bias, data_t* out1, data_t* out2, data_t* out3, data_t* out4,
+                          int ci, int co, int size, int stride, int kernel, int act) {
+#pragma HLS INLINE off
+    if (kernel == 3 || kernel == 1)
+        std_conv(in1,in2,in3,in4,w1,w2,w3,w4,bias,out1,out2,out3,out4,ci,co,size,stride,act,kernel);
+    else if (kernel == 2) maxpool(in1,out1,ci,size,size);
+    else upsample(in1,out1,size);
+}
+
 void conv(data_t* in1,data_t* in2,data_t* in3,data_t* in4,
 		  data_t* w1,data_t* w2,data_t* w3,data_t* w4,
 		  data_t* b,
@@ -43,19 +54,29 @@ void conv(data_t* in1,data_t* in2,data_t* in3,data_t* in4,
 #pragma HLS INTERFACE m_axi depth=100000 port=out3 offset=slave bundle=FM3 max_write_burst_length=32 num_write_outstanding=4
 #pragma HLS INTERFACE m_axi depth=100000 port=out4 offset=slave bundle=FM4 max_write_burst_length=32 num_write_outstanding=4
 //
-	if(kernel==3 || kernel==1){
-		cout<<"conv B1"<<endl;
-		std_conv(in1,in2,in3,in4,
-				 w1,w2,w3,w4,
-				 b,
-				 out1,out2,out3,out4,
-				 ch_in,ch_out,
-				 fsize,stride,act,kernel);
-	}
-	else if(kernel==2){     //kernel==2 maxpool; kernel==0 upsample
-		maxpool(in1,out1,ch_in,fsize,fsize);
-	}
-	else{
-		upsample(in1,out1,fsize);
-	}
+    ap_uint<32> program[280];
+#pragma HLS BIND_STORAGE variable=program type=ram_1p impl=bram
+    const bool network = kernel == 4;
+    if (network && (ch_in < 1 || ch_in > 28)) return;
+    const int count = network ? ch_in : 1;
+    if (network) for (int i=0; i<count*10; ++i) {
+#pragma HLS PIPELINE II=2
+        const data_t low=b[2*i], high=b[2*i+1];
+        program[i]=(ap_uint<32>(high.range(15,0))<<16) | ap_uint<32>(low.range(15,0));
+    }
+    for (int layer=0; layer<count; ++layer) {
+        int ci=ch_in, co=ch_out, size=fsize, step=stride, op=kernel, activation=act;
+        int input_offset=0, output_offset=0, weight_offset=0, bias_offset=0;
+        if (network) {
+            input_offset=program[layer*10+0]; output_offset=program[layer*10+1];
+            weight_offset=program[layer*10+2]; bias_offset=program[layer*10+3];
+            ci=program[layer*10+4]; co=program[layer*10+5]; size=program[layer*10+6];
+            step=program[layer*10+7]; op=program[layer*10+8]; activation=program[layer*10+9];
+        }
+        execute_layer(in1+input_offset,in2+input_offset,in3+input_offset,in4+input_offset,
+                      w1+weight_offset,w2+weight_offset,w3+weight_offset,w4+weight_offset,
+                      network ? w1+bias_offset : b,
+                      out1+output_offset,out2+output_offset,out3+output_offset,out4+output_offset,
+                      ci,co,size,step,op,activation);
+    }
 }

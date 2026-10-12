@@ -53,3 +53,9 @@ void sampling(data_t* in, data_t* out, int ch, int size, int mode) {
     const int kernel = mode ? 2 : 0;
     conv_leakyrelu(ch, ch, 0, 0, kernel, size, size, in, in, in, out, 0);
 }
+
+void conv_run_program(const ConvCommand* program, int count) {
+    data_t* base=reinterpret_cast<data_t*>(0x00100000U);
+    conv_leakyrelu(count,0,0,0,4,0,0,base,base,
+                   reinterpret_cast<data_t*>(const_cast<ConvCommand*>(program)),base,0);
+}

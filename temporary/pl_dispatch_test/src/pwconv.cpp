@@ -232,5 +232,3 @@ void pwconv(data_t* in1,data_t* in2,data_t *in3,data_t* in4,
 		store_output(fm_out2,out,basePixAddr,baseChannel,SIZE,M,ACT);
     }
 }
-
-

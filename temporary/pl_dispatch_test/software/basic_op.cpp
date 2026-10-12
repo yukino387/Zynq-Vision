@@ -59,4 +59,3 @@ void conv_run_program(const ConvCommand* program, int count) {
     conv_leakyrelu(count,0,0,0,4,0,0,base,base,
                    reinterpret_cast<data_t*>(const_cast<ConvCommand*>(program)),base,0);
 }
-

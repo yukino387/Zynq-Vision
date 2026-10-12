@@ -1,7 +1,7 @@
 set source_dir [file dirname [file normalize [info script]]]
 set build_dir [file join $source_dir build]
 create_project camera_cnn $build_dir -part xc7z020clg400-2 -force
-set_property ip_repo_paths [file join $source_dir ../hls/build/conv/solution/impl/ip] [current_project]
+set_property ip_repo_paths [file join $source_dir ../hls/build/conv/hls/impl/ip] [current_project]
 update_ip_catalog
 add_files [file join $source_dir ov5640_capture.v]
 set_property XPM_LIBRARIES {XPM_FIFO} [current_project]

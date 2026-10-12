@@ -32,6 +32,10 @@ data_t leaky_relu(data_t x){
 }
 
 
+static data_t weight_cache[4][Tm/4][128*9];
+static bool cache_enabled;
+static bool cache_reuse;
+
 // load input tile In[n:n+Tn][fm_row:fm_row+Tr+K-1][fm_col:fm_col+Tc+K-1] or
 // In[n:n+Tn][fm_row:fm_row+TRin][fm_col:fm_col+TCin]
 template<unsigned Lane>
@@ -101,18 +105,41 @@ void load_weight_lane(data_t bank[Tm/4][Tn][K][K], data_t* weights,
                       ap_uint<10> m, ap_uint<10> ch_in,
                       ap_uint<10> ch_out, ap_uint<2> kernel) {
 #pragma HLS INLINE off
+#pragma HLS ARRAY_PARTITION variable=weight_cache complete dim=1
+#pragma HLS ARRAY_PARTITION variable=weight_cache complete dim=2
+#pragma HLS BIND_STORAGE variable=weight_cache type=ram_1p impl=bram
     const unsigned short elements = kernel == 1 ? 1 : 9;
     for(unsigned short group=0; group<Tm/4; ++group) {
+#pragma HLS LOOP_FLATTEN off
         const unsigned short channel=4*group+Lane;
         int block_offset=channel*ch_in_kk;
 #pragma HLS BIND_OP variable=block_offset op=mul impl=dsp latency=3
         const bool valid=m+channel<ch_out;
+        data_t values[Tn*K*K];
+        if (cache_enabled && cache_reuse) {
+            for(unsigned short k=0; k<Tn*elements; ++k) {
+#pragma HLS PIPELINE II=1
+                values[k]=weight_cache[Lane][group][n*elements+k];
+            }
+        } else if (valid) {
+            // Keep DDR reads unconditional and contiguous so HLS can form a burst.
+            for(unsigned short k=0; k<Tn*elements; ++k) {
+#pragma HLS PIPELINE II=1
+                values[k]=weights[base+block_offset+k];
+            }
+        } else {
+            for(unsigned short k=0; k<Tn*elements; ++k) {
+#pragma HLS PIPELINE II=1
+                values[k]=data_t(0);
+            }
+        }
         for(unsigned short k=0; k<Tn*elements; ++k) {
 #pragma HLS PIPELINE II=1
             const unsigned short nn=kernel == 1 ? k : k/9;
             const unsigned short i=kernel == 1 ? 0 : (k%9)/3;
             const unsigned short j=kernel == 1 ? 0 : k%3;
-            const data_t value=valid ? weights[base+block_offset+k] : data_t(0);
+            const data_t value=values[k];
+            if (cache_enabled && !cache_reuse) weight_cache[Lane][group][n*elements+k]=value;
             bank[group][nn][i][j]=n+nn<ch_in ? value : data_t(0);
         }
     }
@@ -338,11 +365,14 @@ const unsigned short tile = spatial_tile(o_fm_size);
         bias_buff[index/Tm][index%Tm] = bias[index];
     } // PS -> PL, load bias
     cout<<"std_conv B2"<<endl; // for debug
+    cache_enabled=kernel==1 || ch_in<=128;
+    cache_reuse=false;
     compute_output(fm_out1,bias_buff, in1,in2,in3,in4, w1,w2,w3,w4, m,fm_size,ch_in,ch_out,r,c,stride,kernel);
     cout<<"std_conv B3"<<endl; // for debug
     next_block(r,c,m,next_r,next_c,next_m,o_fm_size);
     cout<<"std_conv B4"<<endl; // for debug
     while(next_m < ch_out){
+        cache_reuse=next_m==m;
     	if(pingpong){ // store fm_out1 to DDR,compute next_block in fm_out2
             compute_output(fm_out2,bias_buff,in1,in2,in3,in4,w1,w2,w3,w4,next_m,fm_size,ch_in,ch_out,next_r,next_c,stride,kernel);
             store_output(fm_out1,out1,out2,out3,out4,r,c,m,fm_size,stride,act,ch_out);
@@ -371,5 +401,3 @@ const unsigned short tile = spatial_tile(o_fm_size);
         store_output(fm_out2,out1,out2,out3,out4,r,c,m,fm_size,stride,act,ch_out);
     }
 }
-
-

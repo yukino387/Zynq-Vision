@@ -60,4 +60,3 @@ foreach bp $breakpoints {catch {bpremove $bp}}
 catch {disconnect}
 close $log
 exit $failed
-

@@ -48,4 +48,3 @@ int main() {
     std::cout<<"PASS: 28 PL-scheduled operators match individual calls; guards unchanged"<<std::endl;
     return 0;
 }
-
