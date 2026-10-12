@@ -3,15 +3,12 @@
 
 static data_t* allocate_feature(data_t*& storage, int count) {
     storage = new data_t[count + 64];
-    return reinterpret_cast<data_t*>((reinterpret_cast<UINTPTR>(storage) + 63U)
-                                      & ~static_cast<UINTPTR>(63U));
+    data_t* result = reinterpret_cast<data_t*>((reinterpret_cast<UINTPTR>(storage) + 63U)
+                                               & ~static_cast<UINTPTR>(63U));
+    Xil_DCacheFlushRange((INTPTR)result, count * sizeof(data_t));
+    return result;
 }
 
-static void run_basic_conv(BasicConv* conv, data_t* input, data_t* output, int count) {
-    Xil_DCacheFlushRange((INTPTR)output, count * sizeof(data_t));
-    conv->forward(input, output);
-    Xil_DCacheInvalidateRange((INTPTR)output, count * sizeof(data_t));
-}
 
 CSPDarkNet::CSPDarkNet() {
     basic_conv1 = new BasicConv(256, 256, 3, 2, 1, 3, 32);
@@ -40,10 +37,10 @@ CSPDarkNet::~CSPDarkNet() {
 
 void CSPDarkNet::forward(data_t* input, data_t* feat1, data_t* feat2) {
     Xil_DCacheFlushRange((INTPTR)input, INPUT_COUNT * sizeof(data_t));
-    run_basic_conv(basic_conv1, input, basic_conv1_out, CONV1_COUNT);
-    run_basic_conv(basic_conv2, basic_conv1_out, basic_conv2_out, CONV2_COUNT);
+    basic_conv1->forward(input, basic_conv1_out);
+    basic_conv2->forward(basic_conv1_out, basic_conv2_out);
     resblock1->forward(basic_conv2_out, tmp, resblock1_out);
     resblock2->forward(resblock1_out, tmp, resblock2_out);
     resblock3->forward(resblock2_out, feat1, resblock3_out);
-    run_basic_conv(basic_conv3, resblock3_out, feat2, FEAT2_COUNT);
+    basic_conv3->forward(resblock3_out, feat2);
 }

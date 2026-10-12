@@ -19,6 +19,8 @@ Resblock_body::Resblock_body(int h, int w, int ch_in, int ch_out)
     concat_storage = new data_t[ch_out * h * w + 64];
     route = align_buffer(route_storage);
     conv3_out = align_buffer(concat_storage);
+    Xil_DCacheFlushRange((INTPTR)route, ch_out * h * w * sizeof(data_t));
+    Xil_DCacheFlushRange((INTPTR)conv3_out, ch_out * h * w * sizeof(data_t));
 }
 
 Resblock_body::~Resblock_body() {
@@ -34,10 +36,6 @@ void Resblock_body::forward(data_t* input, data_t* feat, data_t* out) {
     const int count = ch_out * h * w;
     const int half = count / 2;
     Xil_DCacheFlushRange((INTPTR)input, ch_in * h * w * sizeof(data_t));
-    Xil_DCacheFlushRange((INTPTR)route, count * sizeof(data_t));
-    Xil_DCacheFlushRange((INTPTR)conv3_out, count * sizeof(data_t));
-    Xil_DCacheFlushRange((INTPTR)feat, count * sizeof(data_t));
-    Xil_DCacheFlushRange((INTPTR)out, (count / 2) * sizeof(data_t));
 
     conv1->forward(input, route);
     conv2->forward(route + half, conv3_out + half);
@@ -45,9 +43,4 @@ void Resblock_body::forward(data_t* input, data_t* feat, data_t* out) {
     conv4->forward(conv3_out, feat);
     sampling(route, out, ch_out, h, 1);
     sampling(feat, out + count / 4, ch_out, h, 1);
-
-    Xil_DCacheInvalidateRange((INTPTR)route, count * sizeof(data_t));
-    Xil_DCacheInvalidateRange((INTPTR)conv3_out, count * sizeof(data_t));
-    Xil_DCacheInvalidateRange((INTPTR)feat, count * sizeof(data_t));
-    Xil_DCacheInvalidateRange((INTPTR)out, (count / 2) * sizeof(data_t));
 }

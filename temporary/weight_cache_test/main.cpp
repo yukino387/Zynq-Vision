@@ -11,7 +11,7 @@ static std::vector<Region> features;
 static std::vector<std::pair<INTPTR, std::size_t>> prepared;
 static std::size_t feature_flush_bytes;
 static unsigned flushes, repeated, calls;
-static bool running;
+static bool running, loading;
 static void publish_feature(INTPTR address, std::size_t bytes) {
     bool exists=false;
     for (Region& region : features) {
@@ -52,7 +52,7 @@ void Xil_DCacheFlushRange(INTPTR address, std::size_t bytes) {
         ++flushes;
         return;
     }
-    if (!running) {
+    if (loading) {
         regions.push_back({address, std::vector<unsigned char>(reinterpret_cast<unsigned char*>(address), reinterpret_cast<unsigned char*>(address)+bytes)});
         ++flushes;
     } else {
@@ -95,28 +95,33 @@ static bool reader(const char*, float* data, std::size_t count, void* context) {
 int main() {
     Yolo4_Tiny net;
     float value=0.125f;
+    loading=true;
     assert(net.load_weight("weights", reader, &value));
+    loading=false;
     assert(regions.size()==42 && flushes==42);
     std::size_t bytes=0;
     for (const Region& region : regions) bytes+=region.bytes.size();
     std::vector<data_t> input(CSPDarkNet::INPUT_COUNT), out0(Yolo4_Tiny::OUT0_COUNT), out1(Yolo4_Tiny::OUT1_COUNT);
     running=true;
+    feature_flush_bytes=0;
     input[0]=1;
-    prepared.clear();
     net.forward(input.data(), out0.data(), out1.data());
     input[0]=2;
-    prepared.clear();
     net.forward(input.data(), out0.data(), out1.data());
     assert(calls==42 && repeated==0);
     running=false; value=0.25f;
+    loading=true;
     assert(net.load_weight("weights", reader, &value));
+    loading=false;
     assert(regions.size()==42 && flushes==84);
-    running=true; prepared.clear(); net.forward(input.data(), out0.data(), out1.data());
+    running=true; net.forward(input.data(), out0.data(), out1.data());
     assert(calls==63 && repeated==0);
     running=false; value=std::numeric_limits<float>::quiet_NaN();
+    loading=true;
     assert(!net.load_weight("weights", reader, &value));
+    loading=false;
     assert(flushes==84);
-    running=true; prepared.clear(); net.forward(input.data(), out0.data(), out1.data());
+    running=true; net.forward(input.data(), out0.data(), out1.data());
     assert(calls==84 && repeated==0);
     std::cout << "Feature flush bytes per frame: " << feature_flush_bytes/4 << '\n';
     std::cout << "PASS: 42 buffers flushed per load, 4 forwards including rejected reload, no repeated weight flush; saved " << bytes << " bytes per frame\n";
