@@ -115,7 +115,6 @@ bool udp_send_frame(uint32_t frame, uint32_t type, const void* data, uint32_t by
         pbuf_free(packet);
         if (result != ERR_OK) return false;
         udp_poll();
-        usleep(50);
     }
     return true;
 }

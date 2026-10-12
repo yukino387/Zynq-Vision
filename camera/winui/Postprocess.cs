@@ -17,8 +17,8 @@ public static class Postprocess
     public static List<Detection> Detect(byte[] out0, byte[] out1, double confidence, double iou)
     {
         List<Detection> candidates = [];
-        Decode(out0, 13, Anchors[0], confidence, candidates);
-        Decode(out1, 26, Anchors[1], confidence, candidates);
+        Decode(out0, 8, Anchors[0], confidence, candidates);
+        Decode(out1, 16, Anchors[1], confidence, candidates);
         List<Detection> kept = [];
         foreach (var group in candidates.GroupBy(x => x.ClassId))
         {

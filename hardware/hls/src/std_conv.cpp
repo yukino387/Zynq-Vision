@@ -1,5 +1,11 @@
 #include"std_conv.h"
 
+static unsigned short spatial_tile(unsigned short size) {
+    if (size == 8) return 8;
+    if (size == 16 || size == 32 || size == 64 || size == 128) return 16;
+    return size < 26 ? 13 : 26;
+}
+
 //config
 // The size of the block ofm of a single calculation
 #define Tr 26   // height
@@ -69,7 +75,7 @@ void load_input(data_t fm_in_buff[Tn][TRin][TCin],
 #pragma HLS ARRAY_PARTITION variable=fm_in_buff complete dim=1
 #pragma HLS DATAFLOW
     const ap_uint<1> padding=kernel==1 ? 0 : 1;
-    const unsigned short tile=(stride==2 ? fm_size>>1 : fm_size)<26 ? 13 : 26;
+    const unsigned short tile=spatial_tile(stride==2 ? fm_size>>1 : fm_size);
     const ap_uint<6> extent=stride==2 ? tile*2+1 : tile+int(kernel)-1;
     const ap_uint<9> input_row=stride==2 ? fm_row<<1 : fm_row;
     const ap_uint<9> input_col=stride==2 ? fm_col<<1 : fm_col;
@@ -193,7 +199,7 @@ void store_output(data_t fm_out_buff[Tm][Tr][Tc],
 				  ap_uint<2> stride,ap_uint<1> act,ap_uint<10> ch_out){
 unsigned short mm,rr,cc;
 unsigned short o_fm_size=(stride==1)?fm_size:(fm_size >> 1);
-const unsigned short tile = o_fm_size < 26 ? 13 : 26;
+const unsigned short tile = spatial_tile(o_fm_size);
 unsigned short o_size=o_fm_size*o_fm_size;
 data_t tmp1,tmp2,tmp3,tmp4;
 //
@@ -235,7 +241,7 @@ void compute_output(data_t fm_out_buff[Tm][Tr][Tc],
 					data_t* w1,data_t* w2,data_t* w3,data_t* w4,
 					ap_uint<10> m,ap_uint<9> fm_size,ap_uint<10> ch_in,ap_uint<10> ch_out,
 					unsigned short fm_row,unsigned short fm_col,ap_uint<2> stride, ap_uint<2> kernel){
-	const unsigned short tile = (stride == 2 ? fm_size >> 1 : fm_size) < 26 ? 13 : 26;
+	const unsigned short tile = spatial_tile(stride == 2 ? fm_size >> 1 : fm_size);
 	//pingpong buffer 
 	data_t fm_in_buff1[Tn][TRin][TCin];
 #pragma HLS ARRAY_PARTITION variable=fm_in_buff1 complete dim=1
@@ -281,7 +287,7 @@ void compute_output(data_t fm_out_buff[Tm][Tr][Tc],
 void next_block(unsigned short r,unsigned short c,ap_uint<10> m,
 				unsigned short &next_r, unsigned short &next_c, ap_uint<10> &next_m,
 				ap_uint<9> fm_size){
-    const unsigned short tile = fm_size < 26 ? 13 : 26;
+    const unsigned short tile = spatial_tile(fm_size);
     if(c+tile>=fm_size){
         if(r+tile>=fm_size){
     		next_m=m+Tm;
@@ -321,7 +327,7 @@ void std_conv(data_t* in1,data_t* in2,data_t* in3,data_t* in4,
     unsigned short next_r,next_c;
     ap_uint<10> next_m;
 	unsigned short o_fm_size=(stride==1)?fm_size:(fm_size >> 1);
-const unsigned short tile = o_fm_size < 26 ? 13 : 26;
+const unsigned short tile = spatial_tile(o_fm_size);
     r=0;
     c=0;
     m=0;

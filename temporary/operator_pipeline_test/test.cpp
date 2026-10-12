@@ -103,6 +103,22 @@ static bool check_resize(int kernel, int channels, int h) {
 }
 
 int main() {
+    if (std::getenv("HLS_INPUT256")) {
+        bool ok = true;
+        ok &= check(256, 3, 4, 3, 2, 1);
+        ok &= check(128, 8, 4, 3, 2, 1);
+        ok &= check(64, 8, 4, 3, 1, 1);
+        ok &= check(32, 8, 4, 3, 1, 1);
+        ok &= check(16, 8, 75, 3, 1, 1);
+        ok &= check(8, 8, 75, 3, 1, 1, true);
+        ok &= check(8, 512, 75, 1, 1, 0, true);
+        ok &= check(16, 256, 75, 1, 1, 0, true);
+        ok &= check_resize(2, 8, 64);
+        ok &= check_resize(2, 8, 32);
+        ok &= check_resize(2, 8, 16);
+        ok &= check_resize(0, 128, 8);
+        return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
     if (const char* quick = std::getenv("HLS_QUICK_COSIM")) {
         const int selected = std::atoi(quick);
         if (selected == 21)

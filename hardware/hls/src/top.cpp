@@ -56,6 +56,6 @@ void conv(data_t* in1,data_t* in2,data_t* in3,data_t* in4,
 		maxpool(in1,out1,ch_in,fsize,fsize);
 	}
 	else{
-		upsample(in1,out1);
+		upsample(in1,out1,fsize);
 	}
 }

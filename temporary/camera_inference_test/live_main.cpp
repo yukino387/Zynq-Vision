@@ -12,7 +12,7 @@ extern "C" {
 float raw_files[TOTAL_FLOATS] __attribute__((aligned(64)));
 char pc_directory[1024] __attribute__((aligned(64)));
 uint16_t pixels[2][CAMERA_PIXELS + 32] __attribute__((aligned(64)));
-data_t input_data[3 * CAMERA_PIXELS] __attribute__((aligned(64)));
+data_t input_data[CSPDarkNet::INPUT_COUNT] __attribute__((aligned(64)));
 data_t out0_storage[Yolo4_Tiny::OUT0_COUNT + 32] __attribute__((aligned(64)));
 data_t out1_storage[Yolo4_Tiny::OUT1_COUNT + 32] __attribute__((aligned(64)));
 __attribute__((noinline)) void test_load_ready() { asm volatile("nop"); }

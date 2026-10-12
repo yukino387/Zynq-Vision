@@ -7,13 +7,13 @@ class Yolo4_Tiny {
 public:
     enum {
         OUT_CH = 75,
-        FEAT2_COUNT = 512 * 13 * 13,
-        P5_COUNT = 256 * 13 * 13,
-        UPSAMPLE_COUNT = 128 * 13 * 13,
-        P4_COUNT = 384 * 26 * 26,
-        HEAD_P4_COUNT = 256 * 26 * 26,
-        OUT0_COUNT = OUT_CH * 13 * 13,
-        OUT1_COUNT = OUT_CH * 26 * 26
+        FEAT2_COUNT = 512 * 8 * 8,
+        P5_COUNT = 256 * 8 * 8,
+        UPSAMPLE_COUNT = 128 * 8 * 8,
+        P4_COUNT = 384 * 16 * 16,
+        HEAD_P4_COUNT = 256 * 16 * 16,
+        OUT0_COUNT = OUT_CH * 8 * 8,
+        OUT1_COUNT = OUT_CH * 16 * 16
     };
 
     CSPDarkNet* backbone;

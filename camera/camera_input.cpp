@@ -82,7 +82,9 @@ bool camera_init() {
         }
     }
     const struct { uint16_t address; uint8_t value; } output[] = {
-        {0x3035, 0x41}, {0x4300, 0x61}, {0x501f, 0x01},
+        {0x3035, 0x11}, {0x3824, 0x04}, {0x3a00, 0x38},
+        {0x3a02, 0x00}, {0x3a03, 0x48}, {0x3a14, 0x00}, {0x3a15, 0x48},
+        {0x4300, 0x61}, {0x501f, 0x01},
         {0x4740, 0x21}, {0x3808, 0x01}, {0x3809, 0xa0},
         {0x380a, 0x01}, {0x380b, 0xa0}, {0x3008, 0x02}
     };
@@ -153,15 +155,23 @@ bool camera_set_brightness(int level) {
         write_register(0x5588, level < 0 ? sign | 8 : sign & ~8);
 }
 
-void camera_to_input(const uint16_t* pixels, data_t* input) {
-    for (unsigned i = 0; i < CAMERA_PIXELS; ++i) {
-        const unsigned pixel = pixels[i];
-        const unsigned r5 = pixel >> 11, g6 = (pixel >> 5) & 63, b5 = pixel & 31;
-        const unsigned r = (r5 << 3) | (r5 >> 2);
-        const unsigned g = (g6 << 2) | (g6 >> 4);
-        const unsigned b = (b5 << 3) | (b5 >> 2);
-        input[i] = (r << 1) + ((r + 64) >> 7);
-        input[CAMERA_PIXELS + i] = (g << 1) + ((g + 64) >> 7);
-        input[2 * CAMERA_PIXELS + i] = (b << 1) + ((b + 64) >> 7);
+void camera_to_input(const uint16_t *pixels, data_t *input)
+{
+    for (unsigned y = 0; y < 256; ++y)
+    {
+        for (unsigned x = 0; x < 256; ++x)
+        {
+            const unsigned i = y * 256 + x;
+            const unsigned source_y = (2 * y + 1) * 416 / 512;
+            const unsigned source_x = (2 * x + 1) * 416 / 512;
+            const unsigned pixel = pixels[source_y * 416 + source_x];
+            const unsigned r5 = pixel >> 11, g6 = (pixel >> 5) & 63, b5 = pixel & 31;
+            const unsigned r = (r5 << 3) | (r5 >> 2);
+            const unsigned g = (g6 << 2) | (g6 >> 4);
+            const unsigned b = (b5 << 3) | (b5 >> 2);
+            input[i] = (r << 1) + ((r + 64) >> 7);
+            input[256 * 256 + i] = (g << 1) + ((g + 64) >> 7);
+            input[2 * 256 * 256 + i] = (b << 1) + ((b + 64) >> 7);
+        }
     }
 }

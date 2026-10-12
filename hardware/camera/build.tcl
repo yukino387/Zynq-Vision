@@ -71,5 +71,5 @@ set skew [report_bus_skew -file [file join $build_dir bus_skew.rpt] -return_stri
 if {[string first {VIOLATED} $skew] >= 0} {error "Camera FIFO bus-skew qualification failed"}
 write_checkpoint -force [file join $build_dir qualified.dcp]
 write_bitstream -force [file join $build_dir system_wrapper.bit]
-write_hw_platform -fixed -include_bit -force -file [file join $build_dir camera_cnn.xsa]
+write_hw_platform -fixed -force -file [file join $build_dir camera_cnn.xsa]
 exit

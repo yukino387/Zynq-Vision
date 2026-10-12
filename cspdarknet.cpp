@@ -14,12 +14,12 @@ static void run_basic_conv(BasicConv* conv, data_t* input, data_t* output, int c
 }
 
 CSPDarkNet::CSPDarkNet() {
-    basic_conv1 = new BasicConv(416, 416, 3, 2, 1, 3, 32);
-    basic_conv2 = new BasicConv(208, 208, 3, 2, 1, 32, 64);
-    basic_conv3 = new BasicConv(13, 13, 3, 1, 1, 512, 512);
-    resblock1 = new Resblock_body(104, 104, 64, 64);
-    resblock2 = new Resblock_body(52, 52, 128, 128);
-    resblock3 = new Resblock_body(26, 26, 256, 256);
+    basic_conv1 = new BasicConv(256, 256, 3, 2, 1, 3, 32);
+    basic_conv2 = new BasicConv(128, 128, 3, 2, 1, 32, 64);
+    basic_conv3 = new BasicConv(8, 8, 3, 1, 1, 512, 512);
+    resblock1 = new Resblock_body(64, 64, 64, 64);
+    resblock2 = new Resblock_body(32, 32, 128, 128);
+    resblock3 = new Resblock_body(16, 16, 256, 256);
     basic_conv1_out = allocate_feature(storage[0], CONV1_COUNT);
     basic_conv2_out = allocate_feature(storage[1], CONV2_COUNT);
     resblock1_out = allocate_feature(storage[2], BLOCK1_COUNT);
