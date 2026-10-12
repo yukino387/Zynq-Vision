@@ -12,7 +12,8 @@ cases = (
     'RESIZE kernel=0 channels=128 h=13 errors=0',
 )
 data = []
-for name in ('shared44_single', 'shared44_single_fast'):
+names = ('shared44_single', 'shared44_single_fast', 'shared44_read_lanes')
+for name in names:
     log = (base / f'{name}_mixed_stall_cosim_console.log').read_text(errors='replace')
     assert 'C/RTL co-simulation finished: PASS' in log
     assert all(case in log for case in cases)
@@ -20,7 +21,9 @@ for name in ('shared44_single', 'shared44_single_fast'):
               (base / f'{name}_mixed_stall.transaction.rpt').read_text())]
     assert len(values) == len(cases) and min(values) > 0
     data.append(values)
-for case, old, new in zip(cases, *data):
-    print(f'{case}: {old} -> {new} cycles, change={100*(new/old-1):+.3f}%')
-print('Max observed cycle growth:', max(new/old-1 for old,new in zip(*data)))
+for name, values in zip(names[1:], data[1:]):
+    print(name)
+    for case, old, new in zip(cases, data[0], values):
+        print(f'{case}: {old} -> {new} cycles, change={100*(new/old-1):+.3f}%')
+    print('Max observed cycle growth:', max(new/old-1 for old,new in zip(data[0], values)))
 print('Matching randomized interface-stall cases; no board FPS claim. Physical timing qualification is separate.')
