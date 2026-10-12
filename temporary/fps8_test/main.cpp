@@ -59,20 +59,23 @@ static void verify(int index, const data_t* values, std::size_t count) {
     else ++test_verified;
 }
 
-static data_t sampling_input[3 * 26 * 26 + 32] __attribute__((aligned(64)));
-static data_t sampling_output[3 * 26 * 26 * 4 + 32] __attribute__((aligned(64)));
+static data_t sampling_input[128 * 26 * 26 + 32] __attribute__((aligned(64)));
+static data_t sampling_output[128 * 26 * 26 * 4 + 32] __attribute__((aligned(64)));
 volatile unsigned sampling_checked;
 static void check_sampling() {
     for (int mode = 0; mode < 2; ++mode) for (int run = 0; run < 2; ++run) {
         const int size = run == 0 ? 8 : (mode ? 26 : 13);
         const int output_size = mode ? size / 2 : size * 2;
-        const int count = 3 * size * size, output_count = 3 * output_size * output_size;
+        const int channels = mode ? 3 : 128;
+        const int count = channels * size * size, output_count = channels * output_size * output_size;
         for (int i = 0; i < count; ++i) sampling_input[i] = ((i * 9973 + 12345) & 65535) - 32768;
         sampling_input[0] = -32768; sampling_input[1] = 32767;
         for (int i = 0; i < output_count + 32; ++i) sampling_output[i] = -12345;
         Xil_DCacheFlushRange(reinterpret_cast<INTPTR>(sampling_input), (count + 32) * sizeof(data_t));
-        sampling(sampling_input, sampling_output, 3, size, mode);
-        for (int c = 0; c < 3; ++c) for (int y = 0; y < output_size; ++y) for (int x = 0; x < output_size; ++x) {
+        Xil_DCacheFlushRange(reinterpret_cast<INTPTR>(sampling_output), (output_count + 32) * sizeof(data_t));
+        sampling(sampling_input, sampling_output, channels, size, mode);
+        Xil_DCacheInvalidateRange(reinterpret_cast<INTPTR>(sampling_output), (output_count + 32) * sizeof(data_t));
+        for (int c = 0; c < channels; ++c) for (int y = 0; y < output_size; ++y) for (int x = 0; x < output_size; ++x) {
             int expected = sampling_input[c * size * size + (mode ? 2 * y : y / 2) * size + (mode ? 2 * x : x / 2)];
             if (mode) for (int ky = 0; ky < 2; ++ky) for (int kx = 0; kx < 2; ++kx) {
                 const int value = sampling_input[c * size * size + (2 * y + ky) * size + 2 * x + kx];
@@ -86,6 +89,7 @@ static void check_sampling() {
 }
 
 int main() {
+    conv_init();
     check_sampling();
     test_stage = 1;
     Yolo4_Tiny network;
@@ -142,7 +146,6 @@ int main() {
         for (unsigned i = 0; i < sizeof(out1_storage) / sizeof(data_t); ++i) out1_storage[i] = -12345;
         Xil_DCacheFlushRange(reinterpret_cast<INTPTR>(out0_storage), sizeof(out0_storage));
         Xil_DCacheFlushRange(reinterpret_cast<INTPTR>(out1_storage), sizeof(out1_storage));
-        conv_init();
         XTime start, end;
         XTime_GetTime(&start);
         network.forward(input_data, out0_storage + 32, out1_storage + 32);

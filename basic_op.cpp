@@ -49,56 +49,7 @@ void conv_init(){
 }
 
 
-#include "xil_cache.h"
-
-#pragma GCC push_options
-#pragma GCC target("fpu=neon")
-#include <arm_neon.h>
-
 void sampling(data_t* in, data_t* out, int ch, int size, int mode) {
-    const int output_size = mode ? size / 2 : size * 2;
-    Xil_DCacheInvalidateRange(reinterpret_cast<INTPTR>(in), ch * size * size * sizeof(data_t));
-    for (int channel = 0; channel < ch; ++channel) {
-        const data_t* source = in + channel * size * size;
-        data_t* destination = out + channel * output_size * output_size;
-        if (mode) {
-            for (int y = 0; y < size; y += 2) {
-                const data_t* first = source + y * size;
-                const data_t* second = first + size;
-                data_t* row = destination + y / 2 * output_size;
-                int x = 0;
-                for (; x + 8 <= size; x += 8) {
-                    const int16x8_t vertical = vmaxq_s16(vld1q_s16(first + x), vld1q_s16(second + x));
-                    const int16x8x2_t pairs = vuzpq_s16(vertical, vertical);
-                    vst1_s16(row + x / 2, vmax_s16(vget_low_s16(pairs.val[0]), vget_low_s16(pairs.val[1])));
-                }
-                for (; x < size; x += 2) {
-                    data_t value = first[x];
-                    if (first[x + 1] > value) value = first[x + 1];
-                    if (second[x] > value) value = second[x];
-                    if (second[x + 1] > value) value = second[x + 1];
-                    row[x / 2] = value;
-                }
-            }
-        } else {
-            for (int y = 0; y < size; ++y) {
-                const data_t* row = source + y * size;
-                data_t* first = destination + y * 2 * output_size;
-                data_t* second = first + output_size;
-                int x = 0;
-                for (; x + 8 <= size; x += 8) {
-                    const int16x8_t values = vld1q_s16(row + x);
-                    const int16x8x2_t doubled = vzipq_s16(values, values);
-                    vst1q_s16(first + 2 * x, doubled.val[0]);
-                    vst1q_s16(first + 2 * x + 8, doubled.val[1]);
-                    vst1q_s16(second + 2 * x, doubled.val[0]);
-                    vst1q_s16(second + 2 * x + 8, doubled.val[1]);
-                }
-                for (; x < size; ++x)
-                    first[2 * x] = first[2 * x + 1] = second[2 * x] = second[2 * x + 1] = row[x];
-            }
-        }
-    }
-    Xil_DCacheFlushRange(reinterpret_cast<INTPTR>(out), ch * output_size * output_size * sizeof(data_t));
+    const int kernel = mode ? 2 : 0;
+    conv_leakyrelu(ch, ch, 0, 0, kernel, size, size, in, in, in, out, 0);
 }
-#pragma GCC pop_options
