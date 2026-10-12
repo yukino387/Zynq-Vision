@@ -34,6 +34,16 @@ for channels,h in ((8,26),(8,52),(4,104)):
 fast_row_cost = dict(zip((26,52,104), (fast[3]/8,fast[4]/8,fast[5]/4)))
 fast_pool_cycles = sum(2*co*fast_row_cost[h] for _, (h,w,ci,co) in
                        traffic.constructors('cspdarknet.cpp','Resblock_body'))
+read_log = (test / 'shared44_read_lanes_pool_stall_cosim_console.log').read_text(errors='replace')
+assert 'C/RTL co-simulation finished: PASS' in read_log
+read_pool = [int(value) for value in re.findall(r'transaction\s+\d+:\s+(\d+)',
+             (test / 'shared44_read_lanes_pool_stall.transaction.rpt').read_text())]
+assert len(read_pool) == 3
+for channels,h in ((8,26),(8,52),(4,104)):
+    assert f'RESIZE kernel=2 channels={channels} h={h} errors=0' in read_log
+read_row_cost = dict(zip((26,52,104), (read_pool[0]/8,read_pool[1]/8,read_pool[2]/4)))
+read_pool_cycles = sum(2*co*read_row_cost[h] for _, (h,w,ci,co) in
+                       traffic.constructors('cspdarknet.cpp','Resblock_body'))
 # Keep a conservative common upsampling cost in both variants.
 upsample = 183903 / 100000
 residual = inference - old[3]/100000 - old_pool - upsample
@@ -46,7 +56,8 @@ for name, config, pool_cycles, mhz in (
         ('shared44',(26,88,88,True,True,44,True),row_pool_cycles,142.857132),
         ('shared44_narrow',(26,88,88,True,True,44,True),row_pool_cycles,166.666672),
         ('shared44_single',(26,44,44,True,True,44,True),row_pool_cycles,166.666672),
-        ('shared44_single_fast',(26,44,44,True,True,44,True),fast_pool_cycles,166.666672)):
+        ('shared44_single_fast',(26,44,44,True,True,44,True),fast_pool_cycles,166.666672),
+        ('shared44_read_lanes',(26,44,44,True,True,44,True),read_pool_cycles,166.666672)):
     frequency = mhz * 1000
     pooling = pool_cycles / frequency
     gate = test / f'{name}_area_system_{int(mhz)}/build/postroute_timing.rpt'
@@ -60,7 +71,7 @@ for name, config, pool_cycles, mhz in (
     ratio = sum(new[:3]) / sum(old[:3])
     # Observed retiming growth is below 1% in matching RTL cases. This 2%
     # allowance is engineering margin, not a proven bound on untested layers.
-    retiming_margin = new[3]/frequency * 0.02 if name == 'shared44_single_fast' else 0
+    retiming_margin = new[3]/frequency * 0.02 if name in ('shared44_single_fast','shared44_read_lanes') else 0
     print(f'{name}: clock={mhz:.6f}MHz, ideal convolution={new[3]/frequency:.3f}ms, pooling={pooling:.3f}ms')
     if retiming_margin:
         print(f'{name}: additional empirical retiming allowance={retiming_margin:.3f}ms')
