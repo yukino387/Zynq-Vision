@@ -1,3 +1,4 @@
+set_param general.maxThreads 4
 set source_dir [file dirname [file normalize [info script]]]
 set build_dir [file join $source_dir build]
 create_project camera_cnn $build_dir -part xc7z020clg400-2 -force
@@ -52,7 +53,7 @@ update_compile_order -fileset sources_1
 synth_design -top system_wrapper -part xc7z020clg400-2
 set clock_source [get_property SOURCE_PINS [get_clocks clk_fpga_0]]
 set clock_pin [get_pins -hier -filter "NAME == $clock_source"]
-create_clock -name clk_fpga_0 -period 7.000 $clock_pin
+create_clock -name clk_fpga_0 -period 8.000 $clock_pin
 write_checkpoint -force [file join $build_dir synthesized.dcp]
 opt_design
 write_checkpoint -force [file join $build_dir optimized.dcp]

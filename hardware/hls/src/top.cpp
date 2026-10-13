@@ -14,26 +14,31 @@ static void execute_layer(const uint64_t* in1, const uint64_t* in2, const uint64
     else if (kernel == 5) {
         const int count=ci*plane_size(size);
         const int32_t multiplier=bias[0], shift=bias[1];
+        data_t table[8][256];
+#pragma HLS ARRAY_PARTITION variable=table complete dim=1
+#pragma HLS BIND_STORAGE variable=table type=ram_1p impl=bram
+        for(unsigned i=0;i<256;++i) {
+#pragma HLS PIPELINE II=1
+            const data_t value=requant(data_t(i),multiplier,shift);
+            for(unsigned byte=0;byte<8;++byte) {
+#pragma HLS UNROLL
+                table[byte][i]=value;
+            }
+        }
         uint64_t words[64];
-        data_t values[512];
-#pragma HLS ARRAY_PARTITION variable=values cyclic factor=8
         for(unsigned base=0;base<unsigned(count);base+=512) {
             const unsigned bytes=count-base<512 ? count-base : 512;
             for(unsigned i=0;i<(bytes+7)/8;++i) {
 #pragma HLS PIPELINE II=1
                 words[i]=in1[(base>>3)+i];
             }
-            for(unsigned i=0;i<bytes;++i) {
-#pragma HLS PIPELINE II=1
-                const data_t value=data_t(words[i>>3]>>((i&7)*8));
-                values[i]=requant(value,multiplier,shift);
-            }
             for(unsigned i=0;i<bytes/8;++i) {
 #pragma HLS PIPELINE II=1
+                const uint64_t input=words[i];
                 uint64_t word=0;
                 for(unsigned byte=0;byte<8;++byte) {
 #pragma HLS UNROLL
-                    word|=uint64_t(uint8_t(values[i*8+byte]))<<(byte*8);
+                    word|=uint64_t(uint8_t(table[byte][uint8_t(input>>(byte*8))]))<<(byte*8);
                 }
                 out1[(base>>3)+i]=word;
             }

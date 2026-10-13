@@ -111,7 +111,8 @@ static void load_weight_lane(data_t bank[Tm/4][Tn][K][K],const uint64_t* weights
 #pragma HLS INLINE off
 #pragma HLS ARRAY_PARTITION variable=weight_cache complete dim=1
 #pragma HLS ARRAY_PARTITION variable=weight_cache complete dim=2
-#pragma HLS BIND_STORAGE variable=weight_cache type=ram_1p impl=bram
+#pragma HLS BIND_STORAGE variable=weight_cache type=ram_s2p impl=bram
+#pragma HLS DEPENDENCE variable=weight_cache inter false
     const unsigned elements=kernel==1?1:9;
     const unsigned bytes=Tm/4*Tn*elements;
     data_t values[Tm/4*Tn*K*K];
