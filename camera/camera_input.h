@@ -8,6 +8,7 @@ bool camera_init();
 bool camera_capture(uint16_t* pixels);
 bool camera_begin(uint16_t* pixels);
 bool camera_finish(uint16_t* pixels);
+bool camera_ready();
 bool camera_set_brightness(int level);
 void camera_to_input(const uint16_t* pixels, data_t* input);
 #endif

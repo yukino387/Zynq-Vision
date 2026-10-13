@@ -116,6 +116,10 @@ bool camera_begin(uint16_t* pixels) {
     return true;
 }
 
+bool camera_ready() {
+    return (Xil_In32(DMA + 0x34) & 0x1770) || (Xil_In32(GPIO + 8) & 2);
+}
+
 bool camera_finish(uint16_t* pixels) {
     XTime start_time, now;
     XTime_GetTime(&start_time);

@@ -6,8 +6,9 @@ static uint8_t horizontal[416][224];
 static uint8_t gray[424];
 static uint8_t clip(int value) { return value<0 ? 0 : value>255 ? 255 : value; }
 
-void gray_input(const uint16_t* pixels,int8_t* input) {
-    for(unsigned y=0;y<416;++y) {
+void gray_input_rows(const uint16_t* pixels,int8_t* input,unsigned first,unsigned count) {
+    const unsigned end=first+count;
+    for(unsigned y=first;y<end && y<416;++y) {
         for(unsigned x=0;x<416;x+=8) {
             const uint16x8_t p=vld1q_u16(pixels+y*416+x);
             const uint16x8_t r5=vshrq_n_u16(p,11),g6=vandq_u16(vshrq_n_u16(p,5),vdupq_n_u16(63));
@@ -37,7 +38,8 @@ void gray_input(const uint16_t* pixels,int8_t* input) {
             horizontal[y][x]=clip((result+(1<<21))>>22);
         }
     }
-    for(unsigned y=0;y<224;++y) {
+    for(unsigned row=first<416 ? 416 : first;row<end && row<640;++row) {
+        const unsigned y=row-416;
         const auto& coeff=resize_coefficients[y];
         for(unsigned x=0;x<224;x+=8) {
             int32x4_t low=vdupq_n_s32(1<<21),high=low;
@@ -53,4 +55,8 @@ void gray_input(const uint16_t* pixels,int8_t* input) {
             vst1_s8(input+y*224+x,vreinterpret_s8_u8(vmovn_u16(quotient)));
         }
     }
+}
+
+void gray_input(const uint16_t* pixels,int8_t* input) {
+    gray_input_rows(pixels,input,0,640);
 }

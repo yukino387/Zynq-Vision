@@ -17,7 +17,12 @@ int8_t gray_data[224*224];
 int8_t out0[1617],out1[6468];
 }
 
-static bool forward(XConv& engine) {
+static uint32_t microseconds(XTime ticks) {
+    return uint32_t(ticks*1000000u/(COUNTS_PER_SECOND));
+}
+
+static unsigned forward(XConv& engine,unsigned current,uint32_t frame,bool preview,
+                        bool& pending,unsigned& prepared_rows,uint32_t& conversion_us,uint32_t& transfer_us) {
     Xil_DCacheFlushRange((INTPTR)features,224*256);
     XTime begin,now;
     XTime_GetTime(&begin);
@@ -40,16 +45,37 @@ static bool forward(XConv& engine) {
         XConv_Set_fsize(&engine,c[6]); XConv_Set_stride(&engine,c[7]);
         XConv_Set_kernel(&engine,c[8]); XConv_Set_act(&engine,c[9]);
         XConv_Start(&engine);
+        // BasicConv3 is the longest layer; send this frame while it runs.
+        if(layer==23 && preview) {
+            XTime send_begin,send_end;
+            XTime_GetTime(&send_begin);
+            if(!udp_send_frame(frame,2,pixels[current],CAMERA_BYTES)) return 3;
+            XTime_GetTime(&send_end);
+            transfer_us+=microseconds(send_end-send_begin);
+        }
         while(!XConv_IsDone(&engine)) {
             XTime_GetTime(&now);
-            if(now-begin>2*(COUNTS_PER_SECOND)) return false;
+            if(now-begin>2*(COUNTS_PER_SECOND)) return 4;
+            udp_poll();
+            if(pending && camera_ready()) {
+                if(!camera_finish(pixels[1-current])) return 2;
+                pending=false;
+            }
+            if(!pending && prepared_rows<640) {
+                XTime work_begin,work_end;
+                XTime_GetTime(&work_begin);
+                gray_input_rows(pixels[1-current],gray_data,prepared_rows,8);
+                prepared_rows+=8;
+                XTime_GetTime(&work_end);
+                conversion_us+=microseconds(work_end-work_begin);
+            }
         }
     }
     Xil_DCacheInvalidateRange((INTPTR)(features+out0_offset),33*7*8);
     Xil_DCacheInvalidateRange((INTPTR)(features+out1_offset),33*14*16);
     for(unsigned i=0;i<1617;++i) out0[i]=features[out0_offset+(i/7)*8+i%7];
     for(unsigned i=0;i<6468;++i) out1[i]=features[out1_offset+(i/14)*16+i%14];
-    return true;
+    return 0;
 }
 
 int main() {
@@ -61,7 +87,7 @@ int main() {
     CameraStatus status={0x31545343,0,0x7020,0,0,0,0,0,0,0,0,0};
     unsigned current=0;
     bool pending=false;
-    auto microseconds=[](XTime ticks) { return uint32_t(ticks*1000000u/(COUNTS_PER_SECOND)); };
+    bool input_ready=false;
     for(uint32_t frame=0;;++frame) {
         udp_poll();
         while(!udp_running()) { udp_poll(); usleep(1000); }
@@ -69,36 +95,41 @@ int main() {
             if(!camera_set_brightness(udp_brightness())) { status.errors=1; udp_send_status(status); return 1; }
             status.brightness=udp_brightness();
         }
+        const bool inference=!udp_camera_only();
+        const bool preview=udp_preview_enabled();
         XTime begin,captured,converted,predicted,sent;
         XTime_GetTime(&begin);
-        if((!pending && !camera_begin(pixels[current])) || !camera_finish(pixels[current])) {
+        if(!input_ready && ((!pending && !camera_begin(pixels[current])) || !camera_finish(pixels[current]))) {
             status.errors=2; udp_send_status(status); return 2;
         }
         pending=false;
         XTime_GetTime(&captured);
         if(!camera_begin(pixels[1-current])) { status.errors=2; udp_send_status(status); return 2; }
         pending=true;
-        const bool inference=!udp_camera_only();
         if(inference) {
-            gray_input(pixels[current],gray_data);
+            if(!input_ready) gray_input(pixels[current],gray_data);
             for(unsigned row=0;row<224;++row) std::memcpy(features+row*256,gray_data+row*224,224);
         }
         XTime_GetTime(&converted);
-        if(inference && !forward(engine)) { status.errors=4; udp_send_status(status); return 4; }
+        unsigned prepared_rows=0;
+        uint32_t conversion_us=0,transfer_us=0;
+        const unsigned error=inference ? forward(engine,current,frame,preview,pending,prepared_rows,conversion_us,transfer_us) : 0;
+        if(error) { status.errors=error; udp_send_status(status); return error; }
         XTime_GetTime(&predicted);
         if((inference && (!udp_send_frame(frame,0,out0,1617) ||
             !udp_send_frame(frame,1,out1,6468))) ||
-            (udp_preview_enabled() && !udp_send_frame(frame,2,pixels[current],CAMERA_BYTES))) {
+            (!inference && preview && !udp_send_frame(frame,2,pixels[current],CAMERA_BYTES))) {
             status.errors=3; udp_send_status(status); return 3;
         }
         XTime_GetTime(&sent);
         status.frame=frame;
         status.capture_us=microseconds(captured-begin);
-        status.conversion_us=microseconds(converted-captured);
+        status.conversion_us=conversion_us+microseconds(converted-captured);
         status.inference_us=microseconds(predicted-converted);
-        status.transfer_us=microseconds(sent-predicted);
+        status.transfer_us=transfer_us+microseconds(sent-predicted);
         status.cycle_us=microseconds(sent-begin);
         udp_send_status(status);
+        input_ready=inference && !pending && prepared_rows==640;
         current=1-current;
     }
 }
