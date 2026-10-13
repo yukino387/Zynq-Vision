@@ -8,7 +8,7 @@
 #include "sleep.h"
 
 extern "C" {
-int8_t features[feature_bytes] __attribute__((aligned(64)));
+int8_t features[feature_bytes+64] __attribute__((aligned(64)));
 int8_t weights[weight_bytes] __attribute__((aligned(64)));
 int32_t metadata[metadata_words] __attribute__((aligned(64)));
 uint16_t pixels[2][CAMERA_PIXELS] __attribute__((aligned(64)));
@@ -63,11 +63,11 @@ int main() {
         }
         pending=false;
         XTime_GetTime(&captured);
+        if(!camera_begin(pixels[1-current])) { status.errors=2; udp_send_status(status); return 2; }
+        pending=true;
         const bool inference=!udp_camera_only();
         if(inference) gray_input(pixels[current],features);
         XTime_GetTime(&converted);
-        if(!camera_begin(pixels[1-current])) { status.errors=2; udp_send_status(status); return 2; }
-        pending=true;
         if(inference && !forward(engine)) { status.errors=4; udp_send_status(status); return 4; }
         XTime_GetTime(&predicted);
         if((inference && (!udp_send_frame(frame,0,features+out0_offset,1617) ||

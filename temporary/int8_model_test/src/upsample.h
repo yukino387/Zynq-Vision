@@ -1,3 +1,3 @@
-#include"type.h"
-
-void upsample(data_t* in,data_t* out, unsigned short size);
+#pragma once
+#include "type.h"
+void upsample(const uint64_t*,uint64_t*,unsigned short);

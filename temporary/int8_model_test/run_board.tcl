@@ -12,7 +12,7 @@ if {[catch {
     after 500
     ps7_init
     targets -set -filter {name =~ "xc7z020"}
-    fpga -file [file join $testdir system build system_wrapper.bit]
+    fpga -file [file join $testdir system_write build system_wrapper.bit]
     targets -set -filter {name =~ "ARM Cortex-A9 MPCore #0"}
     catch {stop}
     ps7_post_config
@@ -35,6 +35,8 @@ if {[catch {
         puts $log "$expr = [print $expr]"
     }
     puts $log "FORWARD_US = [mrd -value [dict get $addresses forward_us] 3]"
+    source [file join $testdir layout.tcl]
+    puts $log "LAYER_US = [mrd -value [dict get $addresses layer_us] $command_count]"
     set stage [dict get [print -dict test_stage] test_stage]
     set errors [dict get [print -dict test_errors] test_errors]
     if {$stage != 3 || $errors != 0} {error "INT8 inference verification failed"}

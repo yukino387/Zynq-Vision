@@ -1,4 +1,6 @@
 #include"std_conv.h"
+#include "packed_multiply.h"
+#include "write_bytes.h"
 
 static unsigned short spatial_tile(unsigned short size) {
     return size == 7 ? 7 : 14;
@@ -9,7 +11,7 @@ static unsigned short spatial_tile(unsigned short size) {
 #define Tr 14   // height
 #define Tc 14   // width
 #define Tn 4    // Number of channels calculated at a time
-#define Tm 32   // Number of convolution kernels calculated in a single time
+#define Tm 64   // Number of convolution kernels calculated in a single time
 
 #define K 3    // kernel size
 #define P 1    // padding
@@ -48,7 +50,7 @@ static bool cache_reuse;
 // load input tile In[n:n+Tn][fm_row:fm_row+Tr+K-1][fm_col:fm_col+Tc+K-1] or
 // In[n:n+Tn][fm_row:fm_row+TRin][fm_col:fm_col+TCin]
 template<unsigned Lane>
-void load_input_plane(data_t plane[TRin][TCin], data_t* input,
+void load_input_plane(data_t plane[TRin][TCin], const uint64_t* input,
                       int base, ap_uint<18> size, ap_uint<9> fm_size,
                       ap_uint<9> input_row, ap_uint<9> input_col,
                       ap_uint<1> padding, ap_uint<6> extent, bool valid) {
@@ -69,9 +71,19 @@ void load_input_plane(data_t plane[TRin][TCin], data_t* input,
             const int row_base=base+int(Lane*size)+int(row_offset);
             if(first!=0)
                 plane[rr][0]=data_t(0);
+            uint64_t words[5];
+#pragma HLS ARRAY_PARTITION variable=words complete
+            const unsigned start=row_base+unsigned(first);
+            const unsigned offset=start&7;
+            const unsigned count=(offset+unsigned(last-first)+7)>>3;
+            for(unsigned i=0;i<count;++i) {
+#pragma HLS PIPELINE II=1
+                words[i]=input[(start>>3)+i];
+            }
             for(ap_uint<6> cc=first; cc<last; ++cc) {
 #pragma HLS PIPELINE II=1
-                plane[rr][cc]=input[row_base+int(cc)];
+                const unsigned index=offset+unsigned(cc-first);
+                plane[rr][cc]=data_t(words[index>>3]>>((index&7)*8));
             }
             for(ap_uint<6> cc=last; cc<extent; ++cc) {
 #pragma HLS PIPELINE II=1
@@ -82,7 +94,7 @@ void load_input_plane(data_t plane[TRin][TCin], data_t* input,
 }
 
 void load_input(data_t fm_in_buff[Tn][TRin][TCin],
-                data_t* in1, data_t* in2, data_t* in3, data_t* in4,
+                const uint64_t* in1, const uint64_t* in2, const uint64_t* in3, const uint64_t* in4,
                 ap_uint<10> n, unsigned short fm_row, unsigned short fm_col,
                 ap_uint<9> fm_size, ap_uint<2> stride, ap_uint<2> kernel, ap_uint<10> ch_in) {
     if(n>=ch_in) return;
@@ -110,7 +122,7 @@ void load_input(data_t fm_in_buff[Tn][TRin][TCin],
 
 //load weight tile W[m:m+Tm][n:n+Tn][:][:]
 template<unsigned Lane>
-void load_weight_lane(data_t bank[Tm/4][Tn][K][K], data_t* weights,
+void load_weight_lane(data_t bank[Tm/4][Tn][K][K], const uint64_t* weights,
                       int base, int ch_in_kk, ap_uint<10> n,
                       ap_uint<10> m, ap_uint<10> ch_in,
                       ap_uint<10> ch_out, ap_uint<2> kernel) {
@@ -133,14 +145,19 @@ void load_weight_lane(data_t bank[Tm/4][Tn][K][K], data_t* weights,
             }
         } else if (valid) {
             const unsigned count=(ch_in-n < Tn ? unsigned(ch_in-n) : Tn)*elements;
-            // Keep DDR reads unconditional and contiguous so HLS can form a burst.
-            for(unsigned short k=0; k<Tn*elements; ++k) {
+            uint64_t words[6];
+#pragma HLS ARRAY_PARTITION variable=words complete
+            const unsigned start=base+block_offset;
+            const unsigned offset=start&7;
+            const unsigned length=(offset+count+7)>>3;
+            for(unsigned i=0;i<length;++i) {
 #pragma HLS PIPELINE II=1
-                values[k]=0;
+                words[i]=weights[(start>>3)+i];
             }
-            for(unsigned short k=0; k<count; ++k) {
+            for(unsigned k=0;k<Tn*elements;++k) {
 #pragma HLS PIPELINE II=1
-                values[k]=weights[base+block_offset+k];
+                const unsigned index=offset+k;
+                values[k]=k<count ? data_t(words[index>>3]>>((index&7)*8)) : data_t(0);
             }
         } else {
             for(unsigned short k=0; k<Tn*elements; ++k) {
@@ -161,7 +178,7 @@ void load_weight_lane(data_t bank[Tm/4][Tn][K][K], data_t* weights,
 }
 
 void load_weight(data_t wt_buff[4][Tm/4][Tn][K][K],
-                 data_t* w1,data_t* w2,data_t* w3,data_t* w4,
+                 const uint64_t* w1,const uint64_t* w2,const uint64_t* w3,const uint64_t* w4,
                  ap_uint<10> n,ap_uint<10> m,
                  ap_uint<10> ch_in,ap_uint<10> ch_out,ap_uint<2> kernel) {
     if(n>=ch_in) return;
@@ -215,16 +232,21 @@ void compute(data_t fm_in_buff[Tn][TRin][TCin],
             for(rr=0;rr<tile;rr++)
                 for(cc=0;cc<tile;cc++){
                 #pragma HLS PIPELINE II=1
-                    for(mm=0;mm<Tm;mm++){
-                    int16_t product[Tn];
-#pragma HLS ARRAY_PARTITION variable=product complete
-                    for(nn=0;nn<Tn;nn++) {
-                        const unsigned short input_r = (stride == 2 ? rr << 1 : rr) + kx;
-                        const unsigned short input_c = (stride == 2 ? cc << 1 : cc) + ky;
-                        product[nn] = fm_in_buff[nn][input_r][input_c]*wt_buff[mm%4][mm/4][nn][kx][ky];
+                    for(mm=0;mm<Tm;mm+=2) {
+                    int16_t first[Tn],second[Tn];
+#pragma HLS ARRAY_PARTITION variable=first complete
+#pragma HLS ARRAY_PARTITION variable=second complete
+                    for(nn=0;nn<Tn;++nn) {
+                        const unsigned short input_r=(stride==2 ? rr<<1 : rr)+kx;
+                        const unsigned short input_c=(stride==2 ? cc<<1 : cc)+ky;
+                        multiply_pair(fm_in_buff[nn][input_r][input_c],
+                                      wt_buff[mm%4][mm/4][nn][kx][ky],
+                                      wt_buff[(mm+1)%4][(mm+1)/4][nn][kx][ky],first[nn],second[nn]);
                     }
-                    const int32_t sum = (int32_t(product[0])+product[1])+(int32_t(product[2])+product[3]);
-                    fm_out_buff[mm%4][mm/4][rr][cc] += sum;
+                    const int32_t sum0=(int32_t(first[0])+first[1])+(int32_t(first[2])+first[3]);
+                    const int32_t sum1=(int32_t(second[0])+second[1])+(int32_t(second[2])+second[3]);
+                    fm_out_buff[mm%4][mm/4][rr][cc]+=sum0;
+                    fm_out_buff[(mm+1)%4][(mm+1)/4][rr][cc]+=sum1;
                     }
                 }
 }
@@ -232,44 +254,39 @@ void compute(data_t fm_in_buff[Tn][TRin][TCin],
 
 // store fm_out_buff to Out[m:m+Tm][fm_row:fm_row+Tr][fm_col:fm_col+Tc]
 void store_output(int32_t fm_out_buff[4][Tm/4][Tr][Tc],
-                  data_t* out1,data_t* out2,data_t* out3,data_t* out4,
+                  uint64_t* out1,uint64_t* out2,uint64_t* out3,uint64_t* out4,
                   unsigned short fm_row, unsigned short fm_col, ap_uint<10> m,
                   ap_uint<9> fm_size,
                   ap_uint<2> stride,ap_uint<1> act,ap_uint<10> ch_out){
-unsigned short mm,rr,cc;
-unsigned short o_fm_size=(stride==1)?fm_size:(fm_size >> 1);
-const unsigned short tile = spatial_tile(o_fm_size);
-unsigned short o_size=o_fm_size*o_fm_size;
-data_t tmp1,tmp2,tmp3,tmp4;
-//
-    for(mm=0;mm<Tm && m+mm<ch_out;mm+=4)
-        for(rr=0;rr<tile;rr++)
-            for(cc=0;cc<tile;cc++)
-                {
-#pragma HLS PIPELINE
-                    tmp1=activate(fm_out_buff[0][mm/4][rr][cc],m+mm+0,act);
-                    tmp2=activate(fm_out_buff[1][mm/4][rr][cc],m+mm+1,act);
-                    tmp3=activate(fm_out_buff[2][mm/4][rr][cc],m+mm+2,act);
-                    tmp4=activate(fm_out_buff[3][mm/4][rr][cc],m+mm+3,act);
-                    // o_fm_size%Tr==0
-                    int output_channel=(m+mm)*o_size;
-#pragma HLS BIND_OP variable=output_channel op=mul impl=dsp latency=3
-int output_row=(fm_row+rr)*o_fm_size;
-#pragma HLS BIND_OP variable=output_row op=mul impl=dsp latency=3
-int base_addr=output_channel+output_row+fm_col;
-                    if (m+mm+0<ch_out) *(out1+base_addr+cc)=tmp1;
-                    if (m+mm+1<ch_out) *(out2+base_addr+o_size+cc)=tmp2;
-                    if (m+mm+2<ch_out) *(out3+base_addr+2*o_size+cc)=tmp3;
-                    if (m+mm+3<ch_out) *(out4+base_addr+3*o_size+cc)=tmp4;
+    const unsigned short size=stride==1 ? fm_size : fm_size>>1;
+    const unsigned short tile=spatial_tile(size);
+    data_t values[4][Tc];
+#pragma HLS ARRAY_PARTITION variable=values complete dim=1
+#pragma HLS ARRAY_PARTITION variable=values cyclic factor=8 dim=2
+    for(unsigned mm=0;mm<Tm && m+mm<ch_out;mm+=4) {
+        for(unsigned rr=0;rr<tile;++rr) {
+            for(unsigned cc=0;cc<tile;++cc) {
+#pragma HLS PIPELINE II=1
+                for(unsigned lane=0;lane<4;++lane) {
+#pragma HLS UNROLL
+                    values[lane][cc]=activate(fm_out_buff[lane][mm/4][rr][cc],m+mm+lane,act);
                 }
+            }
+            const unsigned base=(m+mm)*size*size+(fm_row+rr)*size+fm_col;
+            if(m+mm+0<ch_out) write_bytes<0,Tc>(out1,base,values[0],tile);
+            if(m+mm+1<ch_out) write_bytes<1,Tc>(out2,base+size*size,values[1],tile);
+            if(m+mm+2<ch_out) write_bytes<2,Tc>(out3,base+2*size*size,values[2],tile);
+            if(m+mm+3<ch_out) write_bytes<3,Tc>(out4,base+3*size*size,values[3],tile);
+        }
+    }
 }
 
 
 static void load_compute(data_t next_input[Tn][TRin][TCin], data_t next_weight[4][Tm/4][Tn][K][K],
                          data_t previous_input[Tn][TRin][TCin], data_t previous_weight[4][Tm/4][Tn][K][K],
                          int32_t output[4][Tm/4][Tr][Tc],
-                         data_t* in1,data_t* in2,data_t* in3,data_t* in4,
-                         data_t* w1,data_t* w2,data_t* w3,data_t* w4,
+                         const uint64_t* in1,const uint64_t* in2,const uint64_t* in3,const uint64_t* in4,
+                         const uint64_t* w1,const uint64_t* w2,const uint64_t* w3,const uint64_t* w4,
                          ap_uint<10> n,ap_uint<10> m,ap_uint<10> ci,ap_uint<10> co,
                          unsigned short row,unsigned short col,ap_uint<9> size,
                          ap_uint<2> stride,ap_uint<2> kernel,unsigned short tile,bool enabled) {
@@ -283,8 +300,8 @@ static void load_compute(data_t next_input[Tn][TRin][TCin], data_t next_weight[4
 // compute Out[m:m+Tm][fm_row:fm_row+Tr][fm_col:fm_col+Tc]
 void compute_output(int32_t fm_out_buff[4][Tm/4][Tr][Tc],
                     int32_t bias_buff[(MAX_LEN+Tm-1)/Tm][Tm],
-                    data_t* in1,data_t* in2,data_t* in3,data_t* in4,
-                    data_t* w1,data_t* w2,data_t* w3,data_t* w4,
+                    const uint64_t* in1,const uint64_t* in2,const uint64_t* in3,const uint64_t* in4,
+                    const uint64_t* w1,const uint64_t* w2,const uint64_t* w3,const uint64_t* w4,
                     ap_uint<10> m,ap_uint<9> fm_size,ap_uint<10> ch_in,ap_uint<10> ch_out,
                     unsigned short fm_row,unsigned short fm_col,ap_uint<2> stride, ap_uint<2> kernel){
     const unsigned short tile = spatial_tile(stride == 2 ? fm_size >> 1 : fm_size);
@@ -356,10 +373,10 @@ void next_block(unsigned short r,unsigned short c,ap_uint<10> m,
 }
 
 
-void std_conv(data_t* in1,data_t* in2,data_t* in3,data_t* in4,
-              data_t* w1,data_t* w2,data_t* w3,data_t* w4,
+void std_conv(const uint64_t* in1,const uint64_t* in2,const uint64_t* in3,const uint64_t* in4,
+              const uint64_t* w1,const uint64_t* w2,const uint64_t* w3,const uint64_t* w4,
               int32_t* bias,
-              data_t* out1,data_t* out2,data_t* out3,data_t* out4,
+              uint64_t* out1,uint64_t* out2,uint64_t* out3,uint64_t* out4,
               ap_uint<10> ch_in,ap_uint<10> ch_out,
               ap_uint<9> fm_size,ap_uint<2> stride,ap_uint<1> act, ap_uint<2> kernel){
     int32_t bias_buff[(MAX_LEN+Tm-1)/Tm][Tm];

@@ -1,22 +1,25 @@
-#include"upsample.h"
-
-
-// 128*13*13-->128*26*26
-void upsample(data_t* in,data_t* out, unsigned short size){
-//#pragma HLS INTERFACE m_axi depth=100 port=out offset=slave bundle=OUT num_write_outstanding=4
-    data_t tmp;
-    for(unsigned short n=0;n<128;n++)
-        for(unsigned short i=0;i<size;i++)
-            for(unsigned short j=0;j<size;j++){
-#pragma HLS PIPELINE
-                int wr_base_addr=n*size*size*4+i*size*4+2*j;
-//#pragma HLS RESOURCE variable=wr_base_addr core=Mul_LUT
-                int rd_base_addr=n*size*size+i*size+j;
-//#pragma HLS RESOURCE variable=rd_base_addr core=Mul_LUT
-                tmp=*(in+rd_base_addr);
-                *(out+wr_base_addr)=tmp;
-                *(out+wr_base_addr+1)=tmp;
-                *(out+wr_base_addr+2*size)=tmp;
-                *(out+wr_base_addr+2*size+1)=tmp;
-            }
+#include "upsample.h"
+#include "write_bytes.h"
+void upsample(const uint64_t* input,uint64_t* output,unsigned short size) {
+    uint64_t words[8];
+#pragma HLS ARRAY_PARTITION variable=words complete
+    data_t plane[49],result[196];
+#pragma HLS ARRAY_PARTITION variable=result cyclic factor=8
+    for(unsigned n=0;n<128;++n) {
+        const unsigned start=n*size*size,offset=start&7;
+        for(unsigned i=0;i<(offset+size*size+7)/8;++i) {
+#pragma HLS PIPELINE II=1
+            words[i]=input[(start>>3)+i];
+        }
+        for(unsigned i=0;i<size*size;++i) {
+#pragma HLS PIPELINE II=1
+            const unsigned byte=offset+i;
+            plane[i]=data_t(words[byte>>3]>>((byte&7)*8));
+        }
+        for(unsigned y=0;y<2*size;++y) for(unsigned x=0;x<2*size;++x) {
+#pragma HLS PIPELINE II=1
+            result[y*size*2+x]=plane[(y>>1)*size+(x>>1)];
+        }
+        write_bytes<0,196>(output,n*size*size*4,result,size*size*4);
+    }
 }

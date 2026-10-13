@@ -8,6 +8,7 @@ directory = Path(__file__).resolve().parent
 golden = directory / 'build/golden'
 quant = json.loads((golden / 'quantization.json').read_text())
 commands = []
+command_names = []
 metadata = [0] * 640
 weights = bytearray()
 features = bytearray((golden / 'input.bin').read_bytes())
@@ -28,6 +29,32 @@ def coefficients(ratio):
         shift -= 1
     return multiplier, shift
 
+shapes = {'input': (1,224)}
+for node in quant['graph']:
+    ci,size = shapes[node['src'][0]]
+    op = node['op']
+    if op == 'conv':
+        co = quant['layers'][node['name']]['weight_shape'][0]
+        size //= node['stride']
+    elif op == 'slice': co = ci-node['start']
+    elif op == 'concat': co = sum(shapes[src][0] for src in node['src'])
+    else:
+        co = ci
+        size = size//2 if op=='pool' else size*2
+    shapes[node['name']] = co,size
+
+# Write a branch with the same quantization scale directly into its concat slot.
+fixed = {}
+for node in quant['graph']:
+    if node['op'] != 'concat': continue
+    co,size = shapes[node['name']]
+    destination = allocate(co,size)
+    fixed[node['name']] = destination
+    for src in node['src']:
+        if src not in fixed and quant['activation_scales'][src] == quant['activation_scales'][node['name']]:
+            fixed[src] = destination
+        destination += shapes[src][0]*size*size
+
 for node in quant['graph']:
     name, op = node['name'], node['op']
     source, ci, size = nodes[node['src'][0]]
@@ -37,7 +64,7 @@ for node in quant['graph']:
         params = quant['layers'][name]
         co = params['weight_shape'][0]
         out_size = size // node['stride']
-        output = allocate(co, out_size)
+        output = fixed[name] if name in fixed else allocate(co,out_size)
         weight_offset = len(weights)
         weights.extend((golden / params['weight_file']).read_bytes())
         meta_offset = len(metadata)
@@ -45,29 +72,37 @@ for node in quant['graph']:
         metadata.extend(struct.unpack('<'+'i'*co, bias))
         for key in ('multiplier','shift','negative_multiplier','negative_shift'):
             metadata.extend(params[key])
+        command_names.append(name)
         commands.append([source,output,weight_offset,meta_offset,ci,co,size,node['stride'],node['k'],int(node['act'])])
     elif op == 'concat':
         co = sum(nodes[src][1] for src in node['src'])
         out_size = size
-        output = allocate(co, size)
+        output = fixed[name]
         destination = output
         for src in node['src']:
             offset, count, _ = nodes[src]
-            meta_offset = len(metadata)
-            metadata.extend(coefficients(quant['activation_scales'][src]/quant['activation_scales'][name]))
-            commands.append([offset,destination,0,meta_offset,count,count,size,1,5,0])
+            if offset != destination:
+                meta_offset = len(metadata)
+                metadata.extend(coefficients(quant['activation_scales'][src]/quant['activation_scales'][name]))
+                command_names.append(name+'/'+src)
+                commands.append([offset,destination,0,meta_offset,count,count,size,1,5,0])
+            else:
+                assert quant['activation_scales'][src] == quant['activation_scales'][name]
             destination += count*size*size
     elif op in ('pool','upsample'):
         co = ci
         out_size = size//2 if op=='pool' else size*2
-        output = allocate(co,out_size)
+        output = fixed[name] if name in fixed else allocate(co,out_size)
+        command_names.append(name)
         commands.append([source,output,0,0,ci,co,size,1,2 if op=='pool' else 0,0])
     else:
         raise ValueError(op)
     nodes[name] = (output,co,out_size)
     checks.append((name,output,co*out_size*out_size))
 
+(directory / 'build/command_names.json').write_text(json.dumps(command_names))
 assert len(commands) <= 64
+assert all(command[0] % 8 == 0 and command[1] % 8 == 0 and command[2] % 8 == 0 for command in commands)
 for i, command in enumerate(commands):
     metadata[i*10:i*10+10] = command
 (directory / 'build/weights.bin').write_bytes(weights)
@@ -90,7 +125,7 @@ for name, _, _ in checks:
 header += 'static const uint32_t expected_hashes[]={'+','.join(str(h)+'u' for h in hashes)+'};\n'
 (directory / 'build/model.h').write_text(header, encoding='utf-8')
 (directory / 'build/layout.tcl').write_text(
-    f'set out0_offset {nodes["out0"][0]}\nset out1_offset {nodes["out1"][0]}\n', encoding='ascii')
+    f'set command_count {len(commands)}\nset out0_offset {nodes["out0"][0]}\nset out1_offset {nodes["out1"][0]}\n', encoding='ascii')
 config = f'''part=xc7z020clg400-2
 [hls]
 flow_target=vivado

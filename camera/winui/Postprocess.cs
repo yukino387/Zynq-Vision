@@ -1,5 +1,3 @@
-using System.Buffers.Binary;
-
 namespace CNNStudio;
 
 public record Detection(int ClassId, double Score, double X1, double Y1, double X2, double Y2)
@@ -9,16 +7,17 @@ public record Detection(int ClassId, double Score, double X1, double Y1, double 
 }
 public static class Postprocess
 {
-    public static readonly string[] Labels = ["飞机", "自行车", "鸟", "船", "瓶子", "公交车", "汽车", "猫", "椅子", "牛",
-        "餐桌", "狗", "马", "摩托车", "人", "盆栽", "羊", "沙发", "火车", "显示器"];
-    private static readonly double[][] Anchors = [[2.5312, 2.5625, 4.2188, 5.2812, 10.75, 9.9688],
-        [1.4375, 1.6875, 2.3125, 3.625, 5.0625, 5.125]];
+    public static readonly string[] Labels = ["龟裂", "夹杂", "斑块", "麻点", "轧入氧化皮", "划痕"];
+    private static readonly double[][] Anchors = [[1.3629538461538462, 1.3798076923076923,
+        2.2716615384615384, 2.843723076923077, 5.788461538461538, 5.367815384615384],
+        [0.7740384615384615, 0.9086538461538461, 1.2451923076923077, 1.9519230769230769,
+        2.7259615384615383, 2.7596153846153846]];
     private static double Sigmoid(double value) => 1 / (1 + Math.Exp(-value));
     public static List<Detection> Detect(byte[] out0, byte[] out1, double confidence, double iou)
     {
         List<Detection> candidates = [];
-        Decode(out0, 8, Anchors[0], confidence, candidates);
-        Decode(out1, 16, Anchors[1], confidence, candidates);
+        Decode(out0, 7, 0.11581249687615341, Anchors[0], confidence, candidates);
+        Decode(out1, 14, 0.15977688286248154, Anchors[1], confidence, candidates);
         List<Detection> kept = [];
         foreach (var group in candidates.GroupBy(x => x.ClassId))
         {
@@ -34,10 +33,10 @@ public static class Postprocess
             X1 = Math.Clamp(x.X1, 0, 416), Y1 = Math.Clamp(x.Y1, 0, 416),
             X2 = Math.Clamp(x.X2, 0, 416), Y2 = Math.Clamp(x.Y2, 0, 416) }).ToList();
     }
-    private static void Decode(byte[] raw, int size, double[] anchors, double threshold, List<Detection> output)
+    private static void Decode(byte[] raw, int size, double scale, double[] anchors, double threshold, List<Detection> output)
     {
         double Value(int anchor, int channel, int cell) =>
-            BinaryPrimitives.ReadInt16LittleEndian(raw.AsSpan(((anchor * 25 + channel) * size * size + cell) * 2)) / 512.0;
+            unchecked((sbyte)raw[(anchor * 11 + channel) * size * size + cell]) * scale;
         for (int anchor = 0; anchor < 3; anchor++)
             for (int cell = 0; cell < size * size; cell++)
             {
@@ -45,7 +44,7 @@ public static class Postprocess
                 if (obj < threshold) continue;
                 int bestClass = 0;
                 double bestValue = Value(anchor, 5, cell);
-                for (int cls = 1; cls < 20; cls++)
+                for (int cls = 1; cls < Labels.Length; cls++)
                     if (Value(anchor, 5 + cls, cell) > bestValue)
                     { bestClass = cls; bestValue = Value(anchor, 5 + cls, cell); }
                 double score = obj * Sigmoid(bestValue);

@@ -1,9 +1,10 @@
 #include"top.h"
+#include "write_bytes.h"
 
 
-static void execute_layer(data_t* in1, data_t* in2, data_t* in3, data_t* in4,
-                          data_t* w1, data_t* w2, data_t* w3, data_t* w4,
-                          int32_t* bias, data_t* out1, data_t* out2, data_t* out3, data_t* out4,
+static void execute_layer(const uint64_t* in1, const uint64_t* in2, const uint64_t* in3, const uint64_t* in4,
+                          const uint64_t* w1, const uint64_t* w2, const uint64_t* w3, const uint64_t* w4,
+                          int32_t* bias, uint64_t* out1, uint64_t* out2, uint64_t* out3, uint64_t* out4,
                           int ci, int co, int size, int stride, int kernel, int act) {
 #pragma HLS INLINE off
     if (kernel == 3 || kernel == 1)
@@ -13,17 +14,29 @@ static void execute_layer(data_t* in1, data_t* in2, data_t* in3, data_t* in4,
     else if (kernel == 5) {
         const int count=ci*size*size;
         const int32_t multiplier=bias[0], shift=bias[1];
-        for (int i=0; i<count; ++i) {
+        uint64_t words[64];
+        data_t values[512];
+#pragma HLS ARRAY_PARTITION variable=values cyclic factor=8
+        for(unsigned base=0;base<unsigned(count);base+=512) {
+            const unsigned bytes=count-base<512 ? count-base : 512;
+            for(unsigned i=0;i<(bytes+7)/8;++i) {
 #pragma HLS PIPELINE II=1
-            out1[i]=requant(in1[i],multiplier,shift);
+                words[i]=in1[(base>>3)+i];
+            }
+            for(unsigned i=0;i<bytes;++i) {
+#pragma HLS PIPELINE II=1
+                const data_t value=data_t(words[i>>3]>>((i&7)*8));
+                values[i]=requant(value,multiplier,shift);
+            }
+            write_bytes<0,512>(out1,base,values,bytes);
         }
     }
 }
 
-void conv(data_t* in1,data_t* in2,data_t* in3,data_t* in4,
-          data_t* w1,data_t* w2,data_t* w3,data_t* w4,
+void conv(const uint64_t* in1,const uint64_t* in2,const uint64_t* in3,const uint64_t* in4,
+          const uint64_t* w1,const uint64_t* w2,const uint64_t* w3,const uint64_t* w4,
           int32_t* b,
-          data_t* out1,data_t* out2,data_t* out3,data_t* out4,
+          uint64_t* out1,uint64_t* out2,uint64_t* out3,uint64_t* out4,
           int ch_in,int ch_out,
           int fsize,int stride,int kernel,int act){
 // AXI4-Lite
@@ -80,10 +93,10 @@ void conv(data_t* in1,data_t* in2,data_t* in3,data_t* in4,
             ci=program[layer*10+4]; co=program[layer*10+5]; size=program[layer*10+6];
             step=program[layer*10+7]; op=program[layer*10+8]; activation=program[layer*10+9];
         }
-        execute_layer(in1+input_offset,in2+input_offset,in3+input_offset,in4+input_offset,
-                      w1+weight_offset,w2+weight_offset,w3+weight_offset,w4+weight_offset,
+        execute_layer(in1+(input_offset>>3),in2+(input_offset>>3),in3+(input_offset>>3),in4+(input_offset>>3),
+                      w1+(weight_offset>>3),w2+(weight_offset>>3),w3+(weight_offset>>3),w4+(weight_offset>>3),
                       network ? b+bias_offset : b,
-                      out1+output_offset,out2+output_offset,out3+output_offset,out4+output_offset,
+                      out1+(output_offset>>3),out2+(output_offset>>3),out3+(output_offset>>3),out4+(output_offset>>3),
                       ci,co,size,step,op,activation);
     }
 }

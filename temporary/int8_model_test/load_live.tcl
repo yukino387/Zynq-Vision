@@ -10,7 +10,7 @@ if {[catch {
     after 500
     ps7_init
     targets -set -filter {name =~ "xc7z020"}
-    fpga -file [file join $testdir system build system_wrapper.bit]
+    fpga -file [file join $testdir system_write build system_wrapper.bit]
     targets -set -filter {name =~ "ARM Cortex-A9 MPCore #0"}
     catch {stop}
     ps7_post_config

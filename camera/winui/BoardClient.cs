@@ -160,7 +160,7 @@ public sealed class BoardClient : IDisposable
     private void Assemble(byte[] packet)
     {
         uint frame = Read(packet, 4), kind = Read(packet, 8), length = Read(packet, 12), offset = Read(packet, 16);
-        int expected = kind switch { 0 => 9600, 1 => 38400, 2 => 346112, _ => 0 };
+        int expected = kind switch { 0 => 1617, 1 => 6468, 2 => 346112, _ => 0 };
         if (expected == 0 || length != expected || offset >= length || offset % 1400 != 0 ||
             packet.Length - 20 != Math.Min(1400, length - offset)) return;
         if (!frames.TryGetValue(frame, out var streams))
