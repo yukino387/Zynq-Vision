@@ -7,7 +7,7 @@ add_files [file join $source_dir ov5640_capture.v]
 set_property XPM_LIBRARIES {XPM_FIFO} [current_project]
 source [file join $source_dir base_system.tcl]
 set ps [get_bd_cells processing_system7_0]
-set_property CONFIG.PCW_FPGA0_PERIPHERAL_FREQMHZ {142.857132} $ps
+set_property CONFIG.PCW_FPGA0_PERIPHERAL_FREQMHZ {125.000000} $ps
 set_property -dict [list CONFIG.PCW_ENET0_PERIPHERAL_ENABLE {1} CONFIG.PCW_ENET0_ENET0_IO {MIO 16 .. 27} CONFIG.PCW_ENET0_GRP_MDIO_ENABLE {1} CONFIG.PCW_ENET0_GRP_MDIO_IO {MIO 52 .. 53}] $ps
 set_property CONFIG.NUM_MI 3 [get_bd_cells axi_smc]
 set_property CONFIG.NUM_SI 3 [get_bd_cells smartconnect_0]
@@ -39,7 +39,7 @@ connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins smartco
 connect_bd_net [get_bd_pins rst_ps7_0_50M/peripheral_aresetn] [get_bd_pins smartconnect_0/S02_ARESETN]
 validate_bd_design
 set actual_frequency [get_property CONFIG.PCW_ACT_FPGA0_PERIPHERAL_FREQMHZ $ps]
-if {abs($actual_frequency-142.857132) > 0.001} {error "Unexpected actual FCLK frequency: $actual_frequency"}
+if {abs($actual_frequency-125.000000) > 0.001} {error "Unexpected actual FCLK frequency: $actual_frequency"}
 puts "ACTUAL_FCLK_MHZ=$actual_frequency"
 save_bd_design
 set_property synth_checkpoint_mode None [get_files system.bd]
@@ -50,19 +50,20 @@ add_files -fileset constrs_1 [file join $source_dir camera.xdc]
 set_property top system_wrapper [current_fileset]
 update_compile_order -fileset sources_1
 synth_design -top system_wrapper -part xc7z020clg400-2
+set clock_source [get_property SOURCE_PINS [get_clocks clk_fpga_0]]
+set clock_pin [get_pins -hier -filter "NAME == $clock_source"]
+create_clock -name clk_fpga_0 -period 7.000 $clock_pin
 write_checkpoint -force [file join $build_dir synthesized.dcp]
 opt_design
 write_checkpoint -force [file join $build_dir optimized.dcp]
 place_design
 phys_opt_design
 route_design
+create_clock -name clk_fpga_0 -period 8.000 $clock_pin
 report_utilization -file [file join $build_dir utilization.rpt]
 report_timing_summary -file [file join $build_dir timing.rpt]
 report_bus_skew -file [file join $build_dir bus_skew.rpt]
 write_checkpoint -force [file join $build_dir routed.dcp]
-phys_opt_design -directive AggressiveExplore
-route_design
-report_utilization -file [file join $build_dir utilization.rpt]
 set timing [report_timing_summary -file [file join $build_dir timing.rpt] -return_string]
 if {[string first {All user specified timing constraints are met.} $timing] < 0} {
     error "Camera accelerator timing qualification failed"

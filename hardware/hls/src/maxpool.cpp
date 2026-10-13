@@ -1,38 +1,41 @@
 #include "maxpool.h"
-
-void maxpool(data_t* in, data_t* out, int ch, int h, int w) {
-    data_t first_row[416];
-    data_t result[208];
-    const unsigned short width = w;
-    const unsigned short height = h;
-    const int input_size = width * height;
-#pragma HLS BIND_OP variable=input_size op=mul impl=dsp latency=3
-    const int output_size = input_size >> 2;
-    int input_base = 0, output_base = 0;
-    for (int n = 0; n < ch; ++n) {
-        int source = input_base, destination = output_base;
-        for (unsigned short r = 0; r < height / 2; ++r) {
-            for (unsigned short c = 0; c < width; ++c) {
+#include "layout.h"
+void maxpool(const uint64_t* input,uint64_t* output,int channels,int height,int width) {
+    uint64_t first[8],second[8],result[4];
+#pragma HLS ARRAY_PARTITION variable=first complete
+#pragma HLS ARRAY_PARTITION variable=second complete
+#pragma HLS ARRAY_PARTITION variable=result complete
+    const unsigned pitch=row_pitch(width),out_pitch=row_pitch(width/2);
+    for(unsigned n=0;n<unsigned(channels);++n) for(unsigned row=0;row<unsigned(height/2);++row) {
+        const unsigned start=(channel_base(n,width)+((2*row)<<(size_level(width)+3)))>>3;
+        for(unsigned i=0;i<pitch/8;++i) {
 #pragma HLS PIPELINE II=1
-                first_row[c] = in[source + c];
-            }
-            source += width;
-            data_t left = 0;
-            for (unsigned short c = 0; c < width; ++c) {
-#pragma HLS PIPELINE II=1
-                const data_t value = in[source + c];
-                const data_t vertical = first_row[c] > value ? first_row[c] : value;
-                if (c & 1) result[c >> 1] = left > vertical ? left : vertical;
-                else left = vertical;
-            }
-            source += width;
-            for (unsigned short c = 0; c < width / 2; ++c) {
-#pragma HLS PIPELINE II=1
-                out[destination + c] = result[c];
-            }
-            destination += width / 2;
+            first[i]=input[start+i];
         }
-        input_base += input_size;
-        output_base += output_size;
+        for(unsigned i=0;i<pitch/8;++i) {
+#pragma HLS PIPELINE II=1
+            second[i]=input[start+pitch/8+i];
+        }
+        for(unsigned i=0;i<out_pitch/8;++i) {
+#pragma HLS PIPELINE II=1
+            uint64_t packed=0;
+            for(unsigned byte=0;byte<8;++byte) {
+#pragma HLS UNROLL
+                const unsigned x=(i*8+byte)*2;
+                const unsigned word=x>>3,offset=x&7;
+                data_t value=data_t(first[word]>>(offset*8));
+                const data_t a=data_t(first[word]>>((offset+1)*8));
+                const data_t b=data_t(second[word]>>(offset*8));
+                const data_t c=data_t(second[word]>>((offset+1)*8));
+                if(a>value)value=a;if(b>value)value=b;if(c>value)value=c;
+                packed|=uint64_t(uint8_t(x<unsigned(width)?value:data_t(0)))<<(byte*8);
+            }
+            result[i]=packed;
+        }
+        const unsigned destination=(channel_base(n,width/2)+(row<<(size_level(width/2)+3)))>>3;
+        for(unsigned i=0;i<out_pitch/8;++i) {
+#pragma HLS PIPELINE II=1
+            output[destination+i]=result[i];
+        }
     }
 }

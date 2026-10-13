@@ -107,11 +107,20 @@ bool udp_send_frame(uint32_t frame, uint32_t type, const void* data, uint32_t by
         const uint32_t count = bytes - offset < 1400 ? bytes - offset : 1400;
         pbuf* packet = pbuf_alloc(PBUF_TRANSPORT, 20 + count, PBUF_RAM);
         if (!packet) return false;
-        // Five little-endian uint32 values; payload is little-endian int16/RGB565.
+        // Five little-endian uint32 values followed by tensor or RGB565 bytes.
         const uint32_t header[] = {0x314f4c59, frame, type, bytes, offset};
         std::memcpy(packet->payload, header, sizeof(header));
         std::memcpy(static_cast<uint8_t*>(packet->payload) + sizeof(header), source + offset, count);
-        const err_t result = udp_sendto(socket, packet, &peer, peer_port);
+        err_t result = udp_sendto(socket, packet, &peer, peer_port);
+        if (result == ERR_MEM) {
+            XTime begin, now;
+            XTime_GetTime(&begin);
+            do {
+                udp_poll();
+                result = udp_sendto(socket, packet, &peer, peer_port);
+                XTime_GetTime(&now);
+            } while (result == ERR_MEM && now - begin < (COUNTS_PER_SECOND) / 200);
+        }
         pbuf_free(packet);
         if (result != ERR_OK) return false;
         udp_poll();

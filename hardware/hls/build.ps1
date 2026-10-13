@@ -6,7 +6,7 @@ $taskBuild = Join-Path $PSScriptRoot 'build'
 New-Item -ItemType Directory -Force $taskBuild | Out-Null
 $taskConfig = @('part=xc7z020clg400-2', '[hls]', 'flow_target=vivado',
                 'clock=7', 'syn.top=conv', 'syn.interface.m_axi_addr64=0')
-foreach ($taskName in @('top', 'std_conv', 'pwconv', 'maxpool', 'upsample')) {
+foreach ($taskName in @('top', 'std_conv', 'maxpool', 'upsample')) {
     $taskSource = (Join-Path $PSScriptRoot "src/$taskName.cpp").Replace('\', '/')
     $taskConfig += "syn.file=$taskSource"
 }

@@ -1,3 +1,3 @@
-#include"type.h"
-
-void maxpool(data_t* in,data_t* out,int ch,int h,int w);
+#pragma once
+#include "type.h"
+void maxpool(const uint64_t*,uint64_t*,int,int,int);
