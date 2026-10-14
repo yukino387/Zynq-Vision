@@ -166,7 +166,16 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception error) { Log(error); ActionHint.Text = "画面保存失败"; }
     }
-    private void OpenFolderClicked(object sender, RoutedEventArgs e) => Process.Start(new ProcessStartInfo(saveFolder) { UseShellExecute = true });
+    private async void OpenFolderClicked(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            System.IO.Directory.CreateDirectory(saveFolder);
+            var folder = await StorageFolder.GetFolderFromPathAsync(saveFolder);
+            if (!await Windows.System.Launcher.LaunchFolderAsync(folder)) ActionHint.Text = "无法打开保存位置";
+        }
+        catch (Exception error) { Log(error); ActionHint.Text = "无法打开保存位置"; }
+    }
     private void RotateClicked(object sender, RoutedEventArgs e) => rotation = (rotation + 1) % 4;
     private void FullScreenClicked(object sender, RoutedEventArgs e) { fullScreen = !fullScreen; AppWindow.SetPresenter(fullScreen ? AppWindowPresenterKind.FullScreen : AppWindowPresenterKind.Overlapped); }
     private async void DiagnosticsClicked(object sender, RoutedEventArgs e)

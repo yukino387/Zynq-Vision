@@ -1,6 +1,7 @@
 #include"std_conv.h"
 #include "packed_multiply.h"
 #include "layout.h"
+#include <hls_stream.h>
 
 static unsigned short spatial_tile(unsigned short size) {
     return size == 7 ? 7 : 14;
@@ -209,55 +210,103 @@ void compute(data_t fm_in_buff[Tn][TRin][TCin],
 }
 
 
-template<unsigned Lane>
-static void write_row(uint64_t* output,unsigned base,const data_t values[32],unsigned bytes,unsigned valid) {
+static void quantize_output(int32_t buffer[4][Tm/4][Tr][Tc],
+                            hls::stream<uint64_t> words[4],
+                            unsigned m,unsigned rows,unsigned cols,unsigned bytes,
+                            unsigned act,unsigned co) {
 #pragma HLS INLINE off
-#pragma HLS ARRAY_PARTITION variable=values cyclic factor=8
-    if(valid) for(unsigned i=0;i<bytes/8;++i) {
-#pragma HLS PIPELINE II=1
-        uint64_t word=0;
-        for(unsigned byte=0;byte<8;++byte) {
+#pragma HLS ARRAY_PARTITION variable=words complete
+    uint64_t partial[4]={0,0,0,0};
+#pragma HLS ARRAY_PARTITION variable=partial complete
+    const unsigned level=bytes==8?3:bytes==16?4:5;
+    const unsigned count=rows<<level;
+    for(unsigned mm=0;mm<Tm && m+mm<co;mm+=4) {
+        int32_t multiplier[4],shift[4],negative_multiplier[4],negative_shift[4];
+#pragma HLS ARRAY_PARTITION variable=multiplier complete
+#pragma HLS ARRAY_PARTITION variable=shift complete
+#pragma HLS ARRAY_PARTITION variable=negative_multiplier complete
+#pragma HLS ARRAY_PARTITION variable=negative_shift complete
+        for(unsigned lane=0;lane<4;++lane) {
 #pragma HLS UNROLL
-            word|=uint64_t(uint8_t(values[i*8+byte]))<<(byte*8);
+            const unsigned channel=m+mm+lane;
+            multiplier[lane]=channel<co?quant_m[channel]:0;
+            shift[lane]=channel<co?quant_s[channel]:1;
+            negative_multiplier[lane]=channel<co?quant_nm[channel]:0;
+            negative_shift[lane]=channel<co?quant_ns[channel]:1;
         }
-        output[(base>>3)+i]=word;
+        for(unsigned p=0;p<count;++p) {
+#pragma HLS PIPELINE II=1
+            const unsigned rr=p>>level,cc=p&(bytes-1);
+            for(unsigned lane=0;lane<4;++lane) {
+#pragma HLS UNROLL
+                const int32_t sum=cc<cols && m+mm+lane<co?buffer[lane][mm/4][rr][cc]:0;
+                const bool negative=act && sum<0;
+                const data_t value=cc<cols && m+mm+lane<co?requant(sum,
+                    negative?negative_multiplier[lane]:multiplier[lane],
+                    negative?negative_shift[lane]:shift[lane]):data_t(0);
+                if((cc&7)==0)partial[lane]=0;
+                partial[lane]|=uint64_t(uint8_t(value))<<((cc&7)*8);
+                if((cc&7)==7 && m+mm+lane<co)words[lane].write(partial[lane]);
+            }
+        }
     }
 }
-static void write_four(uint64_t* out1,uint64_t* out2,uint64_t* out3,uint64_t* out4,
-                       unsigned base,unsigned plane,const data_t values[4][32],
-                       unsigned bytes,unsigned valid) {
+
+template<unsigned Lane>
+static void write_output_stream(uint64_t* output,hls::stream<uint64_t>& words,
+                                unsigned row,unsigned col,unsigned m,unsigned size,
+                                unsigned rows,unsigned bytes,unsigned co) {
 #pragma HLS INLINE off
-#pragma HLS DATAFLOW
-    write_row<0>(out1,base,values[0],bytes,valid>0);
-    write_row<1>(out2,base+plane,values[1],bytes,valid>1);
-    write_row<2>(out3,base+2*plane,values[2],bytes,valid>2);
-    write_row<3>(out4,base+3*plane,values[3],bytes,valid>3);
+    uint64_t packed[56];
+#pragma HLS BIND_STORAGE variable=packed type=ram_1p impl=lutram
+    const unsigned level=bytes==8?0:bytes==16?1:2;
+    const unsigned row_words=1u<<level,count=rows<<level;
+    for(unsigned mm=Lane;mm<Tm && m+mm<co;mm+=4) {
+        const unsigned base=channel_base(m+mm,size)+(row<<(size_level(size)+3))+col;
+        if(size<=14) {
+            for(unsigned i=0;i<count;++i) {
+#pragma HLS PIPELINE II=1
+                packed[i]=words.read();
+            }
+            for(unsigned i=0;i<count;++i) {
+#pragma HLS PIPELINE II=1
+                output[(base>>3)+i]=packed[i];
+            }
+        } else {
+            for(unsigned rr=0;rr<rows;++rr) {
+                for(unsigned i=0;i<row_words;++i) {
+#pragma HLS PIPELINE II=1
+                    packed[i]=words.read();
+                }
+                const unsigned destination=(base>>3)+(rr<<size_level(size));
+                for(unsigned i=0;i<row_words;++i) {
+#pragma HLS PIPELINE II=1
+                    output[destination+i]=packed[i];
+                }
+            }
+        }
+    }
 }
+
 static void store_output(int32_t buffer[4][Tm/4][Tr][Tc],
                          uint64_t* out1,uint64_t* out2,uint64_t* out3,uint64_t* out4,
                          unsigned row,unsigned col,unsigned m,unsigned size,unsigned stride,
                          unsigned act,unsigned co) {
+#pragma HLS INLINE off
+#pragma HLS DATAFLOW
     size=stride==2?size>>1:size;
     const unsigned rows=size==7?7:14;
     const unsigned cols=size-col<16?size-col:16;
     const unsigned bytes=col+cols==size?row_pitch(size)-col:16;
-    data_t values[4][32];
-#pragma HLS ARRAY_PARTITION variable=values complete dim=1
-#pragma HLS ARRAY_PARTITION variable=values cyclic factor=8 dim=2
-    for(unsigned mm=0;mm<Tm && m+mm<co;mm+=4) {
-        const unsigned valid=co-m-mm<4?co-m-mm:4;
-        for(unsigned rr=0;rr<rows;++rr) {
-            for(unsigned cc=0;cc<bytes;++cc) {
-#pragma HLS PIPELINE II=1
-                for(unsigned lane=0;lane<4;++lane) {
-#pragma HLS UNROLL
-                    values[lane][cc]=cc<cols?activate(buffer[lane][mm/4][rr][cc],m+mm+lane,act):data_t(0);
-                }
-            }
-            const unsigned base=channel_base(m+mm,size)+((row+rr)<<(size_level(size)+3))+col;
-            write_four(out1,out2,out3,out4,base,plane_size(size),values,bytes,valid);
-        }
-    }
+    hls::stream<uint64_t> words[4];
+#pragma HLS ARRAY_PARTITION variable=words complete
+#pragma HLS STREAM variable=words depth=32
+#pragma HLS BIND_STORAGE variable=words type=fifo impl=srl
+    quantize_output(buffer,words,m,rows,cols,bytes,act,co);
+    write_output_stream<0>(out1,words[0],row,col,m,size,rows,bytes,co);
+    write_output_stream<1>(out2,words[1],row,col,m,size,rows,bytes,co);
+    write_output_stream<2>(out3,words[2],row,col,m,size,rows,bytes,co);
+    write_output_stream<3>(out4,words[3],row,col,m,size,rows,bytes,co);
 }
 
 static void load_compute(data_t next_input[Tn][TRin][TCin], data_t next_weight[4][Tm/4][Tn][K][K],

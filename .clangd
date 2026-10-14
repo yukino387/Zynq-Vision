@@ -1,0 +1,4 @@
+CompileFlags:
+  CompilationDatabase: vitis_live/camera_live/build
+  Add: [--target=arm-none-eabi, -U__linux__, -U__clang__]
+  Remove: [-specs=*, -MMD, -MP]

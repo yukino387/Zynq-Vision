@@ -1,4 +1,4 @@
-set_param general.maxThreads 4
+set_param general.maxThreads 16
 set source_dir [file dirname [file normalize [info script]]]
 set build_dir [file join $source_dir build]
 create_project camera_cnn $build_dir -part xc7z020clg400-2 -force

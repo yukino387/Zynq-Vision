@@ -92,6 +92,7 @@ try:
         if phase == 'preview':
             assert fps >= 10, f'Camera preview is below 10 FPS: {fps:.2f}'
     print('detect restore', command(3, 0), flush=True)
+    print('pause before receiver closes', command(2, 0), flush=True)
 finally:
     Path(__file__).resolve().parent.joinpath('build/board_results.json').write_text(
         json.dumps({'preview_enabled': not args.detect_only, 'stats': stats, 'frames': completed}, indent=2))

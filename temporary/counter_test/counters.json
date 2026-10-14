@@ -1,0 +1,20 @@
+[
+  "total",
+  "parameters",
+  "bias_init",
+  "input_load",
+  "weight_load",
+  "compute",
+  "load_compute",
+  "store",
+  "quantize",
+  "write",
+  "compute_load_overlap",
+  "read_beats",
+  "write_beats",
+  "read_backpressure",
+  "write_backpressure",
+  "load_without_compute",
+  "read_response_gap",
+  "read_gap_without_compute"
+]

@@ -11,6 +11,7 @@ __pycache__/
 *.pyc
 .compile_commands
 .clangd
+!/.clangd
 compile_commands.json
 .vitisWorkspace.json
 
@@ -62,3 +63,13 @@ README*
 /temporary/**/per_layer_stats.txt
 /temporary/winui_test/*.json
 /temporary/**/*.mp4
+
+# Vitis launch configuration; generated platform internals stay local.
+!/vitis_live/camera_live/_ide/
+/vitis_live/camera_live/_ide/*
+!/vitis_live/camera_live/_ide/launch.json
+/vitis_live/.rigel_lopper/
+/vitis_live/camera_platform_live/hw/
+/vitis_live/camera_platform_live/ps7_cortexa9_0/
+/vitis_live/camera_platform_live/resources/
+/vitis_live/camera_platform_live/zynq_fsbl/
