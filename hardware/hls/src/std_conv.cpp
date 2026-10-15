@@ -270,8 +270,6 @@ static void write_output_stream(uint64_t* output,hls::stream<uint64_t>& words,
                                 unsigned row,unsigned col,unsigned m,unsigned size,
                                 unsigned rows,unsigned bytes,unsigned co) {
 #pragma HLS INLINE off
-    uint64_t packed[56];
-#pragma HLS BIND_STORAGE variable=packed type=ram_1p impl=lutram
     const unsigned level=bytes==8?0:bytes==16?1:2;
     const unsigned row_words=1u<<level,count=rows<<level;
     for(unsigned mm=Lane;mm<Tm && m+mm<co;mm+=4) {
@@ -279,22 +277,14 @@ static void write_output_stream(uint64_t* output,hls::stream<uint64_t>& words,
         if(size<=14) {
             for(unsigned i=0;i<count;++i) {
 #pragma HLS PIPELINE II=1
-                packed[i]=words.read();
-            }
-            for(unsigned i=0;i<count;++i) {
-#pragma HLS PIPELINE II=1
-                output[(base>>3)+i]=packed[i];
+                output[(base>>3)+i]=words.read();
             }
         } else {
             for(unsigned rr=0;rr<rows;++rr) {
-                for(unsigned i=0;i<row_words;++i) {
-#pragma HLS PIPELINE II=1
-                    packed[i]=words.read();
-                }
                 const unsigned destination=(base>>3)+(rr<<size_level(size));
                 for(unsigned i=0;i<row_words;++i) {
 #pragma HLS PIPELINE II=1
-                    output[destination+i]=packed[i];
+                    output[destination+i]=words.read();
                 }
             }
         }
@@ -403,11 +393,25 @@ void std_conv(const uint64_t* in1,const uint64_t* in2,const uint64_t* in3,const 
 #pragma HLS ARRAY_PARTITION variable=fm_out complete dim=1
 #pragma HLS ARRAY_PARTITION variable=fm_out complete dim=2
 #pragma HLS BIND_STORAGE variable=fm_out type=ram_s2p impl=bram
-    for (unsigned index=0;index<ch_out;++index) {
+    for(unsigned index=0;index<ch_out;++index) {
 #pragma HLS PIPELINE II=1
         bias_buff[index/Tm][index%Tm]=bias[index];
-        quant_m[index]=bias[ch_out+index]; quant_s[index]=bias[2*ch_out+index];
-        quant_nm[index]=bias[3*ch_out+index]; quant_ns[index]=bias[4*ch_out+index];
+    }
+    for(unsigned index=0;index<ch_out;++index) {
+#pragma HLS PIPELINE II=1
+        quant_m[index]=bias[ch_out+index];
+    }
+    for(unsigned index=0;index<ch_out;++index) {
+#pragma HLS PIPELINE II=1
+        quant_s[index]=bias[2*ch_out+index];
+    }
+    for(unsigned index=0;index<ch_out;++index) {
+#pragma HLS PIPELINE II=1
+        quant_nm[index]=bias[3*ch_out+index];
+    }
+    for(unsigned index=0;index<ch_out;++index) {
+#pragma HLS PIPELINE II=1
+        quant_ns[index]=bias[4*ch_out+index];
     }
     quant_channels=ch_out;
     const unsigned out_size=stride==2 ? unsigned(fm_size)>>1 : unsigned(fm_size);
