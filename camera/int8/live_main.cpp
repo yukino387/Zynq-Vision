@@ -22,7 +22,7 @@ static uint32_t microseconds(XTime ticks) {
 }
 
 static unsigned forward(XConv& engine,unsigned current,uint32_t frame,bool preview,
-                        bool& pending,unsigned& prepared_rows,uint32_t& conversion_us,uint32_t& transfer_us) {
+                        bool& pending,bool& armed,unsigned& prepared_rows,uint32_t& conversion_us,uint32_t& transfer_us) {
     Xil_DCacheFlushRange((INTPTR)features,224*256);
     XTime begin,now;
     XTime_GetTime(&begin);
@@ -61,6 +61,10 @@ static unsigned forward(XConv& engine,unsigned current,uint32_t frame,bool previ
                 if(!camera_finish(pixels[1-current])) return 2;
                 pending=false;
             }
+            if(!pending && !armed && (!preview || layer>=23)) {
+                if(!camera_begin(pixels[current])) return 2;
+                armed=true;
+            }
             if(!pending && prepared_rows<640) {
                 XTime work_begin,work_end;
                 XTime_GetTime(&work_begin);
@@ -87,7 +91,8 @@ int main() {
     CameraStatus status={0x31545343,0,0x7020,0,0,0,0,0,0,0,0,0};
     unsigned current=0;
     bool pending=false;
-    bool input_ready=false;
+    bool frame_captured=false,armed=false;
+    unsigned prepared_rows=0;
     for(uint32_t frame=0;;++frame) {
         udp_poll();
         while(!udp_running()) { udp_poll(); usleep(1000); }
@@ -99,21 +104,22 @@ int main() {
         const bool preview=udp_preview_enabled();
         XTime begin,captured,converted,predicted,sent;
         XTime_GetTime(&begin);
-        if(!input_ready && ((!pending && !camera_begin(pixels[current])) || !camera_finish(pixels[current]))) {
+        if(!frame_captured && ((!pending && !camera_begin(pixels[current])) || !camera_finish(pixels[current]))) {
             status.errors=2; udp_send_status(status); return 2;
         }
         pending=false;
         XTime_GetTime(&captured);
-        if(!camera_begin(pixels[1-current])) { status.errors=2; udp_send_status(status); return 2; }
+        if(!armed && !camera_begin(pixels[1-current])) { status.errors=2; udp_send_status(status); return 2; }
+        armed=false;
         pending=true;
         if(inference) {
-            if(!input_ready) gray_input(pixels[current],gray_data);
+            if(prepared_rows<640) gray_input_rows(pixels[current],gray_data,prepared_rows,640-prepared_rows);
             for(unsigned row=0;row<224;++row) std::memcpy(features+row*256,gray_data+row*224,224);
         }
         XTime_GetTime(&converted);
-        unsigned prepared_rows=0;
+        prepared_rows=0;
         uint32_t conversion_us=0,transfer_us=0;
-        const unsigned error=inference ? forward(engine,current,frame,preview,pending,prepared_rows,conversion_us,transfer_us) : 0;
+        const unsigned error=inference ? forward(engine,current,frame,preview,pending,armed,prepared_rows,conversion_us,transfer_us) : 0;
         if(error) { status.errors=error; udp_send_status(status); return error; }
         XTime_GetTime(&predicted);
         if((inference && (!udp_send_frame(frame,0,out0,1617) ||
@@ -129,7 +135,7 @@ int main() {
         status.transfer_us=transfer_us+microseconds(sent-predicted);
         status.cycle_us=microseconds(sent-begin);
         udp_send_status(status);
-        input_ready=inference && !pending && prepared_rows==640;
+        frame_captured=!pending;
         current=1-current;
     }
 }

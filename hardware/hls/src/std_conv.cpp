@@ -49,41 +49,70 @@ static bool cache_enabled;
 static bool cache_reuse;
 
 template<unsigned Lane>
-static void load_input_plane(data_t plane[TRin][TCin],const uint64_t* input,
-                             unsigned n,unsigned size,unsigned row,unsigned col,
-                             unsigned stride,unsigned kernel,unsigned channels) {
+static void load_input_pair(data_t first_plane[TRin][TCin],data_t second_plane[TRin][TCin],
+                            const uint64_t* input,unsigned n,unsigned size,unsigned row,unsigned col,
+                            unsigned stride,unsigned kernel,unsigned channels) {
 #pragma HLS INLINE off
     const unsigned padding=kernel==3?1:0;
-    const unsigned out_size=(stride==2?size>>1:size);
+    const unsigned out_size=stride==2?size>>1:size;
     const unsigned rows=out_size==7?7:14;
     const unsigned cols=out_size-col<16?out_size-col:16;
     const unsigned height=(stride==2?(rows-1)<<1:rows-1)+kernel;
     const unsigned width=(stride==2?(cols-1)<<1:cols-1)+kernel;
-    const unsigned first=col==0 && padding?1:0;
     const int input_row=int(stride==2?row<<1:row)-int(padding);
     const int input_col=int(stride==2?col<<1:col)-int(padding);
     const unsigned channel=n+Lane;
-    for(unsigned y=0;y<height;++y) {
-        const int sy=input_row+int(y);
-        if(channel>=channels || sy<0 || sy>=int(size)) {
-            for(unsigned x=0;x<width;++x) {
+    const bool first_valid=channel<channels;
+    const bool second_valid=channel+4<channels;
+    const unsigned first_base=channel_base(channel,size);
+    const unsigned second_base=channel_base(channel+4,size);
+    if(size<=14) {
+        uint64_t packed[2][28];
+#pragma HLS ARRAY_PARTITION variable=packed complete dim=1
+#pragma HLS BIND_STORAGE variable=packed type=ram_1p impl=bram
+        const unsigned count=plane_size(size)>>3;
+        if(first_valid) for(unsigned i=0;i<count;++i) {
 #pragma HLS PIPELINE II=1
-                plane[y][x]=0;
-            }
-        } else {
-            const unsigned last=input_col+int(width)>int(size)?size-input_col:width;
-            const unsigned start=channel_base(channel,size)+(unsigned(sy)<<(size_level(size)+3))+input_col+first;
-            const unsigned offset=start&7;
-            uint64_t words[5];
+            packed[0][i]=input[(first_base>>3)+i];
+        }
+        if(second_valid) for(unsigned i=0;i<count;++i) {
+#pragma HLS PIPELINE II=1
+            packed[1][i]=input[(second_base>>3)+i];
+        }
+        for(unsigned y=0;y<height;++y) for(unsigned x=0;x<width;++x) {
+#pragma HLS PIPELINE II=1
+            const int sy=input_row+int(y),sx=input_col+int(x);
+            const bool valid=sy>=0 && sy<int(size) && sx>=0 && sx<int(size);
+            const unsigned index=(unsigned(sy)<<(size_level(size)+3))+unsigned(sx);
+            first_plane[y][x]=first_valid && valid?data_t(packed[0][index>>3]>>((index&7)*8)):data_t(0);
+            second_plane[y][x]=second_valid && valid?data_t(packed[1][index>>3]>>((index&7)*8)):data_t(0);
+        }
+    } else {
+        const unsigned first=col==0 && padding?1:0;
+        const unsigned last=input_col+int(width)>int(size)?size-input_col:width;
+        const unsigned start_col=input_col+first;
+        const unsigned offset=start_col&7;
+        const unsigned count=(offset+last-first+7)>>3;
+        for(unsigned y=0;y<height;++y) {
+            const int sy=input_row+int(y);
+            const bool valid=sy>=0 && sy<int(size);
+            uint64_t words[2][5];
 #pragma HLS ARRAY_PARTITION variable=words complete
-            for(unsigned i=0;i<(offset+last-first+7)/8;++i) {
+            const unsigned position=(unsigned(sy)<<(size_level(size)+3))+start_col;
+            if(valid && first_valid) for(unsigned i=0;i<count;++i) {
 #pragma HLS PIPELINE II=1
-                words[i]=input[(start>>3)+i];
+                words[0][i]=input[((first_base+position)>>3)+i];
+            }
+            if(valid && second_valid) for(unsigned i=0;i<count;++i) {
+#pragma HLS PIPELINE II=1
+                words[1][i]=input[((second_base+position)>>3)+i];
             }
             for(unsigned x=0;x<width;++x) {
 #pragma HLS PIPELINE II=1
                 const unsigned index=offset+x-first;
-                plane[y][x]=x<first || x>=last?data_t(0):data_t(words[index>>3]>>((index&7)*8));
+                const bool inside=valid && x>=first && x<last;
+                first_plane[y][x]=inside && first_valid?data_t(words[0][index>>3]>>((index&7)*8)):data_t(0);
+                second_plane[y][x]=inside && second_valid?data_t(words[1][index>>3]>>((index&7)*8)):data_t(0);
             }
         }
     }
@@ -95,14 +124,10 @@ static void load_input(data_t input[Tn][TRin][TCin],const uint64_t* in1,const ui
 #pragma HLS INLINE off
 #pragma HLS DATAFLOW
     if(n<ci) {
-        load_input_plane<0>(input[0],in1,n,size,row,col,stride,kernel,ci);
-        load_input_plane<1>(input[1],in2,n,size,row,col,stride,kernel,ci);
-        load_input_plane<2>(input[2],in3,n,size,row,col,stride,kernel,ci);
-        load_input_plane<3>(input[3],in4,n,size,row,col,stride,kernel,ci);
-        load_input_plane<4>(input[4],in1,n,size,row,col,stride,kernel,ci);
-        load_input_plane<5>(input[5],in2,n,size,row,col,stride,kernel,ci);
-        load_input_plane<6>(input[6],in3,n,size,row,col,stride,kernel,ci);
-        load_input_plane<7>(input[7],in4,n,size,row,col,stride,kernel,ci);
+        load_input_pair<0>(input[0],input[4],in1,n,size,row,col,stride,kernel,ci);
+        load_input_pair<1>(input[1],input[5],in2,n,size,row,col,stride,kernel,ci);
+        load_input_pair<2>(input[2],input[6],in3,n,size,row,col,stride,kernel,ci);
+        load_input_pair<3>(input[3],input[7],in4,n,size,row,col,stride,kernel,ci);
     }
 }
 
