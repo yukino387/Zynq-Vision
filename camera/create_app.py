@@ -33,7 +33,7 @@ else:
     platform_component.update_hw(hw_design=(root / "hardware/camera/build/camera_cnn.xsa").as_posix())
 domain = platform_component.get_domain("camera_domain")
 domain.set_config(option="proc", param="proc_extra_compiler_flags",
-    value=" -O2 -g -Wall -Wextra -fno-tree-loop-distribute-patterns -DFPU_HARD_FLOAT_ABI_ENABLED=1")
+    value=" -O2 -g -Wall -Wextra -fno-tree-loop-distribute-patterns -DFPU_HARD_FLOAT_ABI_ENABLED=1 -DLWIP_ALLOW_MEM_FREE_FROM_OTHER_CONTEXT=1")
 domain.set_lib(lib_name="lwip220")
 domain.set_config(option="lib", lib_name="lwip220", param="lwip220_api_mode", value="RAW_API")
 domain.set_config(option="lib", lib_name="lwip220", param="lwip220_dhcp", value="false")
