@@ -1,0 +1,4 @@
+interface:
+  display_name: "FPGA 加速器实现与实测优化"
+  short_description: "从接口适配到上板验证，以黄金输出和实测数据定位 FPGA 性能瓶颈"
+  default_prompt: "使用 $fpga-accelerator-workflow 分析当前加速器，保留已验证基线，完成最小改动、上板验证与性能对比。"

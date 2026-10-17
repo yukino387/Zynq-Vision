@@ -30,11 +30,12 @@ set(USER_INCLUDE_DIRECTORIES "C:/00_workplace/fpga/cnn_accelerator" "C:/00_workp
 #Example 1: Adding /proj/data/helloworld.c will pass /proj/data/helloworld.c
 #Example 2: Adding ../../common/helloworld.c will consider the path as relative to this component directory
 #Example 3: Adding ${MY_ENV}/data/helloworld.c are expanded using project-specific environment settings.
-set(USER_COMPILE_SOURCES
+set(USER_COMPILE_SOURCES 
 "C:/00_workplace/fpga/cnn_accelerator/vitis_live/camera_platform_live/export/camera_platform_live/sw/camera_domain/hw_artifacts/drivers/conv_v1_0/src/xconv.c"
 "C:/00_workplace/fpga/cnn_accelerator/camera/int8/live_main.cpp"
 "C:/00_workplace/fpga/cnn_accelerator/camera/int8/gray.cpp"
 "C:/00_workplace/fpga/cnn_accelerator/camera/int8/weights.S"
+"C:/00_workplace/fpga/cnn_accelerator/camera/int8/model_store.cpp"
 "C:/00_workplace/fpga/cnn_accelerator/camera/camera_input.cpp"
 "C:/00_workplace/fpga/cnn_accelerator/camera/udp_output.cpp")
 

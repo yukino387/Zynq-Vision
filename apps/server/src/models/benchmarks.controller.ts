@@ -170,10 +170,6 @@ export class BenchmarksController {
           },
         },
       });
-      await tx.model.update({
-        where: { id: model.id },
-        data: { status: "APPROVED" },
-      });
       return benchmark;
     });
   }

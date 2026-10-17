@@ -236,43 +236,44 @@ test("Simulator E2E: registration → capture → review → frozen dataset → 
         },
       ],
     },
-    engineer,
+    token,
   );
+  await call("POST", `/samples/${sample.id}/review`, { verdict: "ACCEPT" });
   const dataset = await call<{ id: string }>(
     "POST",
     "/datasets",
     { name: "TEST dataset", version: 1 },
-    engineer,
+    token,
   );
   await call(
     "POST",
     `/datasets/${dataset.id}/items`,
     { sampleIds: [sample.id] },
-    engineer,
+    token,
   );
-  await call("POST", `/datasets/${dataset.id}/freeze`, {}, engineer);
+  await call("POST", `/datasets/${dataset.id}/freeze`, {}, token);
   await call(
     "POST",
     `/datasets/${dataset.id}/items`,
     { sampleIds: [sample.id] },
-    engineer,
+    token,
     409,
   );
   const frozen = await call<{
     checksum: string;
     items: { snapshot: unknown }[];
-  }>("GET", `/datasets/${dataset.id}`, undefined, engineer);
+  }>("GET", `/datasets/${dataset.id}`, undefined, token);
   await call(
     "POST",
     `/samples/${sample.id}/annotations`,
     { status: "COMPLETE", boxes: [] },
-    engineer,
+    token,
   );
   const frozenAfter = await call<typeof frozen>(
     "GET",
     `/datasets/${dataset.id}`,
     undefined,
-    engineer,
+    token,
   );
   assert.equal(frozen.checksum, frozenAfter.checksum);
   assert.deepEqual(frozen.items[0]!.snapshot, frozenAfter.items[0]!.snapshot);
@@ -304,19 +305,27 @@ test("Simulator E2E: registration → capture → review → frozen dataset → 
       modelId: model.id,
       datasetId: dataset.id,
     },
-    engineer,
+    token,
   );
+  assert.equal(
+    (await call<{ status: string }>("GET", `/models/${model.id}`)).status,
+    "CANDIDATE",
+  );
+  await call("POST", `/models/${model.id}/approve`, {
+    confirm: true,
+    note: "SIMULATED fixture acceptance only",
+  });
   const deployment = await call<{ id: string }>(
     "POST",
     "/deployments",
     { deviceId: device.id, modelId: model.id },
-    engineer,
+    token,
   );
   await waitFor(
     () =>
       call<{
         items: { id: string; status: string; receipt: { selfTest: boolean } }[];
-      }>("GET", "/deployments", undefined, engineer),
+      }>("GET", "/deployments", undefined, token),
     (r) =>
       r.items.some(
         (d) =>
@@ -333,13 +342,17 @@ test("Simulator E2E: registration → capture → review → frozen dataset → 
       modelId: model2.id,
       datasetId: dataset.id,
     },
-    engineer,
+    token,
   );
+  await call("POST", `/models/${model2.id}/approve`, {
+    confirm: true,
+    note: "SIMULATED fixture V2 acceptance only",
+  });
   const deploy2 = await call<{ id: string }>(
     "POST",
     "/deployments",
     { deviceId: device.id, modelId: model2.id },
-    engineer,
+    token,
   );
   await waitFor(
     () =>
@@ -347,7 +360,7 @@ test("Simulator E2E: registration → capture → review → frozen dataset → 
         "GET",
         "/deployments",
         undefined,
-        engineer,
+        token,
       ),
     (r) => r.items.some((d) => d.id === deploy2.id && d.status === "ACTIVE"),
   );
@@ -355,7 +368,7 @@ test("Simulator E2E: registration → capture → review → frozen dataset → 
     "POST",
     `/deployments/${deploy2.id}/rollback`,
     {},
-    engineer,
+    token,
   );
   assert.equal(rolled.status, "ROLLED_BACK");
   const snapshots = await call<
@@ -374,7 +387,7 @@ test("Simulator E2E: registration → capture → review → frozen dataset → 
     "POST",
     "/deployments",
     { deviceId: board.id, modelId: model.id },
-    engineer,
+    token,
     422,
   );
   const audit = await call<{ total: number }>("GET", "/audit");
@@ -382,7 +395,7 @@ test("Simulator E2E: registration → capture → review → frozen dataset → 
   const zip = await app.inject({
     method: "POST",
     url: `/api/datasets/${dataset.id}/export`,
-    headers: { authorization: `Bearer ${engineer}` },
+    headers: { authorization: `Bearer ${token}` },
   });
   assert.equal(zip.statusCode, 201);
   assert.equal(zip.rawPayload.subarray(0, 2).toString(), "PK");
@@ -409,13 +422,13 @@ test("Simulator E2E: registration → capture → review → frozen dataset → 
   const originalResponse = await app.inject({
     method: "GET",
     url: `/api/assets/${original.id}/content`,
-    headers: { authorization: `Bearer ${engineer}` },
+    headers: { authorization: `Bearer ${token}` },
   });
   assert.deepEqual(files.get(rawPath), originalResponse.rawPayload);
   const modelExport = await app.inject({
     method: "POST",
     url: `/api/models/${model.id}/export`,
-    headers: { authorization: `Bearer ${engineer}` },
+    headers: { authorization: `Bearer ${token}` },
   });
   assert.equal(modelExport.statusCode, 201);
   const modelFiles = unzip(modelExport.rawPayload);
@@ -431,7 +444,7 @@ test("Simulator E2E: registration → capture → review → frozen dataset → 
     "POST",
     `/datasets/${dataset.id}/export-jobs`,
     {},
-    engineer,
+    token,
   );
   async function completedJob(id: string) {
     return waitFor(
@@ -452,7 +465,7 @@ test("Simulator E2E: registration → capture → review → frozen dataset → 
   const exported = await app.inject({
     method: "GET",
     url: `/api/system/jobs/${queuedExport.id}/content`,
-    headers: { authorization: `Bearer ${engineer}` },
+    headers: { authorization: `Bearer ${token}` },
   });
   assert.equal(exported.statusCode, 200);
   assert.equal(
@@ -463,7 +476,7 @@ test("Simulator E2E: registration → capture → review → frozen dataset → 
     "POST",
     `/samples/${sample.id}/process`,
     {},
-    engineer,
+    token,
   );
   await completedJob(processJob.id);
   const syncJob = await call<{ id: string }>(
@@ -492,13 +505,13 @@ test("Simulator E2E: registration → capture → review → frozen dataset → 
     "POST",
     `/devices/${device.id}/commands`,
     { type: "FAULT", value: "DEPLOYMENT_FAILED" },
-    engineer,
+    token,
   );
   const failed = await call<{ id: string }>(
     "POST",
     "/deployments",
     { deviceId: device.id, modelId: model2.id },
-    engineer,
+    token,
   );
   await waitFor(
     () =>
@@ -506,7 +519,7 @@ test("Simulator E2E: registration → capture → review → frozen dataset → 
         "GET",
         "/deployments",
         undefined,
-        engineer,
+        token,
       ),
     (r) => r.items.some((d) => d.id === failed.id && d.status === "FAILED"),
   );
@@ -519,9 +532,9 @@ test("Simulator E2E: registration → capture → review → frozen dataset → 
     "POST",
     `/devices/${device.id}/commands`,
     { type: "FAULT", value: "NONE" },
-    engineer,
+    token,
   );
-  await call("POST", `/deployments/${failed.id}/rollback`, {}, engineer);
+  await call("POST", `/deployments/${failed.id}/rollback`, {}, token);
 });
 test("one-time pairing expires through atomic consumption and WebSocket requires authentication", async () => {
   const pairing = await call<{ pairingToken: string }>(
@@ -626,7 +639,13 @@ test("mobile multipart uploads preserve bytes, retry idempotently and support sa
     `/samples/${sample.id}/review`,
     { verdict: "ACCEPT", note: "TEST sample-only review", hard: true },
     operator,
+    403,
   );
+  await call("POST", `/samples/${sample.id}/review`, {
+    verdict: "ACCEPT",
+    note: "Administrator approval",
+    hard: true,
+  });
   const reviewed = await call<{
     status: string;
     hard: boolean;
@@ -638,6 +657,187 @@ test("mobile multipart uploads preserve bytes, retry idempotently and support sa
   const conflict = await upload({ ...metadata, localSequence: 2 });
   assert.equal(conflict.statusCode, 409);
 });
+test("plan versions guide sampling; worker feedback cannot approve data; only admin freezes and publishes", async () => {
+  const rules = {
+    product: "测试包装盒",
+    purpose: "PRESENCE",
+    classes: ["盒体", "标签"],
+    instructions: "居中摆放，分别采集完整包装、缺标签、空场景。",
+    conditions: "固定光照",
+    referenceUrl: "",
+    coordinateSpace: "NORMALIZED_FRAME",
+    region: { x: 0, y: 0, width: 1, height: 1 },
+    checks: [
+      { classId: 0, min: 1, max: 1 },
+      { classId: 1, min: 1, max: 1 },
+    ],
+  };
+  const input = { name: "TEST product plan", rules };
+  await call("POST", "/plans", input, operator, 403);
+  await call("POST", "/plans", input, engineer, 403);
+  await call(
+    "POST",
+    "/plans",
+    { ...input, rules: { ...rules, classes: ["标签", "标签"] } },
+    token,
+    400,
+  );
+  await call(
+    "POST",
+    "/plans",
+    {
+      ...input,
+      rules: { ...rules, region: { x: 0.9, y: 0, width: 0.5, height: 1 } },
+    },
+    token,
+    400,
+  );
+  const plan = await call<{ id: string; version: number }>(
+    "POST",
+    "/plans",
+    input,
+  );
+  const next = await call<{ id: string; version: number }>("POST", "/plans", {
+    ...input,
+    rules: { ...rules, instructions: "第二版摆放指引" },
+  });
+  assert.equal(next.version, plan.version + 1);
+  const task = await call<{ id: string }>("POST", "/tasks", {
+    name: "TEST guided sampling",
+    target: 2,
+    planId: plan.id,
+  });
+  const loaded = await call<{
+    plan: { id: string; rules: { instructions: string } };
+  }>("GET", `/tasks/${task.id}`, undefined, operator);
+  assert.equal(loaded.plan.id, plan.id);
+  assert.equal(loaded.plan.rules.instructions, rules.instructions);
+  const device = await call<{ id: string }>("POST", "/devices", {
+    name: "SIMULATED plan workflow",
+    serialNumber: randomUUID(),
+    type: "SIMULATOR",
+  });
+  const sample = await call<{ id: string; inspections: { id: string }[] }>(
+    "POST",
+    "/samples/capture",
+    {
+      deviceId: device.id,
+      taskId: task.id,
+      idempotencyKey: randomUUID(),
+      clientId: randomUUID(),
+      localSequence: 0,
+    },
+    operator,
+  );
+  const box = {
+    classId: 0,
+    label: "untrusted label",
+    confidence: 1,
+    x1: 10,
+    y1: 10,
+    x2: 100,
+    y2: 100,
+  };
+  await call(
+    "POST",
+    `/samples/${sample.id}/annotations`,
+    { status: "COMPLETE", boxes: [{ ...box, classId: 5 }] },
+    engineer,
+    400,
+  );
+  const annotation = await call<{ boxes: { label: string }[] }>(
+    "POST",
+    `/samples/${sample.id}/annotations`,
+    { status: "COMPLETE", boxes: [box] },
+    engineer,
+  );
+  assert.equal(annotation.boxes[0]!.label, "盒体");
+  await call(
+    "POST",
+    "/reviews",
+    { inspectionId: sample.inspections[0]!.id, verdict: "CORRECT" },
+    operator,
+  );
+  assert.equal(
+    (await call<{ status: string }>("GET", `/samples/${sample.id}`)).status,
+    "PENDING",
+  );
+  await call(
+    "POST",
+    `/samples/${sample.id}/review`,
+    { verdict: "ACCEPT" },
+    operator,
+    403,
+  );
+  await call(
+    "POST",
+    `/samples/${sample.id}/review`,
+    { verdict: "ACCEPT" },
+    engineer,
+    403,
+  );
+  const dataset = await call<{ id: string }>(
+    "POST",
+    "/datasets",
+    { name: "TEST plan dataset", version: 1 },
+    engineer,
+  );
+  await call(
+    "POST",
+    `/datasets/${dataset.id}/items`,
+    { sampleIds: [sample.id] },
+    engineer,
+  );
+  await call("POST", `/datasets/${dataset.id}/freeze`, {}, token, 409);
+  await call("POST", `/samples/${sample.id}/review`, { verdict: "ACCEPT" });
+  await call("POST", `/datasets/${dataset.id}/freeze`, {}, engineer, 403);
+  await call("POST", `/datasets/${dataset.id}/freeze`, {});
+  const frozen = await call<{
+    items: { snapshot: { classes: string[]; planId: string } }[];
+  }>("GET", `/datasets/${dataset.id}`);
+  assert.deepEqual(frozen.items[0]!.snapshot.classes, rules.classes);
+  assert.equal(frozen.items[0]!.snapshot.planId, plan.id);
+  await call(
+    "POST",
+    `/samples/${sample.id}/annotations`,
+    { status: "COMPLETE", boxes: [] },
+    engineer,
+  );
+  assert.equal(
+    (await call<{ status: string }>("GET", `/samples/${sample.id}`)).status,
+    "PENDING",
+  );
+  await call(
+    "POST",
+    "/deployments",
+    { deviceId: device.id, modelId: "none" },
+    operator,
+    403,
+  );
+  await call(
+    "POST",
+    "/deployments",
+    { deviceId: device.id, modelId: "none" },
+    engineer,
+    403,
+  );
+  await call("POST", "/deployments/none/rollback", {}, engineer, 403);
+  await call(
+    "POST",
+    "/models/none/approve",
+    { confirm: true, note: "no authority" },
+    engineer,
+    403,
+  );
+  await call(
+    "POST",
+    "/models/none/approve",
+    { confirm: true, note: "no authority" },
+    operator,
+    403,
+  );
+});
+
 test("command arbiter bounds concurrent work, serializes effects, cancels queued commands and only retries status reads", async () => {
   const device = await call<{ id: string }>("POST", "/devices", {
     name: "SIMULATED command test",

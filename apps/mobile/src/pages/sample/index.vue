@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { chinese, displayName } from "@vision/shared";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
-import { request, session, notify } from "../../state";
+import { chinese, displayName } from "@vision/shared";
+import { request, notify } from "../../state";
+import RemoteImage from "../../components/RemoteImage.vue";
+
 interface Sample {
   id: string;
   name: string;
@@ -14,24 +16,18 @@ interface Sample {
   quality: { status: string } | null;
 }
 const sample = ref<Sample | null>(null),
-  image = ref(""),
   error = ref(""),
   verdict = ref("ACCEPT"),
   note = ref(""),
   hard = ref(false),
   busy = ref(false);
+const previewAsset = computed(() =>
+  sample.value?.assets.find((a) => a.kind === "PREVIEW"),
+);
 onLoad(async (options) => {
   try {
     sample.value = await request(`/samples/${String(options?.id ?? "")}`);
     hard.value = sample.value!.hard;
-    const asset = sample.value!.assets.find((a) => a.kind === "PREVIEW");
-    if (asset) {
-      const result = await uni.downloadFile({
-        url: `${session.server}/api/assets/${asset.id}/content`,
-        header: { authorization: `Bearer ${session.token}` },
-      });
-      if (result.statusCode === 200) image.value = result.tempFilePath;
-    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   }
@@ -58,24 +54,28 @@ async function review() {
   }
 }
 </script>
+
 <template>
-  <view class="page"
-    ><view v-if="error" class="error">{{ error }}</view
-    ><template v-if="sample"
-      ><text class="eyebrow">样本来源： {{ chinese(sample.source) }}</text
-      ><text class="title">样本与审核</text
-      ><text class="subtitle">{{ displayName(sample.name) }}</text
-      ><image v-if="image" :src="image" mode="widthFix" class="image" /><view
-        class="card"
-        style="margin-top: 20px"
-        ><view class="row"
-          ><text>审核状态</text
-          ><text class="status">{{ chinese(sample.status) }}</text></view
-        ><text class="note"
+  <view class="page">
+    <view v-if="error" class="error">{{ error }}</view>
+    <template v-if="sample">
+      <text class="eyebrow">样本来源： {{ chinese(sample.source) }}</text>
+      <text class="title">样本与审核</text>
+      <text class="subtitle">{{ displayName(sample.name) }}</text>
+      <view class="image-wrap">
+        <RemoteImage :asset-id="previewAsset?.id" mode="aspectFit" label="无预览图" />
+      </view>
+      <view class="card" style="margin-top: 18px">
+        <view class="row">
+          <text>审核状态</text>
+          <text class="status">{{ chinese(sample.status) }}</text>
+        </view>
+        <text class="note"
           >质量提示：{{ chinese(sample.quality?.status ?? "不可用") }}</text
-        ></view
-      ><view class="review-options"
-        ><text
+        >
+      </view>
+      <view class="review-options">
+        <text
           v-for="v in [
             { key: 'ACCEPT', label: '接纳' },
             { key: 'REJECT', label: '拒绝' },
@@ -85,15 +85,14 @@ async function review() {
           :class="{ selected: verdict === v.key }"
           @click="verdict = v.key"
           >{{ v.label }}</text
-        ></view
-      ><view class="field row"
-        ><text>困难样本</text
-        ><switch :checked="hard" color="#1f4d3a" @change="setHard" /></view
-      ><textarea
-        v-model="note"
-        placeholder="采样审核备注"
-        maxlength="2000"
-      /><button
+        >
+      </view>
+      <view class="field row">
+        <text>困难样本</text>
+        <switch :checked="hard" color="#dd5b2a" @change="setHard" />
+      </view>
+      <textarea v-model="note" placeholder="采样审核备注" maxlength="2000" />
+      <button
         class="primary"
         style="margin-top: 18px"
         @click="review"
@@ -101,7 +100,18 @@ async function review() {
         :loading="busy"
       >
         保存样本审核
-      </button></template
-    ><view v-else-if="!error" class="empty">读取样本…</view></view
-  >
+      </button>
+    </template>
+    <view v-else-if="!error" class="empty">读取样本…</view>
+  </view>
 </template>
+
+<style scoped>
+.image-wrap {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border: 1px solid #b7bda9;
+  background: #dcded5;
+  overflow: hidden;
+}
+</style>

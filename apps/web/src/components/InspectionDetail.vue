@@ -22,7 +22,7 @@ async function save(next = false) {
       note: note.value,
       hard: hard.value,
     });
-    notices.add("审核已保存");
+    notices.add("复核意见已提交；样本接纳由管理员审核");
     emit("saved", next);
   } catch (e) {
     notices.error(e);
@@ -42,11 +42,11 @@ async function raw() {
 </script>
 <template>
   <div class="toolbar">
-    <span class="muted">设备判定</span
+    <span class="muted">已保存结果</span
     ><Status :value="inspection.result" /><span
       v-if="inspection.reviews.length"
       class="tag ok"
-      >已复核</span
+      >已提交复核意见</span
     ><span
       class="tag"
       :class="{ simulated: inspection.source === 'SIMULATION' }"
@@ -118,13 +118,13 @@ async function raw() {
           @click="save(true)"
           :disabled="busy"
         >
-          保存并复核下一件</button
+          提交意见并查看下一件</button
         ><button
           :class="{ primary: !queue }"
           @click="save(false)"
           :disabled="busy"
         >
-          保存复核
+          提交复核意见
         </button>
       </div>
       <div v-for="(r, i) in inspection.reviews" :key="i" class="list-line">

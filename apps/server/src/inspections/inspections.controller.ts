@@ -99,7 +99,7 @@ export class ReviewsController {
       });
       await tx.sample.update({
         where: { id: inspection.sampleId },
-        data: { ...(dto.hard ? { hard: true } : {}), status: "REVIEWED" },
+        data: { ...(dto.hard ? { hard: true } : {}) },
       });
       return review;
     });

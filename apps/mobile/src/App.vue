@@ -1,16 +1,36 @@
 <script setup lang="ts">
-import { onLaunch, onShow } from "@dcloudio/uni-app";
+import { watch } from "vue";
+import { onLaunch, onShow, onHide } from "@dcloudio/uni-app";
 import { session } from "./state";
 import { syncQueue } from "./queue";
+import { startLive, stopLive } from "./live";
 onLaunch(() => {
   uni.onNetworkStatusChange((state) => {
     session.online = state.isConnected;
-    if (state.isConnected && session.token) void syncQueue();
+    if (state.isConnected) {
+      if (session.token) {
+        void syncQueue();
+        startLive();
+      }
+    }
   });
+  if (session.token) startLive();
 });
+// 实时画面是登录态的一部分：有 token 就保持一条预览连接，退出即断开。
+watch(
+  () => session.token,
+  (token) => {
+    if (token) startLive();
+    else stopLive();
+  },
+);
 onShow(() => {
-  if (session.token) void syncQueue();
+  if (session.token) {
+    startLive();
+    void syncQueue();
+  }
 });
+onHide(() => stopLive());
 </script>
 <style>
 page {

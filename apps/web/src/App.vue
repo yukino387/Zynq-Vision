@@ -7,10 +7,9 @@ import { useDeviceStore } from "./stores/devices";
 import { useNotificationStore } from "./stores/notifications";
 import { useTaskStore } from "./stores/tasks";
 import { useAppStore, type Theme } from "./stores/app";
-import { canAccess, navItems } from "./navigation";
+import { canAccess, navItems, roleDuties } from "./navigation";
 import type { RouteRecordRaw } from "vue-router";
 import AuthPanel from "./components/AuthPanel.vue";
-import WorkflowNav from "./components/WorkflowNav.vue";
 const auth = useAuthStore(),
   devices = useDeviceStore(),
   notices = useNotificationStore(),
@@ -102,7 +101,7 @@ function subCurrent(item: RouteRecordRaw, tab: string) {
 onMounted(() => auth.restore());
 watch(
   () => auth.user,
-  async (user) => {
+  async (user, previousUser) => {
     if (user) {
       try {
         await devices.start();
@@ -110,7 +109,13 @@ watch(
       } catch (e) {
         notices.error(e);
       }
-    } else devices.stop();
+    } else {
+      devices.stop();
+      if (previousUser) {
+        tasks.selected = "";
+        tasks.items = [];
+      }
+    }
   },
   { immediate: true },
 );
@@ -134,8 +139,8 @@ watch(
     ></button>
     <aside class="sidebar" :class="{ open: sidebarOpen }">
       <RouterLink to="/" class="brand"
-        ><span>视觉物联网平台</span
-        ><small>边缘视觉 · 设备工作站</small></RouterLink
+        ><span>边缘视觉工作站</span
+        ><small>{{ roleDuties[auth.user.role].name }}</small></RouterLink
       >
       <input
         v-model="menuQuery"
@@ -253,11 +258,10 @@ watch(
         :data-page="String(route.name)"
         :data-tab="String(route.params.tab || route.meta.defaultTab || '')"
       >
-        <WorkflowNav
-          v-if="
-            auth.engineer && ['data', 'models'].includes(String(route.name))
-          "
-        />
+        <div class="role-context">
+          <strong>{{ roleDuties[auth.user.role].name }}</strong
+          ><span>{{ roleDuties[auth.user.role].summary }}</span>
+        </div>
         <!-- tab 切换也是路由切换，所以这一个过渡同时覆盖侧栏跳转和子页切换 -->
         <RouterView v-slot="{ Component }">
           <Transition name="page" mode="out-in">

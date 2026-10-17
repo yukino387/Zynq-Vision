@@ -103,7 +103,7 @@ export class DatasetsController {
     );
     return this.datasets.add(id, dto.sampleIds);
   }
-  @Post(":id/freeze") freeze(@Param("id") id: string) {
+  @Roles("ADMIN") @Post(":id/freeze") freeze(@Param("id") id: string) {
     return this.datasets.freeze(id);
   }
   @Post(":id/clone") clone(@Param("id") id: string) {

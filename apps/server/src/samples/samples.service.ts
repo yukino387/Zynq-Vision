@@ -254,23 +254,39 @@ export class SamplesService {
     source: Source,
     taskId?: string,
   ) {
-    const boxes = frame.detections;
+    const modelVersion = frame.modelState.modelVersion ?? null;
+    const model = modelVersion
+      ? await tx.model.findFirst({
+          where: {
+            version: modelVersion,
+            source: source === "SIMULATION" ? "SIMULATION" : "IMPORT",
+          },
+        })
+      : null;
+    const classes = (model?.manifest as { classes?: string[] } | undefined)
+      ?.classes;
+    const boxes =
+      frame.detections?.map((box) => ({
+        ...box,
+        label:
+          classes?.[box.classId] ??
+          (source === "SIMULATION" ? box.label : `类别 ${box.classId + 1}`),
+      })) ?? null;
     const confidence = boxes?.length
       ? Math.max(...boxes.map((b) => b.confidence))
       : null;
-    const result = !boxes
-      ? "REVIEW"
-      : boxes.length === 0
-        ? source === "SIMULATION"
-          ? "PASS"
-          : "REVIEW"
-        : confidence! >= 0.7
-          ? "FAIL"
-          : "REVIEW";
-    const modelVersion = frame.modelState.modelVersion ?? null;
-    const model = modelVersion
-      ? await tx.model.findFirst({ where: { version: modelVersion, source } })
-      : null;
+    const result =
+      source !== "SIMULATION"
+        ? "REVIEW"
+        : !boxes
+          ? "REVIEW"
+          : boxes.length === 0
+            ? source === "SIMULATION"
+              ? "PASS"
+              : "REVIEW"
+            : confidence! >= 0.7
+              ? "FAIL"
+              : "REVIEW";
     return tx.inspection.create({
       data: {
         sampleId,
@@ -289,17 +305,23 @@ export class SamplesService {
           ? frame.telemetry.inferenceUs / 1000
           : null,
         result,
-        reason: !boxes
-          ? "Inference tensors unavailable"
-          : boxes.length
-            ? "Defect candidate; host postprocess"
-            : source === "SIMULATION"
-              ? "SIMULATED acceptance plan: no defect candidates"
-              : "No defect candidates; acceptance plan not reported",
+        reason:
+          source !== "SIMULATION"
+            ? "当前为对象候选输出，尚未应用经过验证的方案规则，请人工复核"
+            : !boxes
+              ? "Inference tensors unavailable"
+              : boxes.length
+                ? "Defect candidate; host postprocess"
+                : source === "SIMULATION"
+                  ? "SIMULATED acceptance plan: no defect candidates"
+                  : "No defect candidates; acceptance plan not reported",
         confidence,
         metadata: {
           telemetry: frame.telemetry as unknown as Prisma.InputJsonValue,
-          rule: "HOST_DEFECT_CANDIDATE_V1; no claim of firmware inspection plan",
+          rule:
+            source === "SIMULATION"
+              ? "SIMULATOR_FIXTURE_ONLY"
+              : "CANDIDATES_ONLY; acceptance plan not applied",
         },
         detections: boxes ? { create: boxes } : undefined,
       },

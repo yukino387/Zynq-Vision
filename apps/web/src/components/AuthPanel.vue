@@ -66,7 +66,7 @@ async function submit() {
       <span class="workspace-index">边缘视觉 / 设备工作站</span>
       <h2>看见细节。<br />作出判断<span>.</span></h2>
       <div class="auth-instrument">
-        <span>视觉检测</span><span>数据采样</span><span>模型部署</span>
+        <span>产品方案</span><span>引导采样</span><span>审核发布</span>
       </div>
       <small>视觉物联网平台</small>
     </section>

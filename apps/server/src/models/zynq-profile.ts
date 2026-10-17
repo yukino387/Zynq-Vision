@@ -14,6 +14,7 @@ const commands = (
 export function zynqManifest(
   weights: Buffer,
   channels: 1 | 3 = 1,
+  classes: string[] = ["龟裂", "夹杂", "斑块", "麻点", "轧入氧化皮", "划痕"],
 ): ModelManifest {
   return {
     formatVersion: 1,
@@ -27,7 +28,7 @@ export function zynqManifest(
       [1, 33, 14, 14],
     ],
     classCount: 6,
-    classes: ["龟裂", "夹杂", "斑块", "麻点", "轧入氧化皮", "划痕"],
+    classes,
     quantization: {
       scheme: "FIXED_INT8",
       inputScale: 1 / 127,
@@ -61,9 +62,16 @@ export function validateZynqPackage(
   )
     return fail();
   const channels = manifest.input.channels;
-  if (channels !== 1 && channels !== 3) return fail();
   if (
-    compatibility(zynqManifest(weights, channels), manifest).length ||
+    (channels !== 1 && channels !== 3) ||
+    manifest.classes.length !== 6 ||
+    new Set(manifest.classes).size !== 6 ||
+    manifest.classes.some((name) => !name.trim() || name.length > 40)
+  )
+    return fail();
+  if (
+    compatibility(zynqManifest(weights, channels, manifest.classes), manifest)
+      .length ||
     weights.readUInt32LE(0) !== 0x314e4e43 ||
     weights.readUInt32LE(4) !== 1 ||
     weights.readUInt32LE(8) !== 6350208 ||

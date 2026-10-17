@@ -56,6 +56,8 @@ export class TrainingService {
     if (checksum !== dataset.checksum)
       throw new Error("Frozen dataset checksum mismatch");
     const items = [];
+    let classes: string[] | undefined;
+    let hasUnscopedItems = false;
     for (const item of dataset.items) {
       const snapshot = item.snapshot as {
         width: number;
@@ -64,7 +66,20 @@ export class TrainingService {
         sha256: string;
         assets: { id: string; kind: string; sha256: string }[];
         boxes: Prisma.JsonValue[];
+        classes?: string[];
       };
+      if (snapshot.classes?.length) {
+        if (snapshot.classes.length > 6)
+          throw new Error("当前模板最多支持六类对象");
+        if (
+          classes &&
+          JSON.stringify(classes) !== JSON.stringify(snapshot.classes)
+        )
+          throw new Error(
+            "同一训练版本不能混用不同方案的类别，请分别整理数据集",
+          );
+        classes = snapshot.classes;
+      } else hasUnscopedItems = true;
       const raw = snapshot.assets.find(
         (a) =>
           a.kind === "RAW" &&
@@ -100,12 +115,28 @@ export class TrainingService {
       });
     }
     const directory = resolve(config.storage, "training", id);
+    if (classes && hasUnscopedItems)
+      throw new Error("请勿将未关联方案的历史样本与方案样本混入同一训练版本");
     const version = `INT8-${id}`;
     await mkdir(directory, { recursive: true });
     const spec = resolve(directory, "spec.json");
     await writeFile(
       spec,
-      JSON.stringify({ options, items, version, datasetChecksum: checksum }),
+      JSON.stringify({
+        options,
+        items,
+        version,
+        classes: classes
+          ? [
+              ...classes,
+              ...Array.from(
+                { length: 6 - classes.length },
+                (_, i) => `_unused_${classes.length + i}`,
+              ),
+            ]
+          : undefined,
+        datasetChecksum: checksum,
+      }),
     );
     const claim = await this.db.trainingJob.updateMany({
       where: { id, status: "QUEUED" },

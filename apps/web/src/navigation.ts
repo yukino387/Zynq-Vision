@@ -10,6 +10,7 @@ import Devices from "./views/Devices.vue";
 import System from "./views/System.vue";
 import NotFound from "./views/NotFound.vue";
 import Access from "./views/Access.vue";
+import Plans from "./views/Plans.vue";
 
 export interface TabMeta {
   tab: string;
@@ -36,6 +37,20 @@ declare module "vue-router" {
 }
 
 const ENGINEER: Role[] = ["ADMIN", "ENGINEER"];
+export const roleDuties = {
+  ADMIN: {
+    name: "管理工作区",
+    summary: "配置方案、分配采样、审核数据、训练与批准发布",
+  },
+  OPERATOR: {
+    name: "现场工作区",
+    summary: "按任务采样、查看结果、提交复核意见",
+  },
+  ENGINEER: {
+    name: "技术维护区",
+    summary: "维护设备、处理标注与训练；审核和正式发布由管理员负责",
+  },
+};
 
 /** 路由是导航的唯一真源：侧栏、顶栏标题、视图内 tab 条、角色可见性全部从这里派生。 */
 export const routes: RouteRecordRaw[] = [
@@ -44,7 +59,19 @@ export const routes: RouteRecordRaw[] = [
     name: "overview",
     component: Overview,
     meta: {
-      title: "项目工作台",
+      title: "管理首页",
+      nav: true,
+      order: 1,
+      roles: ENGINEER,
+      discipline: "business",
+    },
+  },
+  {
+    path: "/plans",
+    name: "plans",
+    component: Plans,
+    meta: {
+      title: "产品与检查方案",
       nav: true,
       order: 2,
       roles: ENGINEER,
@@ -55,7 +82,7 @@ export const routes: RouteRecordRaw[] = [
     path: "/workbench",
     name: "workbench",
     component: Operations,
-    meta: { title: "检测工作台", nav: true, order: 1, discipline: "hmi" },
+    meta: { title: "现场工作台", nav: true, order: 3, discipline: "hmi" },
   },
   {
     path: "/inspections/:id",
@@ -84,7 +111,7 @@ export const routes: RouteRecordRaw[] = [
     name: "data",
     component: Data,
     meta: {
-      title: "样本与标注",
+      title: "采样与数据",
       nav: true,
       order: 4,
       discipline: "business",
@@ -92,7 +119,7 @@ export const routes: RouteRecordRaw[] = [
       tabs: [
         { tab: "tasks", label: "采样任务" },
         { tab: "samples", label: "样本库" },
-        { tab: "review", label: "样本审核" },
+        { tab: "review", label: "样本审核", roles: ["ADMIN"] },
         { tab: "annotation", label: "样本标注", roles: ENGINEER },
         { tab: "datasets", label: "数据集", roles: ENGINEER },
         { tab: "quality", label: "数据质量", roles: ENGINEER },
@@ -104,7 +131,7 @@ export const routes: RouteRecordRaw[] = [
     name: "models",
     component: Models,
     meta: {
-      title: "训练与发布",
+      title: "模型与发布",
       nav: true,
       order: 5,
       roles: ENGINEER,
@@ -114,7 +141,7 @@ export const routes: RouteRecordRaw[] = [
         { tab: "registry", label: "模型仓库" },
         { tab: "training", label: "训练任务" },
         { tab: "benchmarks", label: "模型评估" },
-        { tab: "deployments", label: "部署管理" },
+        { tab: "deployments", label: "批准发布与回退", roles: ["ADMIN"] },
       ],
     },
   },
@@ -124,6 +151,7 @@ export const routes: RouteRecordRaw[] = [
     component: Devices,
     meta: {
       title: "设备诊断",
+      roles: ENGINEER,
       nav: true,
       order: 6,
       discipline: "hmi",
@@ -160,7 +188,7 @@ export const routes: RouteRecordRaw[] = [
     name: "access",
     component: Access,
     meta: {
-      title: "账号与注册",
+      title: "人员与权限",
       nav: true,
       order: 8,
       roles: ["ADMIN"],

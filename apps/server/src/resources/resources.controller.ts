@@ -11,7 +11,8 @@ import {
 } from "@nestjs/common";
 import { hash } from "bcryptjs";
 import { z } from "zod";
-import { roles } from "@vision/contracts";
+import { roles, createPlanSchema } from "@vision/contracts";
+import { Prisma } from "@prisma/client";
 import { Db } from "../core/db.js";
 import { Events } from "../core/events.js";
 import { Roles, type Request } from "../core/auth.js";
@@ -133,26 +134,33 @@ export class TasksController {
     return page(
       await this.db.task.findMany({
         ...args,
-        include: { _count: { select: { samples: true } } },
+        include: {
+          plan: true,
+          station: true,
+          _count: { select: { samples: true } },
+        },
       }),
       await this.db.task.count({ where: args.where }),
       q,
     );
   }
-  @Roles("ADMIN", "ENGINEER") @Post() create(@Body() body: unknown) {
-    return this.db.task.create({
-      data: parse(
-        z
-          .object({
-            name: names,
-            target: z.number().int().positive(),
-            stationId: z.string().optional(),
-            planId: z.string().optional(),
-          })
-          .strict(),
-        body,
-      ),
-    });
+  @Roles("ADMIN", "ENGINEER") @Post() async create(@Body() body: unknown) {
+    const data = parse(
+      z
+        .object({
+          name: names,
+          target: z.number().int().positive(),
+          stationId: z.string().optional(),
+          planId: z.string().optional(),
+        })
+        .strict(),
+      body,
+    );
+    if (data.planId)
+      await this.db.inspectionPlan.findUniqueOrThrow({
+        where: { id: data.planId },
+      });
+    return this.db.task.create({ data });
   }
   @Get(":id") detail(@Param("id") id: string) {
     return this.db.task.findUniqueOrThrow({
@@ -162,6 +170,34 @@ export class TasksController {
         station: true,
         _count: { select: { samples: true } },
       },
+    });
+  }
+}
+@Controller("api/plans")
+export class PlansController {
+  constructor(@Inject(Db) private db: Db) {}
+  @Get() async list(@Query() query: unknown) {
+    const { q, args } = listing(query, ["name", "createdAt", "version"]);
+    return page(
+      await this.db.inspectionPlan.findMany(args),
+      await this.db.inspectionPlan.count({ where: args.where }),
+      q,
+    );
+  }
+  @Roles("ADMIN") @Post() async create(@Body() body: unknown) {
+    const dto = parse(createPlanSchema, body);
+    return this.db.$transaction(async (tx) => {
+      const latest = await tx.inspectionPlan.findFirst({
+        where: { name: dto.name },
+        orderBy: { version: "desc" },
+      });
+      return tx.inspectionPlan.create({
+        data: {
+          name: dto.name,
+          version: (latest?.version ?? 0) + 1,
+          rules: dto.rules as Prisma.InputJsonValue,
+        },
+      });
     });
   }
 }

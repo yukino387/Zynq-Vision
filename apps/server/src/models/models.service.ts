@@ -66,7 +66,11 @@ export class ModelsService {
       );
     const differences = compatibility(
       device.type === "ZYNQ"
-        ? zynqManifest(weights, manifest.input.channels === 3 ? 3 : 1)
+        ? zynqManifest(
+            weights,
+            manifest.input.channels === 3 ? 3 : 1,
+            manifest.classes,
+          )
         : simulatorManifest(weights),
       manifest,
     );

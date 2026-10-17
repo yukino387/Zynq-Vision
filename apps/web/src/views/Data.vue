@@ -4,6 +4,7 @@ import { chinese, displayName } from "@vision/shared";
 import { ref, computed, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import type { Named, Sample } from "../types";
+import type { InspectionPlan } from "@vision/contracts";
 import { useList } from "../composables/useList";
 import { api, post, download } from "../api";
 import { useNotificationStore } from "../stores/notifications";
@@ -35,6 +36,8 @@ const endpoint = computed(() =>
   ),
   list = useList<Named>(endpoint);
 const gallery = ref(true);
+const plans = ref<InspectionPlan[]>([]),
+  taskPlanId = ref("");
 const importProgress = ref({ done: 0, total: 0 });
 const sampleScope = ref("REAL"),
   annotationFilter = ref("");
@@ -88,9 +91,17 @@ watch(
     route.query.annotation,
     route.query.datasetId,
     route.query.create,
+    route.query.planId,
   ],
   () => {
     creatingDataset.value = tab.value === "datasets";
+    taskPlanId.value = String(route.query.planId ?? "");
+    if (auth.engineer && tab.value === "tasks")
+      void api<{ items: InspectionPlan[] }>("/plans?pageSize=100")
+        .then((r) => {
+          plans.value = r.items.filter((p) => Array.isArray(p.rules.classes));
+        })
+        .catch(notices.error);
     selectedIds.value = [];
     datasetId.value = String(route.query.datasetId ?? "");
     sampleScope.value = String(route.query.source ?? "REAL");
@@ -156,7 +167,12 @@ async function create(startSampling = false) {
     const isDataset = isDatasetCreation.value;
     const created = await post<Named>(isDataset ? "/datasets" : "/tasks", {
       name: name.value,
-      ...(isDataset ? { version: version.value } : { target: target.value }),
+      ...(isDataset
+        ? { version: version.value }
+        : {
+            target: target.value,
+            ...(taskPlanId.value ? { planId: taskPlanId.value } : {}),
+          }),
     });
     createOpen.value = false;
     name.value = "";
@@ -258,6 +274,7 @@ async function upload(e: Event) {
           "metadata",
           JSON.stringify({
             source: "IMPORT",
+            taskId: tasks.selected || undefined,
             clientId: crypto.randomUUID(),
             idempotencyKey: crypto.randomUUID(),
             localSequence: 0,
@@ -349,12 +366,16 @@ async function adjacent(delta: number) {
       <p>
         {{
           tab === "annotation"
-            ? "选择缺陷类别，在图片上框出位置；完成后可直接处理下一张。"
+            ? "按方案中的对象类别框选标注。缺件由规则判断，不为不存在的部件画框。"
             : tab === "datasets"
-              ? "把已标注样本选入数据集，锁定版本后即可开始训练。"
+              ? "整理已标注样本，由管理员审核后冻结训练版本。"
               : tab === "samples"
-                ? "管理真实采集与导入的图片，查看标注进度并整理训练数据。"
-                : ""
+                ? auth.engineer
+                  ? "整理采集与导入的图片，完成标注并提交管理员审核。"
+                  : "查看采样结果和审核状态；需要补充时按任务重新采集。"
+                : tab === "tasks"
+                  ? "按产品方案安排采样；工人按任务中的摆放指引完成采集。"
+                  : ""
         }}
       </p>
     </div>
@@ -700,6 +721,12 @@ async function adjacent(delta: number) {
             </td>
             <td>
               <strong>{{ displayName(r.name) }}</strong
+              ><small v-if="tab === 'tasks' && r.plan"
+                >{{
+                  (r.plan as InspectionPlan).rules.product ||
+                  (r.plan as InspectionPlan).name
+                }}
+                · V{{ (r.plan as InspectionPlan).version }}</small
               ><small class="mono"
                 >{{ r.id.slice(-10) }} {{ r.version ? `/ V${r.version}` : "" }}
                 {{ r.hard ? "· 困难样本" : "" }}</small
@@ -731,7 +758,7 @@ async function adjacent(delta: number) {
             <td v-if="tab === 'datasets'">
               <button @click="open(r)" class="table-action">详情</button
               ><button
-                v-if="r.status !== 'FROZEN'"
+                v-if="r.status !== 'FROZEN' && auth.admin"
                 @click="action(r.id, 'freeze')"
                 class="table-action"
                 :disabled="busy"
@@ -790,6 +817,13 @@ async function adjacent(delta: number) {
     @close="createOpen = false"
     ><form @submit.prevent="create(!isDatasetCreation)">
       <label>名称<input v-model="name" required maxlength="120" /></label
+      ><label v-if="!isDatasetCreation"
+        >关联检查方案<select v-model="taskPlanId">
+          <option value="">暂不关联（独立采样）</option>
+          <option v-for="plan in plans" :key="plan.id" :value="plan.id">
+            {{ plan.rules.product }} · {{ plan.name }} / V{{ plan.version }}
+          </option>
+        </select></label
       ><label v-if="isDatasetCreation"
         >版本<input type="number" min="1" v-model.number="version" /></label
       ><label v-else
@@ -868,7 +902,7 @@ async function adjacent(delta: number) {
           }}</pre>
         </details>
       </div>
-      <section class="review-panel">
+      <section v-if="auth.admin" class="review-panel">
         <h3>样本审核</h3>
         <label
           >结论<select v-model="reviewVerdict">
@@ -914,6 +948,16 @@ async function adjacent(delta: number) {
           </div>
         </details>
       </section>
+      <section v-else class="review-panel">
+        <h3>样本状态：{{ chinese(sample.status) }}</h3>
+        <p>审核接纳与退回由管理员处理。现场反馈请在对应结果中提交复核意见。</p>
+        <RouterLink
+          v-if="auth.engineer"
+          to="/data/annotation"
+          @click="sample = null"
+          >继续标注</RouterLink
+        >
+      </section>
     </div></Drawer
   ><Drawer
     v-if="dataset"
@@ -953,7 +997,7 @@ async function adjacent(delta: number) {
         @click="dataset = null"
         >添加已标注样本</RouterLink
       ><button
-        v-if="dataset.status !== 'FROZEN'"
+        v-if="dataset.status !== 'FROZEN' && auth.admin"
         class="primary"
         :disabled="busy || datasetItems < 2"
         @click="action(dataset.id, 'freeze')"

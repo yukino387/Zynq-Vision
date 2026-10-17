@@ -113,6 +113,32 @@ async function saveUser() {
       >邀请新用户</RouterLink
     >
   </div>
+  <section class="permissions-summary">
+    <h2>职责与权限</h2>
+    <div>
+      <article>
+        <b>工人 · 现场使用</b>
+        <p>
+          按任务采样、查看结果、提交复核意见。不能审核训练数据、修改方案或发布模型。
+        </p>
+      </article>
+      <article>
+        <b>管理员 · 业务负责人</b>
+        <p>
+          配置产品方案、安排采样、审核并冻结数据、发起训练、批准发布与回退、管理人员。
+        </p>
+      </article>
+      <article>
+        <b>技术维护人员 · 开发与维护</b>
+        <p>
+          连接和诊断设备、协助标注、训练与评估。正式审核、方案变更和发布由管理员执行。
+        </p>
+      </article>
+    </div>
+    <p class="note">
+      注册码只创建工人账号；管理员按职责调整权限。当前为角色级权限，尚未提供按人员隔离工位数据的绑定授权。
+    </p>
+  </section>
   <form class="toolbar" @submit.prevent="list.filter">
     <input
       v-model="list.search.value"
@@ -224,8 +250,8 @@ async function saveUser() {
     ><form @submit.prevent="saveUser">
       <label
         >角色<select v-model="role">
-          <option value="OPERATOR">操作员</option>
-          <option value="ENGINEER">工程师</option>
+          <option value="OPERATOR">工人（采样与反馈）</option>
+          <option value="ENGINEER">技术维护人员（设备、标注与训练）</option>
           <option value="ADMIN">管理员</option>
         </select></label
       ><label class="check-row"
@@ -234,3 +260,30 @@ async function saveUser() {
     </form></Drawer
   >
 </template>
+<style scoped>
+.permissions-summary {
+  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  margin-bottom: 24px;
+}
+.permissions-summary h2 {
+  font-size: 18px;
+  margin-top: 0;
+}
+.permissions-summary > div {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+}
+.permissions-summary article p {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.8;
+}
+@media (max-width: 760px) {
+  .permissions-summary > div {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

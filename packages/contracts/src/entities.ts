@@ -1,4 +1,5 @@
 import type { DetectionBox, Source } from "./index.js";
+import type { InspectionPlan } from "./plans.js";
 export interface Asset {
   id: string;
   kind: string;
@@ -15,6 +16,7 @@ export interface Annotation {
   boxes: DetectionBox[];
 }
 export interface Sample {
+  task?: { plan: InspectionPlan | null } | null;
   id: string;
   name: string;
   source: Source;
@@ -54,6 +56,8 @@ export interface Named {
   [key: string]: unknown;
 }
 export interface Task extends Named {
+  planId?: string | null;
+  plan?: InspectionPlan | null;
   stationId: string | null;
   target: number;
   _count: { samples: number };

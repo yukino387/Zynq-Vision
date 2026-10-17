@@ -12,6 +12,7 @@ struct CameraStatus {
     int32_t brightness;
 };
 bool udp_running();
+void udp_pause();
 bool udp_camera_only();
 int udp_brightness();
 void udp_send_status(const CameraStatus& status);

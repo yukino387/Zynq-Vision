@@ -14,6 +14,14 @@
       }
     },
     {
+      "path": "pages/live/index",
+      "style": {
+        "navigationBarTitleText": "实时画面",
+        "navigationStyle": "custom",
+        "disableScroll": false
+      }
+    },
+    {
       "path": "pages/tasks/index",
       "style": {
         "navigationBarTitleText": "采样任务"

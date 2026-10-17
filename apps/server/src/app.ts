@@ -16,6 +16,7 @@ import {
   StationsController,
   TasksController,
   WorkpiecesController,
+  PlansController,
 } from "./resources/resources.controller.js";
 import { AssetsService } from "./assets/assets.service.js";
 import { SamplesService } from "./samples/samples.service.js";
@@ -105,6 +106,7 @@ class JobsModule {}
     StationsController,
     TasksController,
     WorkpiecesController,
+    PlansController,
     SystemController,
   ],
   providers: [

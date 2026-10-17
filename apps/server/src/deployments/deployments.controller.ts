@@ -46,7 +46,7 @@ export class DeploymentsController {
       q,
     );
   }
-  @Post() async create(@Body() body: unknown) {
+  @Roles("ADMIN") @Post() async create(@Body() body: unknown) {
     const dto = parse(
       z.object({ deviceId: z.string(), modelId: z.string() }).strict(),
       body,
@@ -114,7 +114,7 @@ export class DeploymentsController {
       return deployment;
     });
   }
-  @Post(":id/rollback") async rollback(
+  @Roles("ADMIN") @Post(":id/rollback") async rollback(
     @Param("id") id: string,
     @Req() req: Request,
   ) {

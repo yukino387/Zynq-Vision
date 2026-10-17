@@ -129,6 +129,12 @@ def run(spec, directory):
             model(images.to(**image_options), observe)
     hidden_scale = max(maximum / 127, 1e-6)
     weights, metadata, manifest = export_int8(model, hidden_scale, spec['version'], directory)
+    if spec.get('classes'):
+        classes = spec['classes']
+        if len(classes) != 6 or len(set(classes)) != 6 or any(not isinstance(c, str) or not c.strip() or len(c) > 40 for c in classes):
+            raise ValueError('Model requires six unique class slots')
+        manifest['classes'] = classes
+        (directory / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
     if use_cuda:
         runtime['peakAllocatedMiB'] = torch.cuda.max_memory_allocated() / 2**20
     model = model.cpu()

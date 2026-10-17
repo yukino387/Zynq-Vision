@@ -24,6 +24,7 @@ export class DatasetsService {
         const sample = await tx.sample.findUniqueOrThrow({
           where: { id: sampleId, deletedAt: null },
           include: {
+            task: { include: { plan: true } },
             assets: true,
             annotations: {
               where: { status: "COMPLETE" },
@@ -53,6 +54,14 @@ export class DatasetsService {
             sampleId,
             annotationSetId: annotation.id,
             snapshot: {
+              ...(sample.task?.plan
+                ? {
+                    planId: sample.task.plan.id,
+                    classes:
+                      (sample.task.plan.rules as { classes?: string[] })
+                        .classes ?? [],
+                  }
+                : {}),
               source: sample.source,
               hard: sample.hard,
               previewId: preview.id,
@@ -80,11 +89,22 @@ export class DatasetsService {
     return this.db.$transaction(async (tx) => {
       const dataset = await tx.dataset.findUniqueOrThrow({
         where: { id },
-        include: { items: { orderBy: { sampleId: "asc" } } },
+        include: {
+          items: { orderBy: { sampleId: "asc" }, include: { sample: true } },
+        },
       });
       if (dataset.status === "FROZEN") return dataset;
       if (!dataset.items.length)
         throw new DomainError("INVALID_STATE", "Cannot freeze empty dataset");
+      if (
+        dataset.items.some(
+          (item) => item.sample.status !== "REVIEWED" || item.sample.deletedAt,
+        )
+      )
+        throw new DomainError(
+          "INVALID_STATE",
+          "请先由管理员审核通过全部样本，再冻结训练版本",
+        );
       if (dataset.status === "DRAFT") {
         await tx.dataset.update({ where: { id }, data: { status: "READY" } });
       }

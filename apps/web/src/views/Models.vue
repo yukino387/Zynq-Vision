@@ -5,6 +5,7 @@ import { ref, computed, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import type { Named, Dataset, Model } from "../types";
 import type { TrainingOptions } from "@vision/contracts";
+import { useAuthStore } from "../stores/auth";
 import { useList } from "../composables/useList";
 import { api, post, download } from "../api";
 import { useDeviceStore } from "../stores/devices";
@@ -19,6 +20,7 @@ const metricFps = (row: Named): number | null => {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 };
 const route = useRoute(),
+  auth = useAuthStore(),
   router = useRouter(),
   devices = useDeviceStore(),
   notices = useNotificationStore();
@@ -58,6 +60,34 @@ const trainingOptions = ref<TrainingOptions>({
   amp: true,
   workers: 4,
 });
+const approvalNote = ref(""),
+  approvalConfirmed = ref(false);
+watch(
+  () => detail.value?.id,
+  () => {
+    approvalNote.value = "";
+    approvalConfirmed.value = false;
+  },
+);
+async function approveModel() {
+  if (!detail.value) return;
+  busy.value = true;
+  try {
+    await post(`/models/${detail.value.id}/approve`, {
+      confirm: approvalConfirmed.value,
+      note: approvalNote.value,
+    });
+    detail.value = await api<Named>(`/models/${detail.value.id}`);
+    await list.load();
+    approvalNote.value = "";
+    approvalConfirmed.value = false;
+    notices.add("管理员发布批准已记录，尚未激活到设备");
+  } catch (e) {
+    notices.error(e);
+  } finally {
+    busy.value = false;
+  }
+}
 const chosenDataset = computed(() =>
   datasets.value.find((d) => d.id === datasetId.value),
 );
@@ -114,7 +144,7 @@ async function openForm() {
         : "";
     else if (!datasets.value.some((d) => d.id === datasetId.value))
       datasetId.value = "";
-    if (!name.value) name.value = `缺陷模型 ${new Date().toLocaleDateString()}`;
+    if (!name.value) name.value = `现场模型 ${new Date().toLocaleDateString()}`;
     deviceId.value = devices.current?.id ?? "";
     form.value = true;
   } catch (e) {
@@ -823,7 +853,8 @@ watch(
           /></label>
         </details>
         <p class="note">
-          使用冻结标注和固定六类检测结构。没有验证集时按种子划分 20%
+          使用管理员审核后的冻结数据，类别沿用采样方案，当前硬件模板最多支持六类。没有验证集时按种子划分
+          20%
           留出验证，至少需要两张样本。训练完成后可下载模型包、训练记录和检查点。
         </p>
       </template>
@@ -885,6 +916,41 @@ watch(
     "
     @close="detail = null"
   >
+    <section
+      v-if="tab === 'registry' && detail.status !== 'APPROVED'"
+      class="training-empty"
+    >
+      <h3>验证与发布是两步</h3>
+      <p>
+        模型评估记录不等于业务验收，也不会自动批准发布。请核查模型验证记录与现场样本效果后，再由管理员批准。
+      </p>
+      <p v-if="!(detail.benchmarks as unknown[])?.length">
+        还没有验证记录，请先进行模型评估。
+      </p>
+      <form v-else-if="auth.admin" @submit.prevent="approveModel">
+        <label
+          >现场验收意见<textarea
+            v-model="approvalNote"
+            required
+            maxlength="1000"
+            rows="2"
+            placeholder="记录已验证的产品、工位条件、效果及适用限制"
+          /></label
+        ><label class="check-row"
+          ><input
+            v-model="approvalConfirmed"
+            type="checkbox"
+            required
+          />我已核查验证记录及现场效果，同意此版本进入发布流程</label
+        ><button
+          class="primary"
+          :disabled="busy || !approvalConfirmed || !approvalNote.trim()"
+        >
+          批准发布资格
+        </button>
+      </form>
+      <p v-else>请由管理员完成发布批准。</p>
+    </section>
     <div v-if="detailOptions" class="training-detail">
       <span
         >输入模式<b>{{

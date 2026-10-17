@@ -452,3 +452,84 @@ button.capture {
     max-height: 36dvh;
   }
 }
+.role-context {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--muted);
+}
+.role-context strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+.field-task-context {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 32px;
+  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  margin-bottom: 24px;
+}
+.field-task-context label {
+  max-width: 640px;
+}
+.field-task-context aside {
+  border-left: 1px solid var(--line);
+  padding-left: 24px;
+  font-size: 13px;
+}
+.field-task-context p {
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--muted);
+}
+.field-task-context small {
+  color: var(--muted);
+}
+.field-instructions {
+  white-space: pre-wrap;
+}
+.field-technical {
+  grid-column: 1/-1;
+  font-size: 12px;
+  margin-top: 12px;
+}
+.field-technical summary {
+  cursor: pointer;
+  padding: 14px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+@media (max-width: 760px) {
+  .field-task-context {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .field-task-context aside {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    padding: 16px 0 0;
+  }
+}
+.field-capture {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  margin-bottom: 16px;
+}
+.field-capture .capture-task {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+.field-capture .capture-task small {
+  color: var(--muted);
+  font-size: 11px;
+}

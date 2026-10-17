@@ -301,7 +301,7 @@ main {
   margin-bottom: 8px;
 }
 main[data-page="overview"] {
-  --workspace-label: "00 / 运行控制室";
+  --workspace-label: "管理 / 从方案到现场";
 }
 main[data-page="records"] {
   --workspace-label: "02 / 判定与追溯";
@@ -313,7 +313,7 @@ main[data-page="data"][data-tab="quality"] {
   --workspace-label: "05 / 数据质量";
 }
 main[data-page="models"][data-tab="registry"] {
-  --workspace-label: "08 / 模型注册表";
+  --workspace-label: "模型 / 候选与已验证版本";
 }
 main[data-page="models"][data-tab="deployments"] {
   --workspace-label: "09 / 部署控制台";

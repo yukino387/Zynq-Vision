@@ -29,6 +29,10 @@ const device = computed(() => devices.current),
       : null,
   );
 const queue = computed(() => inspections.items);
+const currentTask = computed(() =>
+  tasks.items.find((task) => task.id === tasks.selected),
+);
+const taskPlan = computed(() => currentTask.value?.plan);
 const inspecting = computed(
   () => device.value?.reportedState.inspectionEnabled === true,
 );
@@ -96,6 +100,7 @@ async function capture() {
     // 采样后留在工作台：新的一行落到「最近检测」顶部，不把操作工从实时画面上带走。
     notices.add("样本与检测记录已保存");
     await load();
+    await tasks.load();
   } catch (e) {
     notices.error(e);
   } finally {
@@ -139,16 +144,63 @@ async function control(start: boolean) {
 <template>
   <div class="page-heading instrument-heading">
     <div>
-      <span class="workspace-index">01 / 视觉检测</span>
-      <h1>检测工作台<span class="heading-period">.</span></h1>
+      <span class="workspace-index">现场使用 / 采样与反馈</span>
+      <h1>现场工作台<span class="heading-period">.</span></h1>
     </div>
     <div class="heading-actions">
       <Status :value="device?.connectionState" /><span
+        v-if="auth.engineer"
         class="mono instrument-id"
         >{{ device?.type ?? "无设备" }}</span
       >
     </div>
   </div>
+  <section class="field-task-context">
+    <div>
+      <label
+        >当前采样任务<select v-model="tasks.selected" aria-label="现场采样任务">
+          <option value="">选择任务，查看产品与摆放要求</option>
+          <option v-for="task in tasks.items" :key="task.id" :value="task.id">
+            {{ displayName(task.name) }} · {{ task._count.samples }}/{{
+              task.target
+            }}
+            张
+          </option>
+        </select></label
+      >
+      <p v-if="!currentTask" class="note">
+        先选任务，再按指引采样。独立采样也可保存，后续由管理员整理。
+      </p>
+      <template v-else
+        ><b>{{ taskPlan?.rules.product || "独立采样任务" }}</b
+        ><span v-if="taskPlan">
+          · {{ taskPlan.name }} / V{{ taskPlan.version }}</span
+        >
+        <p class="field-instructions">
+          {{
+            taskPlan?.rules.instructions ||
+            "该任务还没有摆放指引，请向管理员确认采集标准。"
+          }}
+        </p>
+        <small>{{ taskPlan?.rules.conditions }}</small></template
+      >
+    </div>
+    <aside>
+      <b>{{
+        auth.admin ? "管理现场" : auth.engineer ? "技术维护" : "我的职责"
+      }}</b>
+      <p>
+        {{
+          auth.engineer
+            ? "连接设备、核对实际运行模型与现场结果；正式发布由管理员批准。"
+            : "按要求摆放和采样；结果有疑问时提交复核意见。方案、训练和发布由管理员负责。"
+        }}
+      </p>
+      <span v-if="taskPlan" class="note"
+        >任务方案是采样依据，未代表设备已激活此方案。</span
+      >
+    </aside>
+  </section>
   <div class="device-control console-controls">
     <label
       >检测设备<select v-model="devices.selected" aria-label="当前设备">
@@ -185,7 +237,7 @@ async function control(start: boolean) {
       >
     </div>
     <span v-else-if="device?.connectionState !== 'ONLINE'" class="muted"
-      >请联系工程师连接设备</span
+      >请联系管理员或维护人员连接设备</span
     >
   </div>
   <details v-if="device?.error" class="error-box device-error">
@@ -201,6 +253,27 @@ async function control(start: boolean) {
     </summary>
     <pre>{{ device.error }}</pre>
   </details>
+  <div class="capture-bar console-capture field-capture">
+    <div class="capture-task">
+      <b>保存到：{{ currentTask?.name || "独立采样" }}</b
+      ><small v-if="currentTask"
+        >已采 {{ currentTask._count.samples }} /
+        {{ currentTask.target }} 张</small
+      >
+    </div>
+    <span class="muted capture-hint">{{
+      captureBlocked || (held ? "采样保存设备当前实时帧" : "保存图像与检测记录")
+    }}</span
+    ><button
+      class="primary capture"
+      :class="{ busy }"
+      @click="capture"
+      :disabled="busy || connecting || !!captureBlocked"
+      :title="captureBlocked"
+    >
+      {{ busy ? "处理中…" : held ? "采样实时帧" : "采样当前帧" }}
+    </button>
+  </div>
   <div class="vision-workspace">
     <section class="vision-canvas">
       <div class="canvas-title">
@@ -251,13 +324,15 @@ async function control(start: boolean) {
         <strong>{{
           !shown
             ? "等待图像"
-            : !inspecting
-              ? "检测暂停"
-              : detections === null
-                ? "仅图像"
-                : detections.length
-                  ? "待复核"
-                  : "未检出缺陷"
+            : device?.reportedState.inspectionEnabled === undefined
+              ? "等待检测状态"
+              : !inspecting
+                ? "检测暂停"
+                : detections === null
+                  ? "仅图像"
+                  : detections.length
+                    ? "待复核"
+                    : "未检出目标"
         }}</strong>
         <span>{{
           !shown
@@ -304,6 +379,9 @@ async function control(start: boolean) {
         </div>
       </div>
       <div class="inspector-section model-readout">
+        <p class="note">
+          候选目标不等于合格判定。当前尚未应用已验证的通用方案规则，现场结果需要复核。
+        </p>
         <h3>运行模型</h3>
         <b class="mono">{{
           device?.reportedState.modelVersion ?? "版本未上报"
@@ -313,58 +391,65 @@ async function control(start: boolean) {
           {{ chinese(device?.syncState) }}</small
         >
       </div>
-      <div class="inspector-section telemetry-trend">
+      <div v-if="auth.engineer" class="inspector-section telemetry-trend">
         <h3>推理耗时趋势 <span>ms</span></h3>
         <Sparkline :values="latency" label="推理耗时" unit=" ms" />
       </div>
     </aside>
-    <div class="device-telemetry">
-      <header>
-        <span>{{
-          device?.connectionState === "ONLINE"
-            ? "设备遥测"
-            : "末次遥测 · 当前设备未连接"
-        }}</span
-        ><time class="mono">{{
-          device?.telemetry?.receivedAt
-            ? new Date(device.telemetry.receivedAt).toLocaleTimeString()
-            : "等待上报"
-        }}</time>
-      </header>
-      <div>
-        <small>帧率</small
-        ><strong
-          >{{ device?.telemetry?.fps?.toFixed(2) ?? "—" }}<em>FPS</em></strong
-        >
+    <details v-if="auth.engineer" class="field-technical">
+      <summary>维护信息：采集、推理与传输耗时</summary>
+      <div class="device-telemetry">
+        <header>
+          <span>{{
+            device?.connectionState === "ONLINE"
+              ? "设备遥测"
+              : "末次遥测 · 当前设备未连接"
+          }}</span
+          ><time class="mono">{{
+            device?.telemetry?.receivedAt
+              ? new Date(device.telemetry.receivedAt).toLocaleTimeString()
+              : "等待上报"
+          }}</time>
+        </header>
+        <div>
+          <small>帧率</small
+          ><strong
+            >{{ device?.telemetry?.fps?.toFixed(2) ?? "—" }}<em>FPS</em></strong
+          >
+        </div>
+        <div>
+          <small>推理耗时</small
+          ><strong
+            >{{ metric(device?.telemetry?.inferenceUs) }}<em>ms</em></strong
+          >
+        </div>
+        <div>
+          <small>采集</small
+          ><strong
+            >{{ metric(device?.telemetry?.captureUs) }}<em>ms</em></strong
+          >
+        </div>
+        <div>
+          <small>预处理</small
+          ><strong
+            >{{ metric(device?.telemetry?.conversionUs) }}<em>ms</em></strong
+          >
+        </div>
+        <div>
+          <small>传输</small
+          ><strong
+            >{{ metric(device?.telemetry?.transferUs) }}<em>ms</em></strong
+          >
+        </div>
+        <div>
+          <small>错误码</small
+          ><strong :class="{ 'tone-crit': device?.telemetry?.errorCode }">{{
+            device?.telemetry?.errorCode ?? "—"
+          }}</strong>
+        </div>
       </div>
-      <div>
-        <small>推理耗时</small
-        ><strong
-          >{{ metric(device?.telemetry?.inferenceUs) }}<em>ms</em></strong
-        >
-      </div>
-      <div>
-        <small>采集</small
-        ><strong>{{ metric(device?.telemetry?.captureUs) }}<em>ms</em></strong>
-      </div>
-      <div>
-        <small>预处理</small
-        ><strong
-          >{{ metric(device?.telemetry?.conversionUs) }}<em>ms</em></strong
-        >
-      </div>
-      <div>
-        <small>传输</small
-        ><strong>{{ metric(device?.telemetry?.transferUs) }}<em>ms</em></strong>
-      </div>
-      <div>
-        <small>错误码</small
-        ><strong :class="{ 'tone-crit': device?.telemetry?.errorCode }">{{
-          device?.telemetry?.errorCode ?? "—"
-        }}</strong>
-      </div>
-    </div>
-    <section class="frame-filmstrip">
+    </details>
+    <section v-if="auth.engineer" class="frame-filmstrip">
       <div class="filmstrip-label">
         <b>连续帧</b><small>每秒留取 · 最近 8 帧</small
         ><button v-if="held" @click="held = null">实时</button>
@@ -399,28 +484,6 @@ async function control(start: boolean) {
         </div>
       </div>
     </section>
-    <div class="capture-bar console-capture">
-      <label class="capture-task"
-        >采样任务<select v-model="tasks.selected" aria-label="关联采样任务">
-          <option value="">独立采样</option>
-          <option v-for="t in tasks.items" :key="t.id" :value="t.id">
-            {{ displayName(t.name) }}
-          </option>
-        </select></label
-      ><span class="muted capture-hint">{{
-        captureBlocked ||
-        (held ? "采样保存设备当前实时帧" : "保存图像与检测记录")
-      }}</span
-      ><button
-        class="primary capture"
-        :class="{ busy }"
-        @click="capture"
-        :disabled="busy || connecting || !!captureBlocked"
-        :title="captureBlocked"
-      >
-        {{ busy ? "处理中…" : held ? "采样实时帧" : "采样当前帧" }}
-      </button>
-    </div>
   </div>
   <section class="panel section-space">
     <div class="panel-head">

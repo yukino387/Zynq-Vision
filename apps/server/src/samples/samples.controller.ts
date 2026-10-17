@@ -89,7 +89,7 @@ export class SamplesController {
       },
     });
   }
-  @Post(":id/review") async review(
+  @Roles("ADMIN") @Post(":id/review") async review(
     @Param("id") id: string,
     @Body() body: unknown,
     @Req() req: Request,
@@ -159,6 +159,7 @@ export class SamplesController {
     return this.db.sample.findUniqueOrThrow({
       where: { id, deletedAt: null },
       include: {
+        task: { include: { plan: true } },
         assets: true,
         quality: true,
         reviews: true,
@@ -185,6 +186,25 @@ export class SamplesController {
     const asset = await this.db.asset.findFirstOrThrow({
       where: { sampleId: id, kind: "PREVIEW" },
     });
+    const sample = await this.db.sample.findUniqueOrThrow({
+      where: { id, deletedAt: null },
+      include: { task: { include: { plan: true } } },
+    });
+    const classes = (
+      sample.task?.plan?.rules as { classes?: string[] } | undefined
+    )?.classes;
+    if (classes?.length) {
+      if (dto.boxes.some((box) => !classes[box.classId]))
+        throw new DomainError(
+          "VALIDATION_ERROR",
+          "标注类别不属于当前采样方案",
+          400,
+        );
+      dto.boxes = dto.boxes.map((box) => ({
+        ...box,
+        label: classes[box.classId]!,
+      }));
+    }
     if (
       dto.boxes.some(
         (b) => b.x2 > (asset.width ?? 0) || b.y2 > (asset.height ?? 0),
@@ -200,6 +220,7 @@ export class SamplesController {
         where: { sampleId: id },
         orderBy: { version: "desc" },
       });
+      await tx.sample.update({ where: { id }, data: { status: "PENDING" } });
       return tx.annotationSet.create({
         data: {
           sampleId: id,

@@ -1,0 +1,4 @@
+interface:
+  display_name: "FPGA 工程精简诊断工具"
+  short_description: "用只读脚本提取工程状态、实现报告和逐层性能，减少重复查询与日志上下文"
+  default_prompt: "使用 $fpga-engineering-tools 先输出当前 FPGA 工程的简短状态摘要，只针对异常展开证据。"

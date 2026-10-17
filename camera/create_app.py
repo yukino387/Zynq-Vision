@@ -35,11 +35,20 @@ domain = platform_component.get_domain("camera_domain")
 domain.set_config(option="proc", param="proc_extra_compiler_flags",
     value=" -O2 -g -Wall -Wextra -fno-tree-loop-distribute-patterns -DFPU_HARD_FLOAT_ABI_ENABLED=1 -DLWIP_ALLOW_MEM_FREE_FROM_OTHER_CONTEXT=1")
 domain.set_lib(lib_name="lwip220")
+domain.set_lib(lib_name="xilffs")
+domain.set_config(option="lib", lib_name="xilffs", param="XILFFS_enable_exfat", value="true")
 domain.set_config(option="lib", lib_name="lwip220", param="lwip220_api_mode", value="RAW_API")
 domain.set_config(option="lib", lib_name="lwip220", param="lwip220_dhcp", value="false")
 domain.set_config(option="lib", lib_name="lwip220", param="lwip220_tcp", value="false")
 if platform_component.build() != build_pb2.BuildResponse.SUCCESS:
     raise RuntimeError("Platform build failed")
+# Updating the platform does not refresh the generated FSBL source copies.
+fsbl_dir = workspace / "camera_platform_live/zynq_fsbl"
+for filename in ("ps7_init.c", "ps7_init.h"):
+    shutil.copyfile(workspace / "camera_platform_live/export/camera_platform_live/hw/sdt" / filename,
+                    fsbl_dir / filename)
+if platform_component.build() != build_pb2.BuildResponse.SUCCESS:
+    raise RuntimeError("FSBL rebuild with current PS initialization failed")
 if not (workspace / "camera_platform_live/export/camera_platform_live/sw/camera_domain/include/lwip/init.h").exists():
     raise RuntimeError("The platform is missing lwIP headers")
 platform = workspace / "camera_platform_live/export/camera_platform_live/camera_platform_live.xpfm"
@@ -53,7 +62,7 @@ app.import_files(from_loc=(root / "camera").as_posix(),
                  files=["camera_input.cpp", "camera_input.h", "udp_output.cpp", "udp_output.h"],
                  is_skip_copy_sources=True)
 app.import_files(from_loc=(root / "camera/int8").as_posix(),
-                 files=["live_main.cpp", "gray.cpp", "gray.h", "gray_coefficients.h", "model.h", "weights.S"],
+                 files=["live_main.cpp", "gray.cpp", "gray.h", "gray_coefficients.h", "model.h", "weights.S", "model_store.cpp", "model_store.h", "sha256.h"],
                  is_skip_copy_sources=True)
 config = workspace / "camera_live/src/UserConfig.cmake"
 bsp = workspace / "camera_platform_live/export/camera_platform_live/sw/camera_domain"
@@ -67,7 +76,7 @@ settings = {
     "USER_COMPILE_OTHER_FLAGS": "-mfpu=neon",
     "USER_COMPILE_SOURCES": "\n" + "\n".join(f'"{path.as_posix()}"' for path in [
         driver / "xconv.c", root / "camera/int8/live_main.cpp", root / "camera/int8/gray.cpp",
-        root / "camera/int8/weights.S", root / "camera/camera_input.cpp", root / "camera/udp_output.cpp"]),
+        root / "camera/int8/weights.S", root / "camera/int8/model_store.cpp", root / "camera/camera_input.cpp", root / "camera/udp_output.cpp"]),
     "USER_COMPILE_DEFINITIONS": "SDT",
     "USER_LINK_OTHER_FLAGS": '"-Wl,--defsym,_HEAP_SIZE=0x100000 -Wl,--defsym,_STACK_SIZE=0x10000"',
     "USER_LINKER_SCRIPT": '"${CMAKE_SOURCE_DIR}/lscript.ld"',

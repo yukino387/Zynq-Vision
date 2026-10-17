@@ -130,6 +130,49 @@ export class ModelsController {
     await this.models.check(id, deviceId);
     return { compatible: true };
   }
+  @Roles("ADMIN") @Post(":id/approve") async approve(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+  ) {
+    const dto = parse(
+      z
+        .object({
+          confirm: z.literal(true),
+          note: z.string().trim().min(1).max(1000),
+        })
+        .strict(),
+      body,
+    );
+    await this.models.artifact(id);
+    return this.db.$transaction(async (tx) => {
+      const model = await tx.model.findUniqueOrThrow({
+        where: { id },
+        include: { benchmarks: true },
+      });
+      if (!model.benchmarks.length)
+        throw new DomainError(
+          "INVALID_STATE",
+          "请先完成模型验证，再由管理员记录现场验收意见",
+        );
+      const metrics = model.metrics as Prisma.JsonObject;
+      return tx.model.update({
+        where: { id },
+        data: {
+          status: "APPROVED",
+          metrics: {
+            ...metrics,
+            releaseApproval: {
+              actorId: req.actor.id,
+              at: new Date().toISOString(),
+              note: dto.note,
+              benchmarkIds: model.benchmarks.map((b) => b.id),
+            },
+          },
+        },
+      });
+    });
+  }
   @Post(":id/export") async export(
     @Param("id") id: string,
     @Res() reply: FastifyReply,

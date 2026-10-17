@@ -7,6 +7,20 @@ export function uid() {
     `mobile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
   );
 }
+/** 板端采样身份：同一台手机固定 clientId，localSequence 递增。
+ *  服务端按 (clientId, localSequence) 唯一，重复用 0 会 409。 */
+export function captureIdentity(prefix: string) {
+  let client = uni.getStorageSync("vision.client") as string;
+  if (!client) {
+    client = uid();
+    uni.setStorageSync("vision.client", client);
+  }
+  const stored = Number(uni.getStorageSync("vision.boardSequence") || 0);
+  // 时间基准兜底：即使本地存储被清空，也不会再撞上历史 (clientId, localSequence)。
+  const localSequence = Math.max(stored + 1, Date.now() % 2147483647);
+  uni.setStorageSync("vision.boardSequence", localSequence);
+  return { clientId: `${prefix}-${client}`, localSequence };
+}
 const initialServer = () => {
   let origin = "";
   // #ifdef H5

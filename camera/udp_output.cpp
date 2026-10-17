@@ -1,4 +1,5 @@
 #include "udp_output.h"
+#include "int8/model_store.h"
 extern "C" {
 #include "lwip/init.h"
 #include "lwip/udp.h"
@@ -35,7 +36,19 @@ static void send_status(const ip_addr_t* address, u16_t port, uint32_t request) 
 
 static void receive(void*, udp_pcb*, pbuf* packet, const ip_addr_t* address, u16_t port) {
     uint8_t request = 0;
-    if (packet && packet->tot_len == 1) {
+    if (packet && packet->tot_len >= 20 && packet->tot_len <= 1420) {
+        uint8_t bytes[1420];
+        pbuf_copy_partial(packet,bytes,packet->tot_len,0);
+        uint32_t header[5];std::memcpy(header,bytes,20);
+        if(header[0]==0x314c444d && header[4]==packet->tot_len-20) {
+            const bool owner=peer_port==port && ip_addr_cmp(&peer,address);
+            ModelReply reply={};
+            if(header[2]==0 || owner)reply=model_request(header[1],header[2],header[3],bytes+20,header[4]);
+            else {reply.magic=0x3152444d;reply.request=header[1];reply.result=2;}
+            pbuf* response=pbuf_alloc(PBUF_TRANSPORT,sizeof(reply),PBUF_RAM);
+            if(response){std::memcpy(response->payload,&reply,sizeof(reply));udp_sendto(socket,response,address,port);pbuf_free(response);}
+        }
+    } else if (packet && packet->tot_len == 1) {
         pbuf_copy_partial(packet, &request, 1, 0);
         if (request <= 1) {
             peer = *address;
@@ -94,6 +107,7 @@ void udp_poll() {
 bool udp_client_ready() { return peer_port != 0; }
 bool udp_preview_enabled() { return preview; }
 bool udp_running() { return running; }
+void udp_pause() { running=false; }
 bool udp_camera_only() { return camera_only; }
 int udp_brightness() { return brightness; }
 void udp_send_status(const CameraStatus& status) {

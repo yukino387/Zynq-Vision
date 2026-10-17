@@ -20,6 +20,9 @@ const image = ref(""),
 const asset = computed(() =>
   props.sample.assets.find((a) => a.kind === "PREVIEW"),
 );
+const classes = computed(
+  () => props.sample.task?.plan?.rules?.classes ?? defectClasses,
+);
 const width = computed(() => asset.value?.width ?? 416),
   height = computed(() => asset.value?.height ?? 416);
 let start: {
@@ -43,6 +46,7 @@ watch(
       ? (JSON.parse(draft) as DetectionBox[])
       : (props.sample.annotations[0]?.boxes ?? []).map((b) => ({ ...b }));
     selected.value = -1;
+    classId.value = 0;
     negative.value =
       !boxes.value.length && props.sample.annotations[0]?.status === "COMPLETE";
     if (asset.value) {
@@ -64,9 +68,9 @@ watch(selected, (index) => {
   if (index >= 0) classId.value = boxes.value[index]!.classId;
 });
 watch(classId, (value) => {
-  if (selected.value >= 0 && defectClasses[value]) {
+  if (selected.value >= 0 && classes.value[value]) {
     boxes.value[selected.value]!.classId = value;
-    boxes.value[selected.value]!.label = defectClasses[value]!;
+    boxes.value[selected.value]!.label = classes.value[value]!;
   }
 });
 watch(
@@ -125,7 +129,7 @@ function down(e: PointerEvent) {
   } else {
     const box = {
       classId: classId.value,
-      label: defectClasses[classId.value]!,
+      label: classes.value[classId.value]!,
       confidence: 1,
       x1: p.x,
       y1: p.y,
@@ -174,15 +178,15 @@ function remove() {
 async function save(status: "DRAFT" | "COMPLETE", next = false) {
   if (busy.value) return;
   if (status === "COMPLETE" && !boxes.value.length && !negative.value) {
-    notices.add("没有缺陷时，请勾选“这是一张无缺陷样本”", true);
+    notices.add("没有需要标注的对象时，请勾选对应选项", true);
     return;
   }
   if (
     boxes.value.some(
-      (box) => !Number.isInteger(box.classId) || !defectClasses[box.classId],
+      (box) => !Number.isInteger(box.classId) || !classes.value[box.classId],
     )
   ) {
-    notices.add("请选择六类缺陷中的一个类别", true);
+    notices.add("请选择当前方案中的对象类别", true);
     return;
   }
   busy.value = true;
@@ -190,7 +194,7 @@ async function save(status: "DRAFT" | "COMPLETE", next = false) {
     await post(`/samples/${props.sample.id}/annotations`, {
       boxes: boxes.value.map(({ classId, confidence, x1, y1, x2, y2 }) => ({
         classId,
-        label: defectClasses[classId]!,
+        label: classes.value[classId]!,
         confidence,
         x1,
         y1,
@@ -212,7 +216,12 @@ async function save(status: "DRAFT" | "COMPLETE", next = false) {
 function key(e: KeyboardEvent) {
   if ((e.target as HTMLElement).tagName.match(/INPUT|TEXTAREA|SELECT/)) return;
   if (e.key === "Delete") remove();
-  if (/^[1-6]$/.test(e.key) && !e.ctrlKey && !e.metaKey)
+  if (
+    /^[1-6]$/.test(e.key) &&
+    classes.value[Number(e.key) - 1] &&
+    !e.ctrlKey &&
+    !e.metaKey
+  )
     classId.value = Number(e.key) - 1;
   if (e.ctrlKey && e.key === "Enter") {
     e.preventDefault();
@@ -233,14 +242,14 @@ onUnmounted(() => {
   <div class="annotation-workspace">
     <div class="toolbar">
       <label style="margin: 0"
-        >缺陷类别<select v-model.number="classId" aria-label="当前缺陷类别">
-          <option v-for="(label, id) in defectClasses" :key="id" :value="id">
+        >对象类别<select v-model.number="classId" aria-label="当前对象类别">
+          <option v-for="(label, id) in classes" :key="id" :value="id">
             {{ id + 1 }} · {{ label }}
           </option>
         </select></label
       >
       <span class="annotation-tool-hint">{{
-        selected >= 0 ? "修改选中框的类别" : "拖动图片，框选缺陷位置"
+        selected >= 0 ? "修改选中框的类别" : "框选实际存在的对象"
       }}</span>
       <button @click="zoom = Math.max(1, zoom - 0.25)" aria-label="缩小图像">
         −</button
@@ -295,7 +304,7 @@ onUnmounted(() => {
         标注对象 <span class="mono">{{ boxes.length }}</span>
       </h3>
       <p class="note">
-        ① 选类别 · ② 框出缺陷 · ③ 保存并继续。拖动框可移动，右下角可调整大小。{{
+        ① 选类别 · ② 框出对象 · ③ 保存并继续。缺失的部件不用画框。{{
           savedLocal ? "未提交的草稿已保存在本机。" : ""
         }}
       </p>
@@ -306,8 +315,7 @@ onUnmounted(() => {
         :class="{ active: selected === i }"
       >
         <button @click="selected = i" :aria-pressed="selected === i">
-          {{ i + 1 }} ·
-          {{ defectClasses[b.classId] ?? "请选择有效类别" }}</button
+          {{ i + 1 }} · {{ classes[b.classId] ?? "请选择有效类别" }}</button
         ><button
           @click="
             selected = i;
@@ -326,7 +334,10 @@ onUnmounted(() => {
         还没有标注框。在左侧图片上拖动鼠标绘制。
       </p>
       <label v-if="!boxes.length" class="check-row"
-        ><input type="checkbox" v-model="negative" />这是一张无缺陷样本</label
+        ><input
+          type="checkbox"
+          v-model="negative"
+        />图中没有需要标注的目标</label
       >
       <div class="annotation-save-actions">
         <button

@@ -20,6 +20,7 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
   private states = new Map<string, string>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private persisting = false;
+  private modelClasses = new Map<string, string[]>();
   constructor(
     @Inject(Db) private db: Db,
     @Inject(Events) private events: Events,
@@ -78,7 +79,17 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
           width: frame.width,
           height: frame.height,
           jpeg: frame.preview.toString("base64"),
-          detections: frame.detections,
+          detections:
+            frame.detections?.map((box) => ({
+              ...box,
+              label:
+                this.modelClasses.get(frame.modelState.modelVersion ?? "")?.[
+                  box.classId
+                ] ??
+                (device.type === "SIMULATOR"
+                  ? box.label
+                  : `类别 ${box.classId + 1}`),
+            })) ?? null,
         },
         device.type === "SIMULATOR" ? "SIMULATION" : "BOARD",
       );
@@ -134,6 +145,12 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
     });
   }
   async persist() {
+    for (const model of await this.db.model.findMany({
+      select: { version: true, manifest: true },
+    })) {
+      const classes = (model.manifest as { classes?: string[] }).classes;
+      if (classes) this.modelClasses.set(model.version, classes);
+    }
     for (const snapshot of await this.snapshots()) {
       await this.db.device.update({
         where: { id: snapshot.id },

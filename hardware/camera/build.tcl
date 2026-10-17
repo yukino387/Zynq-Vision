@@ -10,6 +10,8 @@ source [file join $source_dir base_system.tcl]
 set ps [get_bd_cells processing_system7_0]
 set_property CONFIG.PCW_FPGA0_PERIPHERAL_FREQMHZ {125.000000} $ps
 set_property -dict [list CONFIG.PCW_ENET0_PERIPHERAL_ENABLE {1} CONFIG.PCW_ENET0_ENET0_IO {MIO 16 .. 27} CONFIG.PCW_ENET0_GRP_MDIO_ENABLE {1} CONFIG.PCW_ENET0_GRP_MDIO_IO {MIO 52 .. 53}] $ps
+# QSPI boot uses the dedicated PS MIO pins; SD0 remains on MIO 40..45.
+set_property -dict [list CONFIG.PCW_QSPI_PERIPHERAL_ENABLE {1} CONFIG.PCW_QSPI_QSPI_IO {MIO 1 .. 6} CONFIG.PCW_QSPI_GRP_SINGLE_SS_ENABLE {1} CONFIG.PCW_QSPI_GRP_FBCLK_ENABLE {1} CONFIG.PCW_QSPI_PERIPHERAL_FREQMHZ {200}] $ps
 set_property CONFIG.NUM_MI 3 [get_bd_cells axi_smc]
 set_property CONFIG.NUM_SI 3 [get_bd_cells smartconnect_0]
 create_bd_cell -type module -reference ov5640_capture camera
@@ -75,3 +77,4 @@ write_checkpoint -force [file join $build_dir qualified.dcp]
 write_bitstream -force [file join $build_dir system_wrapper.bit]
 write_hw_platform -fixed -force -file [file join $build_dir camera_cnn.xsa]
 exit
+

@@ -39,7 +39,7 @@
           "usingPs7Init": {
             "runPs7Init": true,
             "runPs7PostInit": true,
-            "ps7InitTclFile": "C:/00_workplace/fpga/cnn_accelerator/vitis_live/camera_platform_live/export/camera_platform_live/hw/sdt/ps7_init.tcl"
+            "ps7InitTclFile": "${workspaceFolder}\\camera_live\\_ide\\psinit\\conv.tcl"
           }
         },
         "downloadElf": [
