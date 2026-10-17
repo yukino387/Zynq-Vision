@@ -1,0 +1,31 @@
+{
+  "name": "视觉采样",
+  "appid": "__UNI__FIELDVISION",
+  "description": "本地局域网现场视觉采样",
+  "versionName": "0.1.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "vueVersion": "3",
+  "h5": {
+    "router": {
+      "mode": "hash",
+      "base": "/mobile/"
+    },
+    "title": "视觉采样"
+  },
+  "app-plus": {
+    "usingComponents": true,
+    "distribute": {
+      "android": {
+        "permissions": [
+          "<uses-permission android:name=\"android.permission.CAMERA\"/>",
+          "<uses-permission android:name=\"android.permission.INTERNET\"/>",
+          "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>"
+        ]
+      }
+    }
+  },
+  "uniStatistics": {
+    "enable": false
+  }
+}

@@ -1,0 +1,101 @@
+import type {
+  ConnectionState,
+  DeviceState,
+  ModelManifest,
+} from "@vision/contracts";
+export {
+  defectClasses,
+  chinese,
+  displayName,
+  reasonLabel,
+  fieldLabel,
+  errorMessage,
+} from "./display.js";
+export { statusTone, type Tone } from "./status.js";
+export function connectionState(
+  lastSeen: number | null,
+  now: number,
+  stale: number,
+  offline: number,
+): ConnectionState {
+  return lastSeen === null || now - lastSeen > offline
+    ? "OFFLINE"
+    : now - lastSeen > stale
+      ? "STALE"
+      : "ONLINE";
+}
+export function syncState(
+  desired: DeviceState,
+  reported: DeviceState,
+): "UNKNOWN" | "SYNCED" | "DESYNCED" {
+  const keys = Object.keys(desired) as (keyof DeviceState)[];
+  if (
+    !keys.length ||
+    keys.some((k) => reported[k] === undefined || reported[k] === null)
+  )
+    return "UNKNOWN";
+  return keys.every((k) => desired[k] === reported[k]) ? "SYNCED" : "DESYNCED";
+}
+export function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object")
+    return `{${Object.entries(value)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`)
+      .join(",")}}`;
+  return JSON.stringify(value) ?? "null";
+}
+export function compatibility(
+  expected: ModelManifest,
+  candidate: ModelManifest,
+): string[] {
+  const keys = [
+    "networkTemplate",
+    "firmwareInterfaceVersion",
+    "preprocessProfile",
+    "input",
+    "output",
+    "classCount",
+    "classes",
+    "quantization",
+  ] as const;
+  return keys.filter((k) => {
+    if (k !== "quantization")
+      return canonical(expected[k]) !== canonical(candidate[k]);
+    const a = expected.quantization,
+      b = candidate.quantization;
+    // JSON storage may round a double by a few ULPs. Hardware scales still
+    // must match to floating-point precision, not an application tolerance.
+    const sameScale = (x: number, y: number) =>
+      x === y ||
+      Math.abs(x - y) <=
+        4 * Number.EPSILON * Math.max(Math.abs(x), Math.abs(y));
+    return (
+      a.scheme !== b.scheme ||
+      a.inputZeroPoint !== b.inputZeroPoint ||
+      !sameScale(a.inputScale, b.inputScale) ||
+      a.outputScales.length !== b.outputScales.length ||
+      a.outputScales.some((scale, i) => !sameScale(scale, b.outputScales[i]!))
+    );
+  });
+}
+export function motionSummary(
+  x: number,
+  y: number,
+  z: number,
+  pitch: number | null,
+  roll: number | null,
+) {
+  const motionScore = Math.sqrt(x * x + y * y + z * z);
+  return {
+    motionScore,
+    pitch,
+    roll,
+    captureStability:
+      motionScore < 0.1
+        ? "STABLE"
+        : motionScore < 0.5
+          ? "SLIGHT MOTION"
+          : "HOLD STEADY",
+  };
+}

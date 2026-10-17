@@ -1,0 +1,88 @@
+{
+  "pages": [
+    {
+      "path": "pages/capture/index",
+      "style": {
+        "navigationBarTitleText": "现场采样",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/home/index",
+      "style": {
+        "navigationBarTitleText": "现场工作台"
+      }
+    },
+    {
+      "path": "pages/tasks/index",
+      "style": {
+        "navigationBarTitleText": "采样任务"
+      }
+    },
+    {
+      "path": "pages/records/index",
+      "style": {
+        "navigationBarTitleText": "检测记录"
+      }
+    },
+    {
+      "path": "pages/login/index",
+      "style": {
+        "navigationBarTitleText": "账号登录"
+      }
+    },
+    {
+      "path": "pages/pair/index",
+      "style": {
+        "navigationBarTitleText": "服务器与工位配对"
+      }
+    },
+    {
+      "path": "pages/detail/index",
+      "style": {
+        "navigationBarTitleText": "检测与复核"
+      }
+    },
+    {
+      "path": "pages/sync/index",
+      "style": {
+        "navigationBarTitleText": "本地采样队列"
+      }
+    },
+    {
+      "path": "pages/sample/index",
+      "style": {
+        "navigationBarTitleText": "样本与审核"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarBackgroundColor": "#f1f0e8",
+    "backgroundColor": "#e9e9df"
+  },
+  "tabBar": {
+    "color": "#738066",
+    "selectedColor": "#c64b1e",
+    "backgroundColor": "#f1f0e8",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/home/index",
+        "text": "首页"
+      },
+      {
+        "pagePath": "pages/tasks/index",
+        "text": "任务"
+      },
+      {
+        "pagePath": "pages/capture/index",
+        "text": "采样"
+      },
+      {
+        "pagePath": "pages/records/index",
+        "text": "记录"
+      }
+    ]
+  }
+}

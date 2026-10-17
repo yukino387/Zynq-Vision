@@ -1,0 +1,135 @@
+/* 工业 HMI 令牌：灰度为底，彩色只承担语义（ISA-101 取向）。
+   主题三段式——亮色定义在 :root，系统暗色与显式暗色各覆盖一次，
+   data-theme 由 apps/web/src/stores/app.ts 写到 documentElement。 */
+:root {
+  --paper: #f1f0ed;
+  --surface: #fbfaf8;
+  --surface-2: #e4e2dd;
+  --surface-3: #d6d3cc;
+  --ink: #151715;
+  --ink-2: #484c49;
+  --muted: #7c807c;
+  --line: #c9c6bf;
+  --line-strong: #adaaa2;
+
+  /* 强调色：只用于选中项、主操作、焦点环、检测框描边。永不作状态色。 */
+  --forest: #1f4d3a;
+  --forest-hover: #2a6349;
+  --forest-ink: #ffffff;
+
+  /* 状态语义：正常 / 需人工 / 故障 / 进行中 */
+  --green: #3d6b4b;
+  --ok-bg: #e6ece7;
+  --amber: #8f5f00;
+  --warn-bg: #f5ead2;
+  --warn-line: #d8bd85;
+  --red: #a5321a;
+  --crit-bg: #f3e1da;
+  --crit-line: #d4a294;
+  --info: #3a5f86;
+  --info-bg: #e3ebf3;
+  --run: #2f6b4a;
+
+  --scrim: color-mix(in srgb, #151715 40%, transparent);
+  --shadow-drawer: 0 8px 28px #00000014;
+  --shadow-toast: 0 6px 20px #00000018;
+
+  --radius: 2px;
+  --mono: "IBM Plex Mono", "Cascadia Code", "Consolas", monospace;
+  --font: "Noto Sans SC", "Segoe UI", "Microsoft YaHei", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #191b19;
+    --surface: #1f2220;
+    --surface-2: #222523;
+    --surface-3: #2c302d;
+    --ink: #e8e6e1;
+    --ink-2: #adb2ad;
+    --muted: #7f847f;
+    --line: #343834;
+    --line-strong: #474c48;
+
+    --forest: #5aa684;
+    --forest-hover: #6fb894;
+    --forest-ink: #0e1a14;
+
+    --green: #7fb391;
+    --ok-bg: #1d2820;
+    --amber: #d3a24b;
+    --warn-bg: #2a2416;
+    --warn-line: #5c4a24;
+    --red: #e0764f;
+    --crit-bg: #2d1d16;
+    --crit-line: #6a3a28;
+    --info: #8ab0d4;
+    --info-bg: #1b2430;
+    --run: #5aa684;
+
+    --scrim: color-mix(in srgb, #000000 60%, transparent);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #191b19;
+  --surface: #1f2220;
+  --surface-2: #222523;
+  --surface-3: #2c302d;
+  --ink: #e8e6e1;
+  --ink-2: #adb2ad;
+  --muted: #7f847f;
+  --line: #343834;
+  --line-strong: #474c48;
+
+  --forest: #5aa684;
+  --forest-hover: #6fb894;
+  --forest-ink: #0e1a14;
+
+  --green: #7fb391;
+  --ok-bg: #1d2820;
+  --amber: #d3a24b;
+  --warn-bg: #2a2416;
+  --warn-line: #5c4a24;
+  --red: #e0764f;
+  --crit-bg: #2d1d16;
+  --crit-line: #6a3a28;
+  --info: #8ab0d4;
+  --info-bg: #1b2430;
+  --run: #5aa684;
+
+  --scrim: color-mix(in srgb, #000000 60%, transparent);
+  color-scheme: dark;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 14px;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+a {
+  color: inherit;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--forest);
+  outline-offset: 3px;
+}

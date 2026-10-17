@@ -51,6 +51,7 @@ compile_commands.json
 
 # Local documentation is kept outside version control
 *.md
+!/AGENTS.md
 *.rst
 *.adoc
 *.pdf
@@ -73,3 +74,37 @@ README*
 /vitis_live/camera_platform_live/ps7_cortexa9_0/
 /vitis_live/camera_platform_live/resources/
 /vitis_live/camera_platform_live/zynq_fsbl/
+
+# IoT Vision local dependencies, secrets and generated artifacts
+node_modules/
+**/dist/
+**/.vite/
+/data/
+.env
+.env.*
+!.env.example
+!/pnpm-lock.yaml
+!/docs/architecture.md
+!/docs/device-protocol.md
+!/docs/database.md
+!/docs/api.md
+!/docs/design-system.md
+!/docs/web-screens.md
+!/docs/websocket.md
+!/docs/offline-sync.md
+!/docs/deployment.md
+!/docs/development.md
+!/docs/hardware-integration.md
+!/docs/design-system.md
+
+/temporary/iot_platform_test/run-*/
+/temporary/iot_platform_test/*.db*
+/temporary/iot_platform_test/*.json
+/temporary/iot_platform_test/screenshots/
+
+/temporary/iot_platform_test/*.tgz
+
+/temporary/frontend_workflow_20261016/run-*/
+/temporary/frontend_workflow_20261016/*.zip
+/temporary/frontend_workflow_20261016/screenshots/
+/temporary/frontend_refinement/*.png

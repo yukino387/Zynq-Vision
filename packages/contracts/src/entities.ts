@@ -1,0 +1,83 @@
+import type { DetectionBox, Source } from "./index.js";
+export interface Asset {
+  id: string;
+  kind: string;
+  mimeType: string;
+  sha256: string;
+  width: number | null;
+  height: number | null;
+  size: number;
+}
+export interface Annotation {
+  id: string;
+  version: number;
+  status: string;
+  boxes: DetectionBox[];
+}
+export interface Sample {
+  id: string;
+  name: string;
+  source: Source;
+  status: string;
+  hard: boolean;
+  createdAt: string;
+  assets: Asset[];
+  annotations: Annotation[];
+  quality?: { status: string; metrics: Record<string, unknown> };
+  metadata: Record<string, unknown>;
+}
+export interface Inspection {
+  id: string;
+  sampleId: string;
+  deviceId: string | null;
+  source: Source;
+  modelVersion: string | null;
+  planVersion: string | null;
+  firmwareVersion: string | null;
+  result: string;
+  reason: string;
+  frameId: number | null;
+  confidence: number | null;
+  latency: number | null;
+  createdAt: string;
+  detections: DetectionBox[];
+  sample: Sample;
+  reviews: { verdict: string; note: string }[];
+}
+export interface Named {
+  id: string;
+  name: string;
+  status?: string;
+  version?: string | number;
+  source?: Source;
+  createdAt: string;
+  [key: string]: unknown;
+}
+export interface Task extends Named {
+  stationId: string | null;
+  target: number;
+  _count: { samples: number };
+}
+export interface Dataset extends Named {
+  status: "DRAFT" | "READY" | "FROZEN";
+  version: number;
+  checksum: string | null;
+  _count: { items: number };
+}
+export interface Model extends Named {
+  version: string;
+  status: string;
+  manifest: Record<string, unknown>;
+  benchmarks: unknown[];
+}
+export interface Deployment extends Named {
+  deviceId: string;
+  modelId: string;
+  status: string;
+  progress: number;
+  previousVersion: string | null;
+  error: string | null;
+  /** 部署收据。resident=true 表示制品已经在设备 SD 卡上，这次没传字节，只做了切换。 */
+  receipt: { resident?: boolean } | null;
+  model: Model;
+}

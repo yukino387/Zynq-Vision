@@ -1,0 +1,488 @@
+generator client {
+ provider = "prisma-client-js"
+}
+datasource db {
+ provider = "sqlite"
+ url = env("DATABASE_URL")
+}
+enum Role {
+ ADMIN
+ ENGINEER
+ OPERATOR
+}
+enum Source {
+ BOARD
+ MOBILE
+ IMPORT
+ SIMULATION
+}
+enum DatasetStatus {
+ DRAFT
+ READY
+ FROZEN
+}
+enum Result {
+ PASS
+ FAIL
+ REVIEW
+ ERROR
+}
+enum JobStatus {
+ QUEUED
+ RUNNING
+ COMPLETED
+ FAILED
+ CANCELLED
+}
+enum DeploymentStatus {
+ APPROVED
+ DOWNLOADING
+ VERIFYING
+ VERIFIED
+ ACTIVATING
+ SELF_TEST
+ ACTIVE
+ FAILED
+ ROLLBACK
+ ROLLED_BACK
+ SUPERSEDED
+}
+model User {
+ id String @id @default(cuid())
+ name String
+ username String @unique
+ passwordHash String
+ role Role
+ disabled Boolean @default(false)
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ reviews Review[]
+ audits AuditLog[]
+ annotations AnnotationSet[]
+}
+model Station {
+ id String @id @default(cuid())
+ name String
+ code String @unique
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ devices Device[]
+ tasks Task[]
+ inspections Inspection[]
+}
+model Device {
+ id String @id @default(cuid())
+ name String
+ serialNumber String @unique
+ type String
+ stationId String?
+ station Station? @relation(fields:[stationId],references:[id])
+ firmwareVersion String?
+ protocolVersion String?
+ ipAddress String?
+ lastSeenAt DateTime?
+ connectionState String @default("OFFLINE")
+ runtimeState String @default("UNKNOWN")
+ desiredState Json @default("{}")
+ reportedState Json @default("{}")
+ capabilities Json
+ metadata Json @default("{}")
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ tokens DeviceToken[]
+ inspections Inspection[]
+ deployments Deployment[]
+ events DeviceEvent[]
+ benchmarks Benchmark[]
+ commands Command[]
+ @@index([lastSeenAt])
+ @@index([stationId])
+}
+model DeviceToken {
+ id String @id @default(cuid())
+ deviceId String
+ device Device @relation(fields:[deviceId],references:[id])
+ tokenHash String @unique
+ expiresAt DateTime?
+ revokedAt DateTime?
+ createdAt DateTime @default(now())
+}
+model InspectionPlan {
+ id String @id @default(cuid())
+ name String
+ version Int
+ rules Json
+ createdAt DateTime @default(now())
+ tasks Task[]
+ @@unique([name,version])
+}
+model Task {
+ id String @id @default(cuid())
+ name String
+ status String @default("OPEN")
+ target Int
+ stationId String?
+ station Station? @relation(fields:[stationId],references:[id])
+ planId String?
+ plan InspectionPlan? @relation(fields:[planId],references:[id])
+ requirements Json @default("{}")
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ samples Sample[]
+ inspections Inspection[]
+ sessions CaptureSession[]
+}
+model Workpiece {
+ id String @id @default(cuid())
+ name String
+ serialNumber String @unique
+ metadata Json @default("{}")
+ createdAt DateTime @default(now())
+ inspections Inspection[]
+}
+model CaptureSession {
+ id String @id @default(cuid())
+ taskId String?
+ task Task? @relation(fields:[taskId],references:[id])
+ source Source
+ createdAt DateTime @default(now())
+ sets CaptureSet[]
+}
+model CaptureSet {
+ id String @id @default(cuid())
+ sessionId String?
+ session CaptureSession? @relation(fields:[sessionId],references:[id])
+ clientId String @unique
+ metadata Json @default("{}")
+ createdAt DateTime @default(now())
+ samples Sample[]
+}
+model Sample {
+ id String @id @default(cuid())
+ name String
+ source Source
+ clientId String
+ idempotencyKey String @unique
+ localSequence Int @default(0)
+ taskId String?
+ task Task? @relation(fields:[taskId],references:[id])
+ captureSetId String?
+ captureSet CaptureSet? @relation(fields:[captureSetId],references:[id])
+ hard Boolean @default(false)
+ status String @default("PENDING")
+ metadata Json @default("{}")
+ capturedAt DateTime
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ deletedAt DateTime?
+ assets Asset[]
+ inspections Inspection[]
+ quality QualityReport?
+ annotations AnnotationSet[]
+ datasets DatasetItem[]
+ reviews Review[]
+ @@unique([clientId,localSequence])
+ @@index([createdAt])
+ @@index([source])
+}
+model Asset {
+ id String @id @default(cuid())
+ sampleId String?
+ sample Sample? @relation(fields:[sampleId],references:[id])
+ storageKey String @unique
+ originalName String
+ mimeType String
+ size Int
+ sha256 String
+ width Int?
+ height Int?
+ format String
+ kind String
+ source Source
+ metadata Json @default("{}")
+ createdAt DateTime @default(now())
+ deletedAt DateTime?
+ artifacts ModelArtifact[]
+ @@index([sha256])
+}
+model QualityReport {
+ id String @id @default(cuid())
+ sampleId String @unique
+ sample Sample @relation(fields:[sampleId],references:[id])
+ status String
+ metrics Json
+ createdAt DateTime @default(now())
+}
+model AnnotationSet {
+ id String @id @default(cuid())
+ sampleId String
+ sample Sample @relation(fields:[sampleId],references:[id])
+ userId String
+ user User @relation(fields:[userId],references:[id])
+ version Int
+ status String @default("DRAFT")
+ createdAt DateTime @default(now())
+ boxes Annotation[]
+ datasets DatasetItem[]
+ @@unique([sampleId,version])
+}
+model Annotation {
+ id String @id @default(cuid())
+ setId String
+ set AnnotationSet @relation(fields:[setId],references:[id])
+ classId Int
+ label String
+ x1 Float
+ y1 Float
+ x2 Float
+ y2 Float
+ confidence Float @default(1)
+}
+model Inspection {
+ id String @id @default(cuid())
+ sampleId String
+ sample Sample @relation(fields:[sampleId],references:[id])
+ deviceId String?
+ device Device? @relation(fields:[deviceId],references:[id])
+ stationId String?
+ station Station? @relation(fields:[stationId],references:[id])
+ taskId String?
+ task Task? @relation(fields:[taskId],references:[id])
+ workpieceId String?
+ workpiece Workpiece? @relation(fields:[workpieceId],references:[id])
+ modelId String?
+ model Model? @relation(fields:[modelId],references:[id])
+ modelVersion String?
+ planVersion String?
+ firmwareVersion String?
+ frameId Int?
+ source Source
+ startedAt DateTime
+ completedAt DateTime
+ latency Float?
+ result Result
+ reason String
+ confidence Float?
+ status String @default("COMPLETED")
+ metadata Json @default("{}")
+ createdAt DateTime @default(now())
+ detections Detection[]
+ reviews Review[]
+ @@index([createdAt])
+ @@index([deviceId])
+ @@index([taskId])
+ @@index([result])
+}
+model Detection {
+ id String @id @default(cuid())
+ inspectionId String
+ inspection Inspection @relation(fields:[inspectionId],references:[id])
+ classId Int
+ label String
+ confidence Float
+ x1 Float
+ y1 Float
+ x2 Float
+ y2 Float
+}
+model Review {
+ id String @id @default(cuid())
+ inspectionId String?
+ inspection Inspection? @relation(fields:[inspectionId],references:[id])
+ sampleId String?
+ sample Sample? @relation(fields:[sampleId],references:[id])
+ userId String
+ user User @relation(fields:[userId],references:[id])
+ verdict String
+ note String
+ hard Boolean
+ createdAt DateTime @default(now())
+}
+model Dataset {
+ id String @id @default(cuid())
+ name String
+ version Int
+ status DatasetStatus @default(DRAFT)
+ checksum String?
+ frozenAt DateTime?
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ items DatasetItem[]
+ trainings TrainingJob[]
+ benchmarks Benchmark[]
+ @@unique([name,version])
+}
+model DatasetItem {
+ id String @id @default(cuid())
+ datasetId String
+ dataset Dataset @relation(fields:[datasetId],references:[id])
+ sampleId String
+ sample Sample @relation(fields:[sampleId],references:[id])
+ annotationSetId String
+ annotationSet AnnotationSet @relation(fields:[annotationSetId],references:[id])
+ split String @default("train")
+ snapshot Json
+ createdAt DateTime @default(now())
+ @@unique([datasetId,sampleId])
+}
+model TrainingJob {
+ id String @id @default(cuid())
+ name String
+ datasetId String
+ dataset Dataset @relation(fields:[datasetId],references:[id])
+ status JobStatus @default(QUEUED)
+ source Source @default(SIMULATION)
+ stage String @default("Preparing Dataset")
+ progress Int @default(0)
+ error String?
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ models Model[]
+}
+model Model {
+ id String @id @default(cuid())
+ name String
+ version String
+ architecture String
+ trainingId String?
+ training TrainingJob? @relation(fields:[trainingId],references:[id])
+ manifest Json
+ source Source
+ status String @default("CANDIDATE")
+ metrics Json @default("{}")
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ artifacts ModelArtifact[]
+ benchmarks Benchmark[]
+ deployments Deployment[]
+ inspections Inspection[]
+ @@unique([name,version])
+}
+model ModelArtifact {
+ id String @id @default(cuid())
+ modelId String
+ model Model @relation(fields:[modelId],references:[id])
+ assetId String
+ asset Asset @relation(fields:[assetId],references:[id])
+ kind String
+ createdAt DateTime @default(now())
+}
+model Benchmark {
+ id String @id @default(cuid())
+ name String
+ modelId String
+ model Model @relation(fields:[modelId],references:[id])
+ datasetId String
+ dataset Dataset @relation(fields:[datasetId],references:[id])
+ deviceId String
+ device Device @relation(fields:[deviceId],references:[id])
+ source Source
+ metrics Json
+ createdAt DateTime @default(now())
+}
+model Deployment {
+ id String @id @default(cuid())
+ name String
+ deviceId String
+ device Device @relation(fields:[deviceId],references:[id])
+ modelId String
+ model Model @relation(fields:[modelId],references:[id])
+ previousVersion String?
+ status DeploymentStatus @default(APPROVED)
+ source Source
+ progress Int @default(0)
+ error String?
+ receipt Json @default("{}")
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ @@index([deviceId,status])
+}
+model SyncJob {
+ id String @id @default(cuid())
+ clientId String
+ status JobStatus @default(QUEUED)
+ attempts Int @default(0)
+ error String?
+ payload Json
+ startedAt DateTime?
+ completedAt DateTime?
+ createdAt DateTime @default(now())
+}
+model Job {
+ id String @id @default(cuid())
+ type String
+ entityId String
+ status JobStatus @default(QUEUED)
+ payload Json
+ attempts Int @default(0)
+ error String?
+ startedAt DateTime?
+ completedAt DateTime?
+ createdAt DateTime @default(now())
+ @@index([status,createdAt])
+}
+model Command {
+ id String @id @default(cuid())
+ deviceId String
+ device Device @relation(fields:[deviceId],references:[id])
+ requestId String
+ type String
+ status JobStatus @default(QUEUED)
+ attempts Int @default(0)
+ result Json?
+ error String?
+ createdAt DateTime @default(now())
+ completedAt DateTime?
+}
+model DeviceEvent {
+ id String @id @default(cuid())
+ deviceId String
+ device Device @relation(fields:[deviceId],references:[id])
+ type String
+ source Source
+ payload Json
+ requestId String
+ createdAt DateTime @default(now())
+ @@index([deviceId,createdAt])
+}
+model AuditLog {
+ id String @id @default(cuid())
+ userId String?
+ user User? @relation(fields:[userId],references:[id])
+ action String
+ entityId String
+ before Json?
+ after Json?
+ requestId String
+ result String
+ createdAt DateTime @default(now())
+ @@index([createdAt])
+}
+model SystemEvent {
+ id String @id @default(cuid())
+ type String
+ payload Json
+ createdAt DateTime @default(now())
+}
+model PairingToken {
+ id String @id @default(cuid())
+ hash String @unique
+ expiresAt DateTime
+ usedAt DateTime?
+ stationId String?
+ createdAt DateTime @default(now())
+}
+
+model RegistrationCode {
+ id String @id @default(cuid())
+ codeHash String @unique
+ prefix String
+ label String
+ issuedById String
+ expiresAt DateTime
+ usedAt DateTime?
+ usedById String?
+ revokedAt DateTime?
+ createdAt DateTime @default(now())
+ @@index([createdAt])
+}
