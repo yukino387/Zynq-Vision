@@ -1,0 +1,113 @@
+{
+  "date": "2026-10-18",
+  "problem": "Monitor displayed only the top strip while both framebuffer pages contained the full interface",
+  "baselineStreamErrors": {
+    "before": 68043,
+    "after": 68163,
+    "seconds": 2,
+    "delta": 120
+  },
+  "changes": [
+    "64-beat VDMA read bursts",
+    "64-bit custom crossbar with display read priority and no extra data FIFOs",
+    "Clear stale preview/results and initialize the empty job selector"
+  ],
+  "bitstreamSha256": "64c16139de03d28921c6e51eaef8e30a8d563c698b07499a1fb423b73e530223",
+  "timing": {
+    "wns_ns": 0.42,
+    "tns_ns": 0.0,
+    "setup_failing": 0.0,
+    "setup_total": 189654.0,
+    "whs_ns": 0.015,
+    "ths_ns": 0.0,
+    "hold_failing": 0.0,
+    "hold_total": 189654.0,
+    "wpws_ns": 1.101,
+    "tpws_ns": 0.0,
+    "pulse_failing": 0.0,
+    "pulse_total": 72390.0
+  },
+  "resources": {
+    "Slice LUTs": {
+      "used": 45120.0,
+      "available": 53200.0,
+      "percent": 84.81
+    },
+    "Slice Registers": {
+      "used": 60647.0,
+      "available": 106400.0,
+      "percent": 57.0
+    },
+    "Block RAM Tile": {
+      "used": 109.0,
+      "available": 140.0,
+      "percent": 77.86
+    },
+    "DSPs": {
+      "used": 217.0,
+      "available": 220.0,
+      "percent": 98.64
+    }
+  },
+  "busSkewMinimumSlackNs": 8.748,
+  "physicalStreamTest": {
+    "idle": {
+      "seconds": 3,
+      "before": 44,
+      "after": 44,
+      "delta": 0
+    },
+    "inference": {
+      "before": 44,
+      "after": 44,
+      "delta": 0
+    },
+    "settled": {
+      "seconds": 30,
+      "before": 44,
+      "after": 44,
+      "delta": 0
+    },
+    "engineRestored": true
+  },
+  "physicalCameraInferenceSmoke": {
+    "model": "MILK-RGB-v3-20261018",
+    "framesObserved": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21
+    ],
+    "elapsedSeconds": 4.6,
+    "previewFrame": 22,
+    "cameraSha256": "1de369a58217679cfcb8507f08f1fe6d7ffbee3a536d65275182e0cb24897bd6",
+    "recordSequence": 1,
+    "idempotent": true,
+    "physicalSdWritten": false,
+    "serverSynced": false
+  },
+  "armPanelRegressionPassed": true,
+  "physicalMonitorPictureConfirmed": false,
+  "loadMethod": "JTAG PL update with Linux still running from RAM; physical SD/QSPI untouched",
+  "pending": [
+    "Monitor picture confirmation",
+    "Physical keyboard/mouse, deferred by user",
+    "SD cold boot and long-run qualification"
+  ]
+}

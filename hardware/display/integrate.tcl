@@ -10,12 +10,14 @@ set_property -dict [list CONFIG.PRIM_IN_FREQ {100.000} CONFIG.CLKOUT1_REQUESTED_
 connect_bd_net [get_bd_pins $ps/FCLK_CLK1] [get_bd_pins display_clocks/clk_in1]
 create_bd_cell -type module -reference hdmi_scanout display_scanout
 create_bd_cell -type ip -vlnv xilinx.com:ip:axi_vdma:6.3 display_vdma
-set_property -dict [list CONFIG.c_include_sg {0} CONFIG.c_include_mm2s {1} CONFIG.c_include_s2mm {0} CONFIG.c_m_axi_mm2s_data_width {64} CONFIG.c_m_axis_mm2s_tdata_width {32} CONFIG.c_num_fstores {2} CONFIG.c_mm2s_linebuffer_depth {4096} CONFIG.c_mm2s_genlock_mode {0}] [get_bd_cells display_vdma]
+set_property -dict [list CONFIG.c_include_sg {0} CONFIG.c_include_mm2s {1} CONFIG.c_include_s2mm {0} CONFIG.c_m_axi_mm2s_data_width {64} CONFIG.c_m_axis_mm2s_tdata_width {32} CONFIG.c_num_fstores {2} CONFIG.c_mm2s_linebuffer_depth {4096} CONFIG.c_mm2s_max_burst_length {64} CONFIG.c_mm2s_genlock_mode {0}] [get_bd_cells display_vdma]
 create_bd_cell -type ip -vlnv xilinx.com:ip:axi_gpio:2.0 display_status
 set_property -dict [list CONFIG.C_GPIO_WIDTH {32} CONFIG.C_ALL_INPUTS {1}] [get_bd_cells display_status]
 connect_bd_intf_net [get_bd_intf_pins axi_smc/M03_AXI] [get_bd_intf_pins display_vdma/S_AXI_LITE]
 connect_bd_intf_net [get_bd_intf_pins axi_smc/M04_AXI] [get_bd_intf_pins display_status/S_AXI]
-set_property CONFIG.NUM_SI 3 [get_bd_cells smartconnect_3]
+# Sustain 221 MB/s scanout through a 64-bit crossbar with display read priority.
+# VDMA already buffers pixels, so avoid the performance preset's extra FIFOs.
+set_property -dict [list CONFIG.NUM_SI {3} CONFIG.STRATEGY {0} CONFIG.XBAR_DATA_WIDTH {64} CONFIG.S02_ARB_PRIORITY {1}] [get_bd_cells smartconnect_3]
 connect_bd_intf_net [get_bd_intf_pins display_vdma/M_AXI_MM2S] [get_bd_intf_pins smartconnect_3/S02_AXI]
 connect_bd_intf_net [get_bd_intf_pins display_vdma/M_AXIS_MM2S] [get_bd_intf_pins display_scanout/s_axis]
 foreach pin {display_scanout/axi_clk display_status/s_axi_aclk display_vdma/s_axi_lite_aclk display_vdma/m_axi_mm2s_aclk display_vdma/m_axis_mm2s_aclk smartconnect_3/S02_ACLK} {

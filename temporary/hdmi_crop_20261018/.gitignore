@@ -1,0 +1,16 @@
+hardware/
+hardware-custom/
+__pycache__/
+*.bin
+*.so
+*.z
+*.png
+*.log
+*.exit
+*.done
+*.list
+uart.commands
+uart.stop
+baseline.json
+build-summary.json
+panel_fb_fixture.c

@@ -2,6 +2,7 @@
 #include "nlohmann/json.hpp"
 #include "httplib.h"
 #include "framebuffer.h"
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <fstream>
@@ -21,7 +22,7 @@ std::vector<uint8_t> pixels(416*416*2);
 std::vector<lv_obj_t*> rectangles;
 std::vector<std::string> job_ids;
 std::string pending,options_cache;
-bool paused=false;
+bool paused=false,picture_valid=false,jobs_loaded=false;
 const char* pending_file="/var/lib/vision/panel-request";
 void store_pending(const std::string& value) {
     const std::string temporary=std::string(pending_file)+".tmp";
@@ -36,6 +37,13 @@ void store_pending(const std::string& value) {
 uint32_t tick(){return uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());}
 std::string translated(const std::string& result){return result=="PASS"?"符合要求":result=="FAIL"?"不符合要求":result=="REVIEW"?"待人工复核":"执行错误";}
 void text(lv_obj_t* label,const std::string& value){lv_label_set_text(label,value.c_str());}
+void clear_picture() {
+    if(!picture_valid)return;
+    std::fill(pixels.begin(),pixels.end(),0);
+    lv_image_set_src(picture,&image);lv_obj_invalidate(picture);
+    for(auto object:rectangles)lv_obj_delete(object);
+    rectangles.clear();picture_valid=false;
+}
 json get(const std::string& path) {
     const auto response=engine.Get(path);if(!response || response->status!=200)throw std::runtime_error("检测服务尚未就绪");return json::parse(response->body);
 }
@@ -74,7 +82,7 @@ void jobs(lv_timer_t*) {
     try {
         const auto list=get("/jobs");std::string options;std::vector<std::string> ids;
         for(const auto& job:list){if(!options.empty())options+='\n';options+=job.at("name").get<std::string>();ids.push_back(job.at("id"));}
-        if(options!=options_cache || ids!=job_ids){options_cache=options;job_ids=std::move(ids);lv_dropdown_set_options(job_select,options.empty()?"尚未导入作业包":options.c_str());}
+        if(!jobs_loaded || options!=options_cache || ids!=job_ids){jobs_loaded=true;options_cache=options;job_ids=std::move(ids);lv_dropdown_set_options(job_select,options.empty()?"尚未导入作业包":options.c_str());}
     }catch(const std::exception&){ }
 }
 void refresh(lv_timer_t*) {
@@ -87,14 +95,14 @@ void refresh(lv_timer_t*) {
             const auto& last=state.at("last");std::string report="最近检查：第 "+std::to_string(last.at("sequence").get<unsigned>())+" 件 · "+translated(last.at("result"));
             if(last.contains("findings"))for(const auto& finding:last["findings"])report+='\n'+finding.at("label").get<std::string>()+"：确认 "+std::to_string(finding.at("count").get<unsigned>())+"，待确认 "+std::to_string(finding.at("uncertain").get<unsigned>())+"，要求 "+std::to_string(finding.at("min").get<unsigned>())+"–"+std::to_string(finding.at("max").get<unsigned>());
             text(result_label,report);
-        }
+        }else text(result_label,"当前作业尚无检查记录");
         text(error_label,state.at("error").get<std::string>()+(!state.at("syncError").get<std::string>().empty()?"\n同步暂不可用，检查记录保存在本地":""));
         const auto response=engine.Get("/frame");
-        if(!response || response->status!=200 || response->body.size()<4){text(fresh_label,"暂无有效画面");return;}
+        if(!response || response->status!=200 || response->body.size()<4){clear_picture();text(fresh_label,"暂无有效画面");return;}
         uint32_t size=0;std::memcpy(&size,response->body.data(),4);
         if(size>100000 || response->body.size()!=4+size+pixels.size())throw std::runtime_error("画面数据长度异常");
         const auto frame=json::parse(response->body.substr(4,size));std::memcpy(pixels.data(),response->body.data()+4+size,pixels.size());
-        lv_image_set_src(picture,&image);lv_obj_invalidate(picture);
+        lv_image_set_src(picture,&image);lv_obj_invalidate(picture);picture_valid=true;
         text(fresh_label,(frame.at("fresh").get<bool>()?"实时画面":"画面已超时")+std::string(" · #")+std::to_string(frame.at("frameId").get<unsigned>()));
         for(auto object:rectangles)lv_obj_delete(object);rectangles.clear();
         if(frame.at("fresh").get<bool>())for(const auto& box:frame.at("boxes")) {
