@@ -74,7 +74,12 @@ export class SystemController {
       }),
       this.devices.snapshots(),
       this.db.inspection.count({
-        where: { result: "REVIEW", reviews: { none: {} } },
+        where: {
+          OR: [
+            { result: "REVIEW", reviewResult: null, reviews: { none: {} } },
+            { reviewResult: "REVIEW" },
+          ],
+        },
       }),
     ]);
     const count = (result: string) =>

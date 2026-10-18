@@ -13,6 +13,7 @@ import NotFound from "./views/NotFound.vue";
 import Access from "./views/Access.vue";
 import Plans from "./views/Plans.vue";
 import Account from "./views/Account.vue";
+import Production from "./views/Production.vue";
 
 export interface TabMeta {
   tab: string;
@@ -56,6 +57,12 @@ export const roleDuties = {
 
 /** 路由是导航的唯一真源：侧栏、顶栏标题、视图内 tab 条、角色可见性全部从这里派生。 */
 export const routes: RouteRecordRaw[] = [
+  {
+    path: "/production",
+    name: "production",
+    component: Production,
+    meta: { title: "检测作业", nav: true, order: 3.1, discipline: "hmi" },
+  },
   {
     path: "/account",
     name: "account",

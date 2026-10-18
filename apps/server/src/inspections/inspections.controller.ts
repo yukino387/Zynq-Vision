@@ -10,8 +10,9 @@ import {
 } from "@nestjs/common";
 import { z } from "zod";
 import { Db } from "../core/db.js";
+import { Events } from "../core/events.js";
 import type { Request } from "../core/auth.js";
-import { parse } from "../core/errors.js";
+import { parse, DomainError } from "../core/errors.js";
 import { listing, page } from "../core/list.js";
 @Controller("api/inspections")
 export class InspectionsController {
@@ -21,13 +22,39 @@ export class InspectionsController {
       "createdAt",
       "deviceId",
       "taskId",
+      "batchId",
       "stationId",
       "result",
       "source",
       "status",
     ]);
-    if (q.reviewed)
-      args.where.reviews = q.reviewed === "false" ? { none: {} } : { some: {} };
+    if (q.reviewed) {
+      if (q.reviewed === "true")
+        args.where.OR = [
+          { reviewResult: { in: ["PASS", "FAIL"] } },
+          { reviewResult: null, reviews: { some: {} } },
+        ];
+      else
+        args.where.AND = [
+          {
+            OR: [
+              { reviewResult: null, reviews: { none: {} } },
+              { reviewResult: "REVIEW" },
+            ],
+          },
+        ];
+    }
+    if (q.result === "REVIEW" && q.reviewed === "false") {
+      delete args.where.result;
+      args.where.AND = [
+        {
+          OR: [
+            { result: "REVIEW", reviewResult: null, reviews: { none: {} } },
+            { reviewResult: "REVIEW" },
+          ],
+        },
+      ];
+    }
     if (q.realOnly === "true") args.where.NOT = { source: "SIMULATION" };
     return page(
       await this.db.inspection.findMany({
@@ -35,7 +62,7 @@ export class InspectionsController {
         include: {
           detections: true,
           sample: { include: { assets: true } },
-          reviews: true,
+          reviews: { orderBy: [{ createdAt: "desc" }, { id: "desc" }] },
         },
       }),
       await this.db.inspection.count({ where: args.where }),
@@ -55,14 +82,20 @@ export class InspectionsController {
           },
         },
         detections: true,
-        reviews: { include: { user: { select: { name: true } } } },
+        reviews: {
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          include: { user: { select: { name: true } } },
+        },
       },
     });
   }
 }
 @Controller("api/reviews")
 export class ReviewsController {
-  constructor(@Inject(Db) private db: Db) {}
+  constructor(
+    @Inject(Db) private db: Db,
+    @Inject(Events) private events: Events,
+  ) {}
   @Get() async list(@Query() query: unknown) {
     const { q, args } = listing(query, ["createdAt"]);
     return page(
@@ -87,22 +120,48 @@ export class ReviewsController {
           ]),
           note: z.string().max(2000).default(""),
           hard: z.boolean().default(false),
+          finalResult: z.enum(["PASS", "FAIL", "REVIEW"]).optional(),
         })
         .strict(),
       body,
     );
-    return this.db.$transaction(async (tx) => {
+    const review = await this.db.$transaction(async (tx) => {
       const inspection = await tx.inspection.findUniqueOrThrow({
         where: { id: dto.inspectionId },
       });
+      if (inspection.batchId && !dto.finalResult)
+        throw new DomainError(
+          "VALIDATION_ERROR",
+          "作业记录复核需要给出最终处理结论",
+          400,
+        );
+      if (dto.finalResult === "REVIEW" && !dto.note.trim())
+        throw new DomainError(
+          "VALIDATION_ERROR",
+          "保持待复核时请填写原因",
+          400,
+        );
       const review = await tx.review.create({
         data: { ...dto, sampleId: inspection.sampleId, userId: req.actor.id },
       });
+      if (dto.finalResult)
+        await tx.inspection.update({
+          where: { id: inspection.id },
+          data: { reviewResult: dto.finalResult },
+        });
       await tx.sample.update({
         where: { id: inspection.sampleId },
         data: { ...(dto.hard ? { hard: true } : {}) },
       });
       return review;
     });
+    this.events.emit(
+      "inspection.reviewed",
+      dto.inspectionId,
+      { id: review.id, finalResult: review.finalResult },
+      "SERVER",
+      req.id,
+    );
+    return review;
   }
 }

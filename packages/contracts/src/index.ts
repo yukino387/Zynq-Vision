@@ -1,6 +1,15 @@
 import { z } from "zod";
 export { planRulesSchema, createPlanSchema } from "./plans.js";
 export type { PlanRules, InspectionPlan } from "./plans.js";
+export { acceptanceSchema } from "./inspection.js";
+export type {
+  AcceptancePolicy,
+  CheckFinding,
+  InspectionDecision,
+  BatchSnapshot,
+  InspectionBatch,
+  BatchSummary,
+} from "./inspection.js";
 export const roles = ["ADMIN", "ENGINEER", "OPERATOR"] as const;
 export type Role = (typeof roles)[number];
 export const sources = ["BOARD", "MOBILE", "IMPORT", "SIMULATION"] as const;
@@ -203,6 +212,7 @@ export const listSchema = z.object({
   to: z.string().datetime().optional(),
   deviceId: z.string().optional(),
   taskId: z.string().optional(),
+  batchId: z.string().optional(),
   stationId: z.string().optional(),
   result: z.enum(["PASS", "FAIL", "REVIEW", "ERROR"]).optional(),
   reviewed: z.enum(["true", "false"]).optional(),

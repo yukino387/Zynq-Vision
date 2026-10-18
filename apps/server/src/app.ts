@@ -20,6 +20,8 @@ import {
 } from "./resources/resources.controller.js";
 import { AssetsService } from "./assets/assets.service.js";
 import { SamplesService } from "./samples/samples.service.js";
+import { BatchesController } from "./inspections/batches.controller.js";
+import { TerminalController } from "./inspections/terminal.controller.js";
 import {
   SamplesController,
   AssetsController,
@@ -77,6 +79,8 @@ class DevicesModule {}
     AssetsController,
     InspectionsController,
     ReviewsController,
+    BatchesController,
+    TerminalController,
     DatasetsController,
   ],
 })

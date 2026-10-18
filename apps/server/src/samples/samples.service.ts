@@ -3,7 +3,8 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import sharp from "sharp";
 import { createHash } from "node:crypto";
-import type { Source } from "@vision/contracts";
+import type { Source, BatchSnapshot } from "@vision/contracts";
+import { evaluateInspection, assessInspectionImage } from "@vision/shared";
 import { Db } from "../core/db.js";
 import { Events } from "../core/events.js";
 import { DomainError } from "../core/errors.js";
@@ -16,6 +17,7 @@ export const captureSchema = z
   .object({
     deviceId: z.string(),
     taskId: z.string().optional(),
+    batchId: z.string().optional(),
     idempotencyKey: z.string().min(8).max(160),
     clientId: z.string().min(1).max(120),
     localSequence: z.number().int().min(0).max(2147483647),
@@ -106,13 +108,28 @@ export class SamplesService {
       );
   }
   async capture(dto: CaptureDto, actor: string, requestId: string) {
-    await this.requireOpenTask(dto.taskId);
     return this.idempotent(
       dto.idempotencyKey,
       actor,
       createHash("sha256").update(JSON.stringify(dto)).digest("hex"),
       () =>
         this.commands.run(dto.deviceId, "CAPTURE", requestId, async () => {
+          await this.requireOpenTask(dto.taskId);
+          if (dto.batchId) {
+            const batch = await this.db.inspectionBatch.findUniqueOrThrow({
+              where: { id: dto.batchId },
+            });
+            if (
+              batch.status !== "OPEN" || batch.execution !== "HOST" ||
+              batch.deviceId !== dto.deviceId ||
+              batch.taskId !== dto.taskId
+            )
+              throw new DomainError(
+                "INVALID_STATE",
+                "批次已结束或设备、任务不匹配",
+                409,
+              );
+          }
           const frame = await this.devices
             .transport(dto.deviceId)
             .captureOnce();
@@ -184,7 +201,7 @@ export class SamplesService {
                 ),
               ])
             : [];
-          const quality = await this.assets.quality(frame.preview);
+          const quality = dto.batchId ? assessInspectionImage(frame.raw) : await this.assets.quality(frame.preview);
           const sample = await this.db.$transaction(async (tx) => {
             await this.requireOpenTask(dto.taskId, tx);
             const set = await tx.captureSet.upsert({
@@ -238,6 +255,8 @@ export class SamplesService {
               frame,
               source,
               dto.taskId,
+              dto.batchId,
+              quality.status,
             );
             return tx.sample.findUniqueOrThrow({
               where: { id: created.id },
@@ -269,6 +288,8 @@ export class SamplesService {
     frame: CapturedFrame,
     source: Source,
     taskId?: string,
+    batchId?: string,
+    qualityStatus = "WARNING",
   ) {
     const modelVersion = frame.modelState.modelVersion ?? null;
     const model = modelVersion
@@ -291,7 +312,7 @@ export class SamplesService {
     const confidence = boxes?.length
       ? Math.max(...boxes.map((b) => b.confidence))
       : null;
-    const result =
+    let result: "PASS" | "FAIL" | "REVIEW" | "ERROR" =
       source !== "SIMULATION"
         ? "REVIEW"
         : !boxes
@@ -303,15 +324,65 @@ export class SamplesService {
             : confidence! >= 0.7
               ? "FAIL"
               : "REVIEW";
+    let decision: ReturnType<typeof evaluateInspection> | null = null;
+    let snapshot: BatchSnapshot | null = null;
+    if (batchId) {
+      const batch = await tx.inspectionBatch.findUniqueOrThrow({
+        where: { id: batchId },
+      });
+      if (
+        batch.status !== "OPEN" || batch.execution !== "HOST" ||
+        batch.deviceId !== device.id ||
+        batch.taskId !== taskId
+      )
+        throw new DomainError(
+          "INVALID_STATE",
+          "批次已结束或设备、任务不匹配",
+          409,
+        );
+      snapshot = batch.snapshot as unknown as BatchSnapshot;
+      const changed =
+        frame.modelState.modelVersion !== snapshot.modelVersion ||
+        (snapshot.modelPayloadSha256 !== null &&
+          frame.modelState.modelPayloadSha256 !== snapshot.modelPayloadSha256);
+      if (changed)
+        throw new DomainError(
+          "MODEL_INCOMPATIBLE",
+          "设备模型已改变，请结束当前批次并重新建批",
+          422,
+        );
+      const age = Date.now() - Date.parse(frame.receivedAt);
+      if (!Number.isFinite(age) || age < -1000 || age > 5000)
+        throw new DomainError(
+          "DEVICE_TIMEOUT",
+          "本次图像已过期，请重新检查",
+          409,
+        );
+      // The fixed model and plan snapshot, rather than mutable model labels, governs this batch.
+      decision = evaluateInspection({
+        rules: snapshot.rules,
+        acceptance: snapshot.acceptance,
+        detections: boxes,
+        width: frame.width,
+        height: frame.height,
+        quality: qualityStatus,
+        errorCode: frame.telemetry?.errorCode,
+      });
+      result = decision.result;
+    }
     return tx.inspection.create({
       data: {
         sampleId,
         deviceId: device.id,
         stationId: device.stationId,
         taskId,
+        batchId,
+        acquisitionId: batchId ? `host:${frame.frameId}` : null,
         modelId: model?.id,
         modelVersion,
-        planVersion: frame.modelState.planVersion ?? null,
+        planVersion: snapshot
+          ? `${snapshot.planId}@${snapshot.planVersion}`
+          : (frame.modelState.planVersion ?? null),
         firmwareVersion: device.firmwareVersion,
         frameId: frame.frameId,
         source,
@@ -321,8 +392,9 @@ export class SamplesService {
           ? frame.telemetry.inferenceUs / 1000
           : null,
         result,
-        reason:
-          source !== "SIMULATION"
+        reason: decision
+          ? decision.reason
+          : source !== "SIMULATION"
             ? "当前为对象候选输出，尚未应用经过验证的方案规则，请人工复核"
             : !boxes
               ? "Inference tensors unavailable"
@@ -333,9 +405,16 @@ export class SamplesService {
                   : "No defect candidates; acceptance plan not reported",
         confidence,
         metadata: {
+          ...(decision
+            ? {
+                decision: decision as unknown as Prisma.InputJsonValue,
+                snapshot: snapshot as unknown as Prisma.InputJsonValue,
+              }
+            : {}),
           telemetry: frame.telemetry as unknown as Prisma.InputJsonValue,
-          rule:
-            source === "SIMULATION"
+          rule: decision
+            ? "ACCEPTANCE_V1"
+            : source === "SIMULATION"
               ? "SIMULATOR_FIXTURE_ONLY"
               : "CANDIDATES_ONLY; acceptance plan not applied",
         },

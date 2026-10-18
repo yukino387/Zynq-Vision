@@ -12,6 +12,7 @@ const props = defineProps<{
   boxes?: DetectionBox[] | null;
   width?: number;
   height?: number;
+  region?: { x: number; y: number; width: number; height: number };
 }>();
 const toolsOpen = ref(false);
 const image = ref(""),
@@ -180,10 +181,19 @@ onUnmounted(() => {
         }"
       >
         <img :src="image" alt="采样图像" draggable="false" /><svg
-          v-if="displayBoxes"
+          v-if="displayBoxes || (mode === 'PREVIEW' && region)"
           :viewBox="`0 0 ${size} ${imageHeight}`"
         >
-          <g v-for="(box, i) in boxes ?? []" :key="i">
+          <rect
+            v-if="mode === 'PREVIEW' && region"
+            :x="region.x * size"
+            :y="region.y * imageHeight"
+            :width="region.width * size"
+            :height="region.height * imageHeight"
+            fill="none"
+            stroke-dasharray="6 5"
+          />
+          <g v-for="(box, i) in displayBoxes ? (boxes ?? []) : []" :key="i">
             <rect
               :x="box.x1"
               :y="box.y1"

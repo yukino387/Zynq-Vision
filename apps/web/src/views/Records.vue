@@ -90,9 +90,9 @@ applyTab();
             </td>
             <td>
               {{
-                i.reviews.length
+                i.reviewResult === "PASS" || i.reviewResult === "FAIL"
                   ? "已复核"
-                  : i.result === "REVIEW"
+                  : i.result === "REVIEW" || i.reviewResult === "REVIEW"
                     ? "待复核"
                     : "—"
               }}

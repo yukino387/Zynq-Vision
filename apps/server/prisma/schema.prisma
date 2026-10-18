@@ -252,6 +252,9 @@ model Inspection {
  station Station? @relation(fields:[stationId],references:[id])
  taskId String?
  task Task? @relation(fields:[taskId],references:[id])
+ batchId String?
+ batch InspectionBatch? @relation(fields:[batchId],references:[id])
+ acquisitionId String?
  workpieceId String?
  workpiece Workpiece? @relation(fields:[workpieceId],references:[id])
  modelId String?
@@ -265,6 +268,7 @@ model Inspection {
  completedAt DateTime
  latency Float?
  result Result
+ reviewResult Result?
  reason String
  confidence Float?
  status String @default("COMPLETED")
@@ -276,6 +280,24 @@ model Inspection {
  @@index([deviceId])
  @@index([taskId])
  @@index([result])
+ @@index([batchId])
+ @@unique([batchId,acquisitionId])
+}
+model InspectionBatch {
+ id String @id @default(cuid())
+ name String
+ deviceId String
+ taskId String
+ target Int
+ status String @default("OPEN")
+ execution String @default("HOST")
+ snapshot Json
+ createdBy String
+ createdAt DateTime @default(now())
+ closedAt DateTime?
+ inspections Inspection[]
+ @@index([deviceId,status])
+ @@index([taskId])
 }
 model Detection {
  id String @id @default(cuid())
@@ -298,6 +320,7 @@ model Review {
  userId String
  user User @relation(fields:[userId],references:[id])
  verdict String
+ finalResult Result?
  note String
  hard Boolean
  createdAt DateTime @default(now())

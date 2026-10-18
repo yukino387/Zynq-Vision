@@ -26,7 +26,13 @@ export function listing(
       ...(q.from ? { gte: new Date(q.from) } : {}),
       ...(q.to ? { lte: new Date(q.to) } : {}),
     };
-  for (const key of ["deviceId", "taskId", "stationId", "result"] as const)
+  for (const key of [
+    "deviceId",
+    "taskId",
+    "batchId",
+    "stationId",
+    "result",
+  ] as const)
     if (q[key] && fields.includes(key)) where[key] = q[key];
   return {
     q,

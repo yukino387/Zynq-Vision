@@ -2,12 +2,19 @@
 import { computed, ref } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
 import { chinese, displayName, reasonLabel } from "@vision/shared";
-import type { DetectionBox, Source } from "@vision/contracts";
+import type {
+  DetectionBox,
+  Source,
+  InspectionDecision,
+} from "@vision/contracts";
 import { request, notify } from "../../state";
 import RemoteImage from "../../components/RemoteImage.vue";
 
 interface Inspection {
   id: string;
+  batchId?: string | null;
+  reviewResult?: string | null;
+  metadata?: { decision?: InspectionDecision };
   result: string;
   source: Source;
   reason: string;
@@ -41,6 +48,22 @@ const inspection = ref<Inspection | null>(null),
     ["OCCLUSION", "遮挡"],
     ["OTHER", "其他"],
   ];
+const finalResult = ref("");
+const outcomes = [
+  { value: "", label: "请选择最终处理结论" },
+  { value: "PASS", label: "符合要求" },
+  { value: "FAIL", label: "不符合要求" },
+  { value: "REVIEW", label: "仍待复核" },
+];
+const outcomeIndex = computed(() =>
+  outcomes.findIndex((o) => o.value === finalResult.value),
+);
+function selectOutcome(event: unknown) {
+  finalResult.value =
+    outcomes[
+      Number((event as { detail: { value: string } }).detail.value)
+    ]!.value;
+}
 const asset = computed(() =>
   inspection.value?.sample.assets.find((a) => a.kind === "PREVIEW"),
 );
@@ -79,9 +102,11 @@ async function save() {
       verdict: verdict.value,
       note: note.value,
       hard: hard.value,
+      ...(finalResult.value ? { finalResult: finalResult.value } : {}),
     });
     uni.showToast({ title: "审核已保存", icon: "success" });
     saved.value = true;
+    if (finalResult.value) inspection.value.reviewResult = finalResult.value;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
     notify(e);
@@ -105,6 +130,9 @@ async function save() {
         >
       </view>
       <text class="subtitle">{{ reasonLabel(inspection.reason) }}</text>
+      <text v-if="inspection.reviewResult" class="subtitle"
+        >人工结论：{{ chinese(inspection.reviewResult) }} · 机器原判保留</text
+      >
 
       <view
         class="evidence"
@@ -152,6 +180,18 @@ async function save() {
         </view>
       </view>
 
+      <view v-if="inspection.metadata?.decision?.findings.length" class="card">
+        <view
+          v-for="finding in inspection.metadata.decision.findings"
+          :key="finding.classId"
+          class="list-item"
+          ><text>{{ finding.label }} · {{ chinese(finding.result) }}</text
+          ><text class="muted"
+            >要求 {{ finding.min }}–{{ finding.max }} 个，确认
+            {{ finding.count }} 个，待确认 {{ finding.uncertain }} 个</text
+          ></view
+        >
+      </view>
       <view class="section-head"><text>运行信息</text></view>
       <view class="card">
         <view class="list-item row"
@@ -195,12 +235,23 @@ async function save() {
         <text style="margin: 0">加入困难样本</text>
         <switch color="#087f82" :checked="hard" @change="setHard" />
       </view>
+      <view class="field"
+        ><text
+          >最终处理结论{{ inspection.batchId ? "（作业记录必选）" : "" }}</text
+        ><picker
+          :range="outcomes"
+          range-key="label"
+          :value="outcomeIndex"
+          @change="selectOutcome"
+          ><view class="card">{{ outcomes[outcomeIndex]!.label }}</view></picker
+        ></view
+      >
       <textarea v-model="note" placeholder="添加现场备注" maxlength="2000" />
       <button
         class="primary"
         style="margin-top: 18px"
         :loading="busy"
-        :disabled="busy"
+        :disabled="busy || (!!inspection.batchId && !finalResult)"
         @click="save"
       >
         保存审核

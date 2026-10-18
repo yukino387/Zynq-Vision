@@ -12,6 +12,7 @@ export {
   errorMessage,
 } from "./display.js";
 export { statusTone, type Tone } from "./status.js";
+export { evaluateInspection, assessInspectionImage } from "./acceptance.js";
 export function connectionState(
   lastSeen: number | null,
   now: number,

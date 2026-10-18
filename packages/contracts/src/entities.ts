@@ -31,12 +31,18 @@ export interface Sample {
 export interface Inspection {
   id: string;
   sampleId: string;
+  batchId?: string | null;
+  metadata?: {
+    decision?: import("./inspection.js").InspectionDecision;
+    snapshot?: import("./inspection.js").BatchSnapshot;
+  };
   deviceId: string | null;
   source: Source;
   modelVersion: string | null;
   planVersion: string | null;
   firmwareVersion: string | null;
   result: string;
+  reviewResult?: "PASS" | "FAIL" | "REVIEW" | null;
   reason: string;
   frameId: number | null;
   confidence: number | null;
@@ -44,7 +50,12 @@ export interface Inspection {
   createdAt: string;
   detections: DetectionBox[];
   sample: Sample;
-  reviews: { verdict: string; note: string }[];
+  reviews: {
+    verdict: string;
+    note: string;
+    finalResult?: "PASS" | "FAIL" | "REVIEW" | null;
+    createdAt?: string;
+  }[];
 }
 export interface Named {
   id: string;
