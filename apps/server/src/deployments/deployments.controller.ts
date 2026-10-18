@@ -18,6 +18,7 @@ import { listing, page } from "../core/list.js";
 import { ModelsService } from "../models/models.service.js";
 import { DevicesService } from "../devices/devices.service.js";
 import { CommandsService } from "../devices/commands.service.js";
+import { FIRMWARE_BUSY_STATES } from "../firmware/firmware.service.js";
 @Roles("ADMIN", "ENGINEER")
 @Controller("api/deployments")
 export class DeploymentsController {
@@ -80,6 +81,15 @@ export class DeploymentsController {
         throw new DomainError(
           "DEVICE_BUSY",
           "A deployment is already queued for this device",
+        );
+      const firmwareBusy = await tx.firmwareDeployment.count({
+        where: { deviceId: dto.deviceId, status: { in: FIRMWARE_BUSY_STATES } },
+      });
+      if (firmwareBusy)
+        throw new DomainError(
+          "DEVICE_BUSY",
+          "设备正在更新固件，请完成后再部署模型",
+          409,
         );
       const deployment = await tx.deployment.create({
         data: {

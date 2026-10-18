@@ -5,7 +5,7 @@
 #include "int8/sha256.h"
 #include <cstring>
 // JTAG-only utility for this board's W25Q256. Only the first 16 MiB is addressable.
-struct Control { uint32_t operation,bytes,state,progress,error,jedec;uint8_t sha256[32]; };
+struct Control { uint32_t operation,bytes,state,progress,error,jedec;uint8_t sha256[32];uint32_t offset,erase4k; };
 static XQspiPs qspi;
 static uint8_t tx[4104],rx[4104];
 static volatile Control* const control=reinterpret_cast<volatile Control*>(0x03000000);
@@ -21,7 +21,9 @@ static void address(uint8_t command,unsigned offset){tx[0]=command;tx[1]=offset>
 static bool read(unsigned offset,unsigned count){address(3,offset);std::memset(tx+4,0,count);return transfer(count+4);}
 static unsigned execute(){
  const uint32_t size=control->bytes,operation=control->operation;
+ const uint32_t base=control->offset;
  if(!size||size>=16u*1024*1024||(operation!=1&&operation!=2))return 1;
+ if((base&0xfffu)||base>16u*1024*1024||size>16u*1024*1024-base)return 1;
  auto config=XQspiPs_LookupConfig(XPAR_XQSPIPS_0_BASEADDR);
  if(!config||XQspiPs_CfgInitialize(&qspi,config,config->BaseAddress)!=XST_SUCCESS)return 2;
  XQspiPs_SetOptions(&qspi,XQSPIPS_MANUAL_START_OPTION|XQSPIPS_FORCE_SSELECT_OPTION|XQSPIPS_HOLD_B_DRIVE_OPTION);
@@ -34,7 +36,7 @@ static unsigned execute(){
  if(!enable_write())return 4;tx[0]=0xc5;tx[1]=0;if(!transfer(2)||!idle(1))return 5;
  tx[0]=4;if(!transfer(1))return 2;tx[0]=0xc8;tx[1]=0;if(!transfer(2)||rx[1])return 7;
  if(operation==1){
-  for(unsigned offset=0;offset<size;offset+=4096){unsigned n=size-offset<4096?size-offset:4096;if(!read(offset,n))return 2;std::memcpy(image+offset,rx+4,n);control->progress=offset+n;}
+  for(unsigned offset=0;offset<size;offset+=4096){unsigned n=size-offset<4096?size-offset:4096;if(!read(base+offset,n))return 2;std::memcpy(image+offset,rx+4,n);control->progress=offset+n;}
   return 0;
  }
  // Enable the Winbond QE bit, preserving all other status-register bits, for FSBL 6Bh reads.
@@ -44,13 +46,15 @@ static unsigned execute(){
  Sha256 expected;expected.update(image,size);uint8_t digest[32];expected.finish(digest);
  for(unsigned i=0;i<32;++i)control->sha256[i]=digest[i];
  control->state=0x45524153;
- for(unsigned offset=0;offset<size;offset+=65536){if(!enable_write())return 4;address(0xd8,offset);if(!transfer(4)||!idle(5))return 5;control->progress=offset;}
+ // Firmware slots can be erased by 64KiB (default) or 4KiB sectors.
+ const uint32_t erase_step=control->erase4k?4096u:65536u;
+ for(unsigned offset=0;offset<size;offset+=erase_step){if(!enable_write())return 4;address(control->erase4k?0x20:0xd8,base+offset);if(!transfer(4)||!idle(5))return 5;control->progress=offset;}
  control->state=0x50524f47;
- for(unsigned offset=0;offset<size;offset+=256){unsigned n=size-offset<256?size-offset:256;if(!enable_write())return 4;address(2,offset);std::memcpy(tx+4,image+offset,n);if(!transfer(n+4,false)||!idle(1))return 5;control->progress=offset+n;}
+ for(unsigned offset=0;offset<size;offset+=256){unsigned n=size-offset<256?size-offset:256;if(!enable_write())return 4;address(2,base+offset);std::memcpy(tx+4,image+offset,n);if(!transfer(n+4,false)||!idle(1))return 5;control->progress=offset+n;}
  control->state=0x56455249;
- for(unsigned offset=0;offset<size;offset+=4096){unsigned n=size-offset<4096?size-offset:4096;if(!read(offset,n))return 2;if(std::memcmp(rx+4,image+offset,n)){control->progress=offset;return 6;}control->progress=offset+n;}
+ for(unsigned offset=0;offset<size;offset+=4096){unsigned n=size-offset<4096?size-offset:4096;if(!read(base+offset,n))return 2;if(std::memcmp(rx+4,image+offset,n)){control->progress=offset;return 6;}control->progress=offset+n;}
  // Verify using the same quad-output read command used by the generated FSBL.
- for(unsigned offset=0;offset<size;offset+=4096){unsigned n=size-offset<4096?size-offset:4096;address(0x6b,offset);std::memset(tx+4,0,n+1);if(!transfer(n+5))return 2;if(std::memcmp(rx+5,image+offset,n)){control->progress=offset;return 9;}control->progress=offset+n;}
+ for(unsigned offset=0;offset<size;offset+=4096){unsigned n=size-offset<4096?size-offset:4096;address(0x6b,base+offset);std::memset(tx+4,0,n+1);if(!transfer(n+5))return 2;if(std::memcmp(rx+5,image+offset,n)){control->progress=offset;return 9;}control->progress=offset+n;}
  return 0;
 }
 int main(){Xil_DCacheDisable();control->state=0x42555359;control->progress=0;control->error=execute();control->state=0x444f4e45;while(1){}}

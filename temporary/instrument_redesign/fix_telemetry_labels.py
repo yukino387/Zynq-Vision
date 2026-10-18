@@ -1,0 +1,4 @@
+from pathlib import Path
+p=Path('apps/web/src/views/Models.vue');s=p.read_text(encoding='utf-8');s=s.replace('devices.devices.find((d) => d.id === r.deviceId)?.name ??\n              text(r, "deviceId")','displayName(devices.devices.find((d) => d.id === r.deviceId)?.name ?? text(r, "deviceId"))');p.write_bytes(s.encode())
+p=Path('apps/web/src/views/Operations.vue');s=p.read_text(encoding='utf-8');s=s.replace('<div class="device-telemetry">','''<div class="device-telemetry"><header><span>{{ device?.connectionState === 'ONLINE' ? '设备遥测' : '末次遥测 · 当前设备未连接' }}</span><time class="mono">{{ device?.telemetry?.receivedAt ? new Date(device.telemetry.receivedAt).toLocaleTimeString() : '等待上报' }}</time></header>''');p.write_bytes(s.encode())
+p=Path('apps/mobile/src/pages/capture/index.vue');s=p.read_text(encoding='utf-8');import re;s=re.sub(r'\.board-guide \.board-guide-number \{[^}]+\}\n','',s);p.write_bytes(s.encode())

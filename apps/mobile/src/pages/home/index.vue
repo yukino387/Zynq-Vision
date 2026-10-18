@@ -33,13 +33,13 @@ const liveLabel = computed(() => {
   if (liveDevice.value.connectionState !== "ONLINE") return "设备离线";
   if (!live.ready) return "正在连接";
   if (!live.frame) return "等待画面";
-  return Date.now() - live.lastFrameAt > 4000 ? "画面暂停" : "实时";
+  return live.now - live.lastFrameAt > 4000 ? "画面暂停" : "实时";
 });
 const liveTone = computed(() => {
   if (!liveDevice.value || liveDevice.value.connectionState !== "ONLINE")
     return "crit";
   if (!live.ready || !live.frame) return "warn";
-  return Date.now() - live.lastFrameAt > 4000 ? "warn" : "live";
+  return live.now - live.lastFrameAt > 4000 ? "warn" : "live";
 });
 const detections = computed(() => live.frame?.detections ?? null);
 
@@ -106,20 +106,20 @@ function chooseDevice(id: string) {
         >
       </view>
       <text class="title">你好，{{ greeting }}</text>
-      <text class="subtitle"
-        >先看设备画面，再按下快门。板端、手机与同步采样都在同一个入口。</text
-      >
+      <text class="subtitle">连接现场，捕捉每一处细节。</text>
     </view>
 
     <view class="live-card" @click="openLive">
       <view class="live-stage">
-        <LiveFeed minimal />
+        <LiveFeed minimal fit="aspectFit" />
       </view>
       <view class="live-foot">
         <view class="live-foot-copy">
           <text class="live-foot-title"
             >{{ displayName(liveDevice?.name ?? "未选择设备") }}
-            <text class="live-dot" :class="liveTone">● {{ liveLabel }}</text></text
+            <text class="live-dot" :class="liveTone"
+              >● {{ liveLabel }}</text
+            ></text
           >
           <text class="live-foot-note"
             >{{
@@ -139,17 +139,20 @@ function chooseDevice(id: string) {
 
     <view class="quick-grid">
       <view class="quick" @click="capture">
-        <text class="quick-num">01</text>
+        <image class="quick-icon" src="/static/action-camera.png" />
         <text class="quick-title">开始采样</text>
         <text class="quick-note">板端 / 手机 / 同步</text>
       </view>
-      <view class="quick" @click="uni.switchTab({ url: '/pages/records/index' })">
-        <text class="quick-num">02</text>
+      <view
+        class="quick"
+        @click="uni.switchTab({ url: '/pages/records/index' })"
+      >
+        <image class="quick-icon" src="/static/action-records.png" />
         <text class="quick-title">检测记录</text>
         <text class="quick-note">复核与证据</text>
       </view>
       <view class="quick" @click="uni.navigateTo({ url: '/pages/sync/index' })">
-        <text class="quick-num">03</text>
+        <image class="quick-icon" src="/static/action-sync.png" />
         <text class="quick-title">同步队列</text>
         <text class="quick-note">{{ pending }} 个待同步</text>
       </view>
@@ -186,8 +189,7 @@ function chooseDevice(id: string) {
           :style="{
             width: `${t.target ? Math.min(100, (t._count.samples / t.target) * 100) : 0}%`,
           }"
-        /></view
-      >
+      /></view>
       <view class="row task-meta">
         <text class="note"
           >{{ chinese(t.status) }} ·
@@ -223,7 +225,6 @@ function chooseDevice(id: string) {
               >● {{ chinese(d.connectionState) }}</text
             >
           </view>
-          <text v-if="d.source === 'SIMULATION'" class="tag">模拟设备</text>
           <text class="list-caption"
             >{{ chinese(d.runtimeState) }} · 模型
             {{ d.reportedState.modelVersion ?? "未上报" }}</text
@@ -262,15 +263,15 @@ function chooseDevice(id: string) {
   margin-bottom: 8px;
 }
 .connection {
-  font-size: 9px;
+  font-size: 11px;
   color: #8a6a24;
 }
 .connection.online {
-  color: #4d7a4b;
+  color: #087f82;
 }
 .live-card {
-  border: 1px solid #b7bda9;
-  background: #10140f;
+  border: 1px solid #dce6e9;
+  background: #102b36;
   margin-bottom: 18px;
 }
 .live-stage {
@@ -289,8 +290,8 @@ function chooseDevice(id: string) {
   justify-content: space-between;
   gap: 10px;
   padding: 10px 12px;
-  background: #22281c;
-  border-top: 1px solid #3d4736;
+  background: #193b48;
+  border-top: 1px solid #315460;
 }
 .live-foot-copy {
   min-width: 0;
@@ -300,19 +301,19 @@ function chooseDevice(id: string) {
 }
 .live-foot-title {
   font-size: 11px;
-  color: #eef1e6;
+  color: #f0f8fa;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .live-dot {
-  font-size: 8px;
-  color: #b9c4ae;
+  font-size: 11px;
+  color: #aac6d0;
   margin-left: 4px;
   white-space: nowrap;
 }
 .live-dot.live {
-  color: #a0cb87;
+  color: #71ddc8;
 }
 .live-dot.warn {
   color: #e4b676;
@@ -321,14 +322,14 @@ function chooseDevice(id: string) {
   color: #efb9a8;
 }
 .live-foot-note {
-  font-size: 9px;
-  color: #93a08a;
+  font-size: 11px;
+  color: #8db0bd;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .live-foot-action {
-  font-size: 10px;
+  font-size: 11px;
   color: #ee9a6e;
   white-space: nowrap;
 }
@@ -336,12 +337,12 @@ function chooseDevice(id: string) {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 1px;
-  background: #b7bda9;
-  border: 1px solid #b7bda9;
+  background: #dce6e9;
+  border: 1px solid #dce6e9;
   margin-bottom: 4px;
 }
 .quick {
-  background: #f7f6ee;
+  background: #ffffff;
   padding: 13px 12px;
   display: flex;
   flex-direction: column;
@@ -352,25 +353,27 @@ function chooseDevice(id: string) {
   background: #e8e7dc;
 }
 .quick-num {
-  font: 9px Consolas, monospace;
-  color: #a4ad98;
+  font:
+    9px Consolas,
+    monospace;
+  color: #8ca4ad;
 }
 .quick-title {
   font-size: 13px;
   font-weight: 600;
 }
 .quick-note {
-  font-size: 9px;
-  color: #6b775e;
+  font-size: 11px;
+  color: #637d87;
   line-height: 1.5;
 }
 .task-card.selected {
-  border-left: 3px solid #dd5b2a;
+  border-left: 3px solid #087f82;
   padding-left: 15px;
 }
 .progress-count {
   font-size: 13px;
-  color: #4d5b3f;
+  color: #486571;
 }
 .task-meta {
   margin-top: 8px;
@@ -379,8 +382,8 @@ function chooseDevice(id: string) {
   margin: 0;
 }
 .task-select {
-  font-size: 10px;
-  color: #b4491f;
+  font-size: 11px;
+  color: #087f82;
   white-space: nowrap;
 }
 .device-card {
@@ -393,7 +396,7 @@ function chooseDevice(id: string) {
   gap: 10px;
 }
 .device-row.selected {
-  border-left: 3px solid #dd5b2a;
+  border-left: 3px solid #087f82;
   padding-left: 15px;
   margin-left: -18px;
   padding-right: 0;
@@ -403,9 +406,9 @@ function chooseDevice(id: string) {
   min-width: 0;
 }
 .selected-mark {
-  font-size: 8px;
-  color: #b4491f;
-  border: 1px solid #d9a388;
+  font-size: 11px;
+  color: #087f82;
+  border: 1px solid #a8d8d3;
   padding: 1px 4px;
   margin-left: 5px;
   font-weight: 400;
@@ -416,5 +419,93 @@ function chooseDevice(id: string) {
   justify-content: space-between;
   margin-top: 24px;
   font-size: 11px;
+}
+
+.welcome-row {
+  margin-bottom: 10px;
+}
+.connection {
+  background: #e5f3ef;
+  border-radius: 20px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+.welcome .subtitle {
+  margin-bottom: 20px;
+}
+.live-card {
+  border: 0;
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 10px 24px #102b3612;
+}
+.live-stage {
+  aspect-ratio: 1.55 / 1;
+}
+.live-foot {
+  padding: 13px 14px;
+  border: 0;
+}
+.live-foot-title {
+  font-size: 13px;
+}
+.live-dot {
+  font-size: 11px;
+}
+.live-foot-note {
+  font-size: 11px;
+  margin-top: 3px;
+}
+.quick-grid {
+  background: transparent;
+  border: 0;
+  gap: 10px;
+  margin-top: 20px;
+}
+.quick {
+  padding: 16px 10px;
+  border: 1px solid #e4ecef;
+  border-radius: 16px;
+  gap: 5px;
+}
+.quick-icon {
+  width: 26px;
+  height: 26px;
+  margin-bottom: 6px;
+}
+.quick-title {
+  font-size: 14px;
+}
+.quick-note {
+  font-size: 11px;
+}
+.task-card.selected {
+  border-left: 3px solid #087f82;
+  padding-left: 16px;
+}
+.task-meta {
+  margin-top: 12px;
+}
+.task-select {
+  font-size: 12px;
+}
+.selected-mark {
+  font-size: 10px;
+  border-radius: 5px;
+  padding: 2px 5px;
+}
+.device-row.selected {
+  border: 0;
+  margin-left: 0;
+  padding-left: 0;
+}
+.device-row.selected .list-title {
+  color: #087f82;
+}
+.footer-links {
+  padding: 18px 0 4px;
+  margin-top: 10px;
+  border-top: 1px solid #dce6e9;
+  font-size: 12px;
 }
 </style>

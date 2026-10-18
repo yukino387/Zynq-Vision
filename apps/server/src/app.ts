@@ -35,8 +35,9 @@ import {
   ModelsController,
   TrainingsController,
 } from "./models/models.controller.js";
-import { BenchmarksController } from "./models/benchmarks.controller.js";
 import { DeploymentsController } from "./deployments/deployments.controller.js";
+import { FirmwareService } from "./firmware/firmware.service.js";
+import { FirmwareController } from "./firmware/firmware.controller.js";
 import { JobsService } from "./jobs/jobs.service.js";
 import { TrainingService } from "./models/training.service.js";
 import { SystemController } from "./system/system.controller.js";
@@ -84,21 +85,30 @@ class DataModule {}
   imports: [DevicesModule],
   providers: [ModelsService, TrainingService],
   exports: [ModelsService, TrainingService],
-  controllers: [
-    ModelsController,
-    TrainingsController,
-    BenchmarksController,
-    DeploymentsController,
-  ],
+  controllers: [ModelsController, TrainingsController, DeploymentsController],
 })
 class ModelsModule {}
 @Module({
-  imports: [DevicesModule, DataModule, ModelsModule],
+  imports: [DevicesModule],
+  providers: [FirmwareService],
+  exports: [FirmwareService],
+  controllers: [FirmwareController],
+})
+class FirmwareModule {}
+@Module({
+  imports: [DevicesModule, DataModule, ModelsModule, FirmwareModule],
   providers: [JobsService],
 })
 class JobsModule {}
 @Module({
-  imports: [CoreModule, DevicesModule, DataModule, ModelsModule, JobsModule],
+  imports: [
+    CoreModule,
+    DevicesModule,
+    DataModule,
+    ModelsModule,
+    FirmwareModule,
+    JobsModule,
+  ],
   controllers: [
     AuthController,
     RegistrationController,

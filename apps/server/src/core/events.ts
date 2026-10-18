@@ -39,11 +39,17 @@ export class Events implements OnModuleDestroy {
               const claims = await this.jwt.verifyAsync<{
                 sub: string;
                 exp: number;
+                sessionVersion?: number;
               }>(token);
               const user = await this.db.user.findUnique({
                 where: { id: claims.sub },
               });
-              if (!user || user.disabled) throw new Error("Unauthorized");
+              if (
+                !user ||
+                user.disabled ||
+                user.sessionVersion !== (claims.sessionVersion ?? 0)
+              )
+                throw new Error("Unauthorized");
               authenticated = true;
               Object.defineProperty(ws, "actorId", { value: user.id });
               expiration = setTimeout(
@@ -112,10 +118,10 @@ export class Events implements OnModuleDestroy {
       }
     return e;
   }
-  closeUser(id: string) {
+  closeUser(id: string, reason = "User disabled") {
     for (const ws of this.server?.clients ?? [])
       if ((ws as WebSocket & { actorId?: string }).actorId === id)
-        ws.close(1008, "User disabled");
+        ws.close(1008, reason);
   }
   count() {
     return this.server?.clients.size ?? 0;

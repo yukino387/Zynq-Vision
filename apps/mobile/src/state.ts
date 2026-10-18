@@ -24,7 +24,7 @@ export function captureIdentity(prefix: string) {
 const initialServer = () => {
   let origin = "";
   // #ifdef H5
-  origin = location.port === "5174" ? location.origin : location.origin;
+  origin = /^https?:$/.test(location.protocol) ? location.origin : "";
   // #endif
   return (uni.getStorageSync("vision.server") as string) || origin;
 };
@@ -44,7 +44,9 @@ export const session = reactive({
   error: "",
 });
 export function setServer(server: string) {
-  const next = server.replace(/\/$/, "");
+  const next = server.trim().replace(/\/+$/, "");
+  if (!/^https?:\/\/[^\s/?#]+$/i.test(next))
+    throw new Error("请输入完整服务器地址，例如 http://192.168.1.100:3000");
   if (session.server !== next) {
     logout();
     session.stationId = "";
@@ -62,7 +64,9 @@ export function selectTask(id: string) {
 }
 export function requireLogin() {
   if (!session.token) {
-    uni.navigateTo({ url: "/pages/login/index" });
+    const pages = getCurrentPages();
+    if (pages[pages.length - 1]?.route !== "pages/login/index")
+      uni.navigateTo({ url: "/pages/login/index" });
     return false;
   }
   return true;
@@ -101,8 +105,8 @@ export async function request<T>(
     session.serverAvailable = response.statusCode < 500;
     if (response.statusCode >= 400) {
       if (response.statusCode === 401) {
-        session.token = "";
-        uni.removeStorageSync("vision.token");
+        logout();
+        requireLogin();
       }
       throw new Error(serverErrorMessage(response.data));
     }

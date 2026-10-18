@@ -42,9 +42,7 @@ function select(t: Task) {
       </view>
       <text class="muted refresh" @click="load">刷新</text>
     </view>
-    <text class="subtitle"
-      >选中任务后，所有板端与手机采样都会归入该任务。</text
-    >
+    <text class="subtitle">选中任务后，所有板端与手机采样都会归入该任务。</text>
     <view v-if="loading" class="empty">读取任务…</view>
     <view v-else-if="error" class="error" @click="load"
       >{{ error }} / 重试</view
@@ -89,8 +87,7 @@ function select(t: Task) {
           :style="{
             width: `${t.target ? Math.min(100, (t._count.samples / t.target) * 100) : 0}%`,
           }"
-        /></view
-      >
+      /></view>
       <text v-if="session.taskId === t.id" class="selected-note"
         >当前任务 · 点按继续采样 →</text
       >
@@ -133,15 +130,15 @@ function select(t: Task) {
 }
 .task.selected,
 .independent.selected {
-  border-left-color: #dd5b2a;
-  background: #fbf8ef;
+  border-left-color: #087f82;
+  background: #eef8f6;
 }
 .stat-row {
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   margin: 14px 0 10px;
-  border-top: 1px solid #b7bda9;
-  border-bottom: 1px solid #b7bda9;
+  border-top: 1px solid #dce6e9;
+  border-bottom: 1px solid #dce6e9;
   padding: 10px 0;
 }
 .stat-row > view {
@@ -152,7 +149,7 @@ function select(t: Task) {
   font-size: 21px;
 }
 .stat-row .caption {
-  font-size: 10px;
+  font-size: 11px;
 }
 .progress {
   margin-top: 4px;
@@ -160,13 +157,44 @@ function select(t: Task) {
 .selected-note {
   display: block;
   margin-top: 10px;
-  font-size: 10px;
-  color: #b4491f;
+  font-size: 11px;
+  color: #087f82;
 }
 .independent {
   border-left: 3px solid transparent;
 }
 .independent .note {
   margin: 6px 0 0;
+}
+
+.task,
+.independent {
+  border: 1px solid #e4ecef;
+  border-left: 3px solid #e4ecef;
+}
+.task.selected,
+.independent.selected {
+  border-color: #b4ded8;
+  border-left-color: #087f82;
+}
+.stat-row {
+  border: 0;
+  background: #f5f9fa;
+  padding: 14px 10px;
+  border-radius: 12px;
+}
+.stat-row .value {
+  font-size: 24px;
+}
+.stat-row .caption,
+.selected-note {
+  font-size: 12px;
+}
+.refresh {
+  padding: 10px;
+  font-size: 13px;
+}
+.independent .list-title {
+  margin-bottom: 0;
 }
 </style>

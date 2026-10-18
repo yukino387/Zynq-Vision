@@ -8,6 +8,7 @@ import {
   Query,
   Req,
   Inject,
+  ForbiddenException,
 } from "@nestjs/common";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
@@ -127,7 +128,7 @@ export class DevicesController {
       return { disconnected: true };
     });
   }
-  @Roles("ADMIN", "ENGINEER") @Patch(":id/desired") async desired(
+  @Roles("ADMIN") @Patch(":id/desired") async desired(
     @Param("id") id: string,
     @Body() body: unknown,
   ) {
@@ -195,6 +196,8 @@ export class DevicesController {
         .strict(),
       body,
     );
+    if (dto.type === "SET_PLAN" && req.actor.role !== "ADMIN")
+      throw new ForbiddenException("只有管理员可以修改设备使用的方案");
     if (
       dto.type === "SET_BRIGHTNESS" &&
       (typeof dto.value !== "number" || dto.value < -4 || dto.value > 4)

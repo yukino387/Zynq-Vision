@@ -22,23 +22,29 @@ const records = ref<Inspection[]>([]),
   total = ref(0),
   loading = ref(false),
   error = ref(""),
-  filter = ref<"ALL" | "REVIEW">("ALL");
+  filter = ref<"ALL" | "REVIEW" | "REAL">("ALL");
 const pending = computed(
   () => queue.items.filter((i) => i.status !== "SYNCED").length,
 );
 async function load(append = false) {
   if (!requireLogin()) return;
+  if (loading.value) return;
   loading.value = true;
   error.value = "";
   try {
-    if (!append) page.value = 1;
+    const nextPage = append ? page.value + 1 : 1;
     const result = await request<Page<Inspection>>(
-      `/inspections?page=${page.value}&pageSize=20${
-        filter.value === "REVIEW" ? "&reviewed=false" : ""
+      `/inspections?page=${nextPage}&pageSize=20${
+        filter.value === "REVIEW"
+          ? "&reviewed=false"
+          : filter.value === "REAL"
+            ? "&realOnly=true"
+            : ""
       }`,
     );
     records.value = append ? [...records.value, ...result.items] : result.items;
     total.value = result.total;
+    page.value = nextPage;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
     notify(e);
@@ -46,8 +52,8 @@ async function load(append = false) {
     loading.value = false;
   }
 }
-function switchFilter(value: "ALL" | "REVIEW") {
-  if (filter.value === value) return;
+function switchFilter(value: "ALL" | "REVIEW" | "REAL") {
+  if (loading.value || filter.value === value) return;
   filter.value = value;
   void load();
 }
@@ -90,15 +96,32 @@ watch(
         >待复核</text
       >
       <text
+        class="filter"
+        :class="{ active: filter === 'REAL' }"
+        @click="switchFilter('REAL')"
+        >真实</text
+      >
+      <text
         class="filter-action"
         @click="uni.navigateTo({ url: '/pages/sync/index' })"
         >{{ pending }} 待同步 →</text
       >
     </view>
 
-    <view v-if="error" class="error" @click="load()">{{ error }} / 点击重试</view>
-    <view v-if="!records.length && !loading" class="empty">
-      <text>{{ filter === "REVIEW" ? "没有待复核记录" : "暂无检测记录" }}</text>
+    <view v-if="error" class="error" @click="load()"
+      >{{ error }} / 点击重试</view
+    >
+    <view v-if="loading && !records.length" class="empty"
+      >正在读取检测记录…</view
+    >
+    <view v-if="!records.length && !loading && !error" class="empty">
+      <text>{{
+        filter === "REVIEW"
+          ? "没有待复核记录"
+          : filter === "REAL"
+            ? "没有真实设备记录"
+            : "暂无检测记录"
+      }}</text>
       <text class="hint">到「采样」拍一张，或连接板端后同步一次。</text>
     </view>
 
@@ -133,10 +156,8 @@ watch(
     <button
       v-if="records.length < total"
       :loading="loading"
-      @click="
-        page++;
-        load(true);
-      "
+      :disabled="loading"
+      @click="load(true)"
     >
       加载更多
     </button>
@@ -156,7 +177,7 @@ watch(
 }
 .total {
   font-size: 11px;
-  color: #6b775e;
+  color: #637d87;
   padding-bottom: 6px;
 }
 .filter-row {
@@ -165,32 +186,32 @@ watch(
   gap: 8px;
   margin: 16px 0 14px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #b7bda9;
+  border-bottom: 1px solid #dce6e9;
 }
 .filter {
   font-size: 11px;
   padding: 5px 10px;
-  border: 1px solid #b7bda9;
-  color: #4d5b3f;
+  border: 1px solid #dce6e9;
+  color: #486571;
   min-height: 30px;
 }
 .filter.active {
-  background: #414f33;
-  border-color: #414f33;
-  color: #f7f6ee;
+  background: #087f82;
+  border-color: #087f82;
+  color: #ffffff;
 }
 .filter-action {
   margin-left: auto;
-  font-size: 10px;
-  color: #b4491f;
+  font-size: 11px;
+  color: #087f82;
 }
 .record {
   display: flex;
   align-items: stretch;
   gap: 12px;
-  background: #f7f6ee;
-  border-top: 1px solid #b7bda9;
-  border-bottom: 1px solid #b7bda9;
+  background: #ffffff;
+  border-top: 1px solid #dce6e9;
+  border-bottom: 1px solid #dce6e9;
   padding: 12px;
   margin-bottom: -1px;
 }
@@ -202,7 +223,7 @@ watch(
   height: 76px;
   flex-shrink: 0;
   position: relative;
-  border: 1px solid #cdd0c3;
+  border: 1px solid #e6edef;
   overflow: hidden;
 }
 .thumb-tag {
@@ -211,7 +232,7 @@ watch(
   bottom: 0;
   background: #f5e7c4;
   color: #7a5a1c;
-  font-size: 8px;
+  font-size: 11px;
   padding: 1px 4px;
   border-top: 1px solid #c2ab76;
   border-right: 1px solid #c2ab76;
@@ -235,13 +256,13 @@ watch(
   white-space: nowrap;
 }
 .time {
-  font-size: 9px;
-  color: #6b775e;
+  font-size: 11px;
+  color: #637d87;
   white-space: nowrap;
 }
 .record-name {
   font-size: 12px;
-  color: #2c3326;
+  color: #17343e;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -250,8 +271,8 @@ watch(
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 9px;
-  color: #6b775e;
+  font-size: 11px;
+  color: #637d87;
 }
 .record-foot .model {
   overflow: hidden;
@@ -261,7 +282,62 @@ watch(
 }
 .chevron {
   align-self: center;
-  color: #8a947f;
+  color: #8ca4ad;
   font-size: 18px;
+}
+
+.filter-row {
+  flex-wrap: wrap;
+  border: 0;
+  gap: 8px;
+  padding-bottom: 0;
+  margin-bottom: 20px;
+}
+.filter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 14px;
+  min-height: 42px;
+  font-size: 13px;
+  border-radius: 12px;
+  background: white;
+}
+.filter-action {
+  font-size: 12px;
+  padding: 10px 0;
+}
+.record {
+  gap: 11px;
+  border: 1px solid #e4ecef;
+  border-radius: 16px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.thumb {
+  width: 64px;
+  height: 76px;
+  border: 0;
+  border-radius: 10px;
+}
+.record-top {
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.record-top .status {
+  font-size: 12px;
+}
+.time {
+  font-size: 10px;
+}
+.record-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.record-foot {
+  font-size: 11px;
+}
+.total {
+  font-size: 12px;
 }
 </style>

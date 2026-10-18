@@ -2,7 +2,7 @@ import { test, before, after } from "node:test";
 import { inflateRawSync } from "node:zlib";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
@@ -159,7 +159,7 @@ test("API auth, role enforcement, validation and safe user projection", async ()
   assert.equal(user.passwordHash, undefined);
   await call("POST", "/stations", { name: "", code: "x" }, token, 400);
 });
-test("Simulator E2E: registration → capture → review → frozen dataset → fixture model → benchmark → deployment → self-test → rollback", async () => {
+test("Simulator E2E: registration → capture → review → frozen dataset → fixture model → approval → deployment → self-test → rollback", async () => {
   const station = await call<{ id: string }>("POST", "/stations", {
     name: "TEST Station",
     code: randomUUID(),
@@ -295,7 +295,8 @@ test("Simulator E2E: registration → capture → review → frozen dataset → 
     return app.get(ModelsService).simulatedModel(training.id);
   }
   const model = await simulatorModel("SIMULATED fixture V1");
-  // Establish a known previous model through the same verified deploy flow.
+  // Evaluation is disabled; approval and deployment must work without it.
+  await call("GET", "/benchmarks", undefined, token, 404);
   await call(
     "POST",
     "/benchmarks",
@@ -306,6 +307,7 @@ test("Simulator E2E: registration → capture → review → frozen dataset → 
       datasetId: dataset.id,
     },
     token,
+    404,
   );
   assert.equal(
     (await call<{ status: string }>("GET", `/models/${model.id}`)).status,
@@ -333,17 +335,6 @@ test("Simulator E2E: registration → capture → review → frozen dataset → 
       ),
   );
   const model2 = await simulatorModel("SIMULATED fixture V2");
-  await call(
-    "POST",
-    "/benchmarks",
-    {
-      name: "SIMULATED Benchmark V2",
-      deviceId: device.id,
-      modelId: model2.id,
-      datasetId: dataset.id,
-    },
-    token,
-  );
   await call("POST", `/models/${model2.id}/approve`, {
     confirm: true,
     note: "SIMULATED fixture V2 acceptance only",
@@ -540,7 +531,7 @@ test("one-time pairing expires through atomic consumption and WebSocket requires
   const pairing = await call<{ pairingToken: string }>(
     "POST",
     "/system/pairing",
-    { serverUrl: "http://localhost:3000" },
+    { serverUrl: "http://192.168.43.10:3000" },
     engineer,
   );
   await call(
@@ -934,6 +925,53 @@ test("model import rejects mismatched weights without writing an orphan asset", 
   assert.equal(response.statusCode, 422, response.body);
   assert.equal(response.json<{ code: string }>().code, "CHECKSUM_ERROR");
   assert.deepEqual((await readdir(modelDir)).sort(), before);
+});
+
+test("model import derives the manifest from a real model.bin", async (t) => {
+  const fixture = resolve(
+    "temporary/milk_model_import/board_model_20261017/model.bin",
+  );
+  if (!existsSync(fixture)) {
+    t.skip("real model.bin fixture is unavailable");
+    return;
+  }
+  const content = readFileSync(fixture);
+  const classes = [
+    "defect",
+    "unused_1",
+    "unused_2",
+    "unused_3",
+    "unused_4",
+    "unused_5",
+  ];
+  const boundary = "model-" + randomUUID();
+  const head = [
+    `--${boundary}\r\nContent-Disposition: form-data; name="name"\r\n\r\nMilk defect\r\n`,
+    `--${boundary}\r\nContent-Disposition: form-data; name="classes"\r\n\r\n${JSON.stringify(classes)}\r\n`,
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="model.bin"\r\nContent-Type: application/octet-stream\r\n\r\n`,
+  ].join("");
+  const payload = Buffer.concat([
+    Buffer.from(head),
+    content,
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/models/import",
+    headers: {
+      authorization: `Bearer ${engineer}`,
+      "content-type": `multipart/form-data; boundary=${boundary}`,
+    },
+    payload,
+  });
+  assert.equal(response.statusCode, 201, response.body);
+  const model = response.json<{
+    version: string;
+    manifest: { input: { channels: number }; classes: string[] };
+  }>();
+  assert.equal(model.version, "MILK-W8A8-20261017");
+  assert.equal(model.manifest.input.channels, 1);
+  assert.deepEqual(model.manifest.classes, classes);
 });
 
 test("overview withholds privileged counters from the operator and agrees with list counts", async () => {

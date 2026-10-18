@@ -1,0 +1,2 @@
+from pathlib import Path
+s=Path('temporary/online_weight_trial/platform_trial.ts').read_text(encoding='utf-8');s=s.replace("log('REGISTERED',{baseline:baseline.id,candidate:candidate.id,candidateVersion:candidate.version,samePayload:true});await api", "log('REGISTERED',{baseline:baseline.id,candidate:candidate.id,candidateVersion:candidate.version,samePayload:true});console.log('QUANTIZATION',JSON.stringify(candidate.manifest.quantization));await api");Path('temporary/online_weight_trial/platform_trial.ts').write_bytes(s.encode())

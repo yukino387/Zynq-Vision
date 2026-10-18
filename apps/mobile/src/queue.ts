@@ -1,5 +1,5 @@
 import { reactive } from "vue";
-import { session, uid, serverErrorMessage } from "./state";
+import { session, uid, serverErrorMessage, logout } from "./state";
 export interface QueuedSample {
   id: string;
   server: string;
@@ -83,7 +83,10 @@ export async function enqueue(
   const saved = await uni.saveFile({ tempFilePath: path });
   durable = saved.savedFilePath;
   // #endif
-  const sequence = Number(uni.getStorageSync("vision.sequence") || 0) + 1;
+  const sequence = Math.max(
+    Number(uni.getStorageSync("vision.sequence") || 0) + 1,
+    Date.now() % 2147483647,
+  );
   uni.setStorageSync("vision.sequence", sequence);
   const item: QueuedSample = {
     id,
@@ -136,10 +139,7 @@ async function upload(item: QueuedSample) {
       timeout: 30000,
     });
     session.serverAvailable = result.statusCode < 500;
-    if (result.statusCode === 401) {
-      session.token = "";
-      uni.removeStorageSync("vision.token");
-    }
+    if (result.statusCode === 401) logout();
     if (result.statusCode >= 400) {
       throw new Error(serverErrorMessage(result.data));
     }
@@ -160,6 +160,7 @@ export async function syncQueue(force = false) {
   queue.syncing = true;
   try {
     for (const item of queue.items) {
+      if (!session.token || !session.online) break;
       if (
         item.status === "SYNCED" ||
         item.server !== session.server ||
@@ -187,7 +188,6 @@ export async function syncQueue(force = false) {
           persist();
         }
       } catch (error) {
-        session.serverAvailable = false;
         item.status = "FAILED";
         item.error = error instanceof Error ? error.message : String(error);
         item.nextRetryAt =

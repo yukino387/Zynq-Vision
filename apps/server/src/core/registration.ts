@@ -19,12 +19,15 @@ import { Public, Roles, type Request } from "./auth.js";
 import { DomainError, parse } from "./errors.js";
 
 const codeSchema = z.string().trim().min(1).max(100);
+/** 注册码永远发不出管理员账号；管理员只能由现有管理员直接创建。 */
+const codeRoles = ["OPERATOR", "ENGINEER"] as const;
 const digest = (code: string) =>
   createHash("sha256").update(code.trim().toUpperCase()).digest("hex");
 const projection = {
   id: true,
   prefix: true,
   label: true,
+  role: true,
   issuedById: true,
   expiresAt: true,
   usedAt: true,
@@ -79,7 +82,11 @@ export class RegistrationController {
     this.limit(req.ip);
     const { code } = parse(z.object({ code: codeSchema }).strict(), body);
     const record = await this.available(code);
-    return { valid: true, expiresAt: record.expiresAt, role: "OPERATOR" };
+    return {
+      valid: true,
+      expiresAt: record.expiresAt,
+      role: record.role,
+    };
   }
 
   @Public() @Post("auth/register") async register(
@@ -96,7 +103,7 @@ export class RegistrationController {
             .string()
             .trim()
             .regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{2,39}$/),
-          password: z.string().min(12).max(100),
+          password: z.string().min(8).max(100),
         })
         .strict(),
       body,
@@ -124,7 +131,7 @@ export class RegistrationController {
           name: dto.name,
           username: dto.username,
           passwordHash,
-          role: "OPERATOR",
+          role: invitation.role,
         },
         select: { id: true, name: true, username: true, role: true },
       });
@@ -148,7 +155,10 @@ export class RegistrationController {
       });
       return created;
     });
-    return { token: await this.jwt.signAsync({ sub: user.id }), user };
+    return {
+      token: await this.jwt.signAsync({ sub: user.id, sessionVersion: 0 }),
+      user,
+    };
   }
 
   @Roles("ADMIN") @Get("registration-codes") async list(
@@ -185,6 +195,7 @@ export class RegistrationController {
         .object({
           label: z.string().trim().min(1).max(100),
           days: z.number().int().min(1).max(30).default(7),
+          role: z.enum(codeRoles).default("OPERATOR"),
         })
         .strict(),
       body,
@@ -195,6 +206,7 @@ export class RegistrationController {
         codeHash: digest(code),
         prefix: code.slice(0, 10),
         label: dto.label,
+        role: dto.role,
         issuedById: req.actor.id,
         expiresAt: new Date(Date.now() + dto.days * 86400_000),
       },

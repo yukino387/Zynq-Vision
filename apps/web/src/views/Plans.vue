@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, nextTick } from "vue";
 import type { InspectionPlan, PlanRules } from "@vision/contracts";
 import { api, post } from "../api";
 import { useAuthStore } from "../stores/auth";
@@ -14,7 +14,8 @@ const plans = ref<InspectionPlan[]>([]),
   error = ref(""),
   busy = ref(false);
 const editing = ref(false),
-  detail = ref<InspectionPlan | null>(null);
+  detail = ref<InspectionPlan | null>(null),
+  deleting = ref<InspectionPlan | null>(null);
 const name = ref(""),
   product = ref(""),
   purpose = ref<PlanRules["purpose"]>("PRESENCE"),
@@ -64,6 +65,7 @@ function open(plan?: InspectionPlan) {
   editing.value = true;
 }
 async function save() {
+  if (busy.value || !auth.admin) return;
   if (
     new Set(entries.value.map((entry) => entry.name.trim())).size !==
     entries.value.length
@@ -123,6 +125,29 @@ function ruleText(plan: InspectionPlan, classId: number) {
         ? `需要 ${check.min} 个`
         : `${check.min}–${check.max} 个`;
 }
+async function requestDelete(plan: InspectionPlan) {
+  detail.value = null;
+  editing.value = false;
+  await nextTick();
+  deleting.value = plan;
+}
+async function remove() {
+  if (!deleting.value || busy.value || !auth.admin) return;
+  busy.value = true;
+  try {
+    await api(`/plans/${deleting.value.id}`, {
+      method: "DELETE",
+      body: JSON.stringify({ confirm: true }),
+    });
+    deleting.value = null;
+    await load();
+    notices.add("方案版本已删除，已有任务及历史数据保留");
+  } catch (e) {
+    notices.error(e);
+  } finally {
+    busy.value = false;
+  }
+}
 </script>
 <template>
   <div class="page-heading">
@@ -178,11 +203,11 @@ function ruleText(plan: InspectionPlan, classId: number) {
             ><span>{{ ruleText(plan, id) }}</span>
           </li>
         </ul>
-        <div class="form-actions">
-          <button @click="detail = plan">查看方案</button
+        <div class="row-actions section-space">
+          <button class="table-action" @click="detail = plan">查看方案</button
           ><RouterLink
             v-if="auth.admin"
-            class="button-link"
+            class="table-action"
             :to="{
               name: 'data',
               params: { tab: 'tasks' },
@@ -190,6 +215,14 @@ function ruleText(plan: InspectionPlan, classId: number) {
             }"
             >安排采样 →</RouterLink
           >
+          <button
+            v-if="auth.admin"
+            class="table-action danger"
+            :disabled="busy"
+            @click="requestDelete(plan)"
+          >
+            删除方案版本
+          </button>
         </div>
       </article>
     </div>
@@ -346,8 +379,31 @@ function ruleText(plan: InspectionPlan, classId: number) {
         @click="detail = null"
         >为此方案安排采样</RouterLink
       ><button v-if="auth.admin" @click="open(detail)">修改并保存新版本</button>
+      <button
+        v-if="auth.admin"
+        class="danger"
+        :disabled="busy"
+        @click="requestDelete(detail)"
+      >
+        删除方案版本
+      </button>
     </div></Drawer
   >
+  <Drawer
+    v-if="deleting"
+    title="删除方案版本"
+    @close="!busy && (deleting = null)"
+  >
+    <p>确认删除“{{ deleting.name }} / V{{ deleting.version }}”？</p>
+    <p class="note">
+      此版本将从方案列表和新任务选项中移除。已关联任务继续使用原版本，已有图片、标注、数据集和检测记录保留。其他方案版本不受影响。
+    </p>
+    <div class="form-actions">
+      <button class="danger" :disabled="busy" @click="remove">
+        {{ busy ? "正在删除…" : "确认删除" }}</button
+      ><button :disabled="busy" @click="deleting = null">取消</button>
+    </div>
+  </Drawer>
 </template>
 <style scoped>
 .plan-intro {

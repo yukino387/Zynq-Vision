@@ -49,7 +49,7 @@ const labels: Record<string, string> = {
   ZYNQ: "开发板",
   ADMIN: "管理员",
   ENGINEER: "技术维护人员",
-  OPERATOR: "工人",
+  OPERATOR: "操作员",
   CORRECT: "正确",
   FALSE_POSITIVE: "误检",
   MISSED: "漏检",
@@ -160,6 +160,8 @@ export function errorMessage(code: unknown, message: unknown): string {
     COMMAND_REJECTED: "设备未执行该操作，请刷新状态后重试",
     FRAME_UNAVAILABLE: "暂未收到完整画面，请等待设备画面后重试",
     MODEL_INCOMPATIBLE: "模型与设备不兼容",
+    MODEL_RESTORE_REQUIRED:
+      "请先导入板端当前模型的原始模型包，版本和权重摘要均须一致，以便评估后恢复",
     INVALID_STATE: "当前状态无法执行此操作，请刷新后重试",
     NOT_FOUND: "记录不存在或已删除",
     ASSET_NOT_FOUND: "原始文件不存在",

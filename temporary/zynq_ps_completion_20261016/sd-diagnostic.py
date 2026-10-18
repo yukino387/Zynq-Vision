@@ -1,0 +1,2 @@
+from pathlib import Path
+p=Path('camera/int8/model_store.cpp');s=p.read_text();s=s.replace('uint32_t received=0, last_error=0;','uint32_t received=0, last_error=0, sd_result=0;');s=s.replace('''    mounted=f_mount(&fs,"0:/",1)==FR_OK;''','''    sd_result=f_mount(&fs,"0:/",1);mounted=sd_result==FR_OK;''');s=s.replace('''(last_error<<16),{}, {}}''','''(last_error<<16)|(sd_result<<8),{}, {}}''');p.write_text(s)

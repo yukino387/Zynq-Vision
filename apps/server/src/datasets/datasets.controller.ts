@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Param,
   Query,
   Body,
@@ -24,6 +25,8 @@ export class DatasetsController {
   ) {}
   @Get() async list(@Query() query: unknown) {
     const { q, args } = listing(query);
+    if (q.realOnly === "true")
+      args.where.items = { none: { sample: { source: "SIMULATION" } } };
     const rows = await this.db.dataset.findMany({
       ...args,
       include: {
@@ -48,12 +51,44 @@ export class DatasetsController {
       data: parse(
         z
           .object({
-            name: z.string().min(1).max(120),
+            name: z.string().trim().min(1).max(120),
             version: z.number().int().positive(),
           })
           .strict(),
         body,
       ),
+    });
+  }
+  @Roles("ADMIN") @Delete(":id") async remove(
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    parse(z.object({ confirm: z.literal(true) }).strict(), body);
+    return this.db.$transaction(async (tx) => {
+      const dataset = await tx.dataset.findUniqueOrThrow({
+        where: { id },
+        include: { _count: { select: { trainings: true, benchmarks: true } } },
+      });
+      if (dataset._count.trainings || dataset._count.benchmarks)
+        throw new DomainError(
+          "INVALID_STATE",
+          "此数据集已被训练或评估使用，不能删除",
+        );
+      const exporting = await tx.job.count({
+        where: {
+          type: "DATASET_EXPORT",
+          entityId: id,
+          status: { in: ["QUEUED", "RUNNING"] },
+        },
+      });
+      if (exporting)
+        throw new DomainError(
+          "INVALID_STATE",
+          "此数据集正在导出，请等待导出完成后删除",
+        );
+      await tx.datasetItem.deleteMany({ where: { datasetId: id } });
+      await tx.dataset.delete({ where: { id } });
+      return { id };
     });
   }
   @Get(":id") async detail(@Param("id") id: string) {
@@ -62,7 +97,13 @@ export class DatasetsController {
       include: {
         items: {
           include: {
-            sample: { include: { quality: true, assets: true } },
+            sample: {
+              include: {
+                quality: true,
+                assets: true,
+                annotations: { orderBy: { version: "desc" }, take: 1 },
+              },
+            },
             annotationSet: { include: { boxes: true } },
           },
         },
@@ -87,6 +128,12 @@ export class DatasetsController {
     }
     return {
       ...dataset,
+      items: dataset.items.map((item) => ({
+        ...item,
+        needsUpdate:
+          item.sample.annotations[0]?.id !== item.annotationSetId ||
+          item.sample.annotations[0]?.status !== "COMPLETE",
+      })),
       quality: {
         sourceCounts,
         classes,
@@ -105,6 +152,12 @@ export class DatasetsController {
   }
   @Roles("ADMIN") @Post(":id/freeze") freeze(@Param("id") id: string) {
     return this.datasets.freeze(id);
+  }
+  @Delete(":id/items/:sampleId") removeItem(
+    @Param("id") id: string,
+    @Param("sampleId") sampleId: string,
+  ) {
+    return this.datasets.removeItem(id, sampleId);
   }
   @Post(":id/clone") clone(@Param("id") id: string) {
     return this.datasets.clone(id);

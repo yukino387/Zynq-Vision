@@ -4,6 +4,7 @@ import type { Role } from "@vision/contracts";
 import { api, post, RequestError } from "../api";
 export const useAuthStore = defineStore("auth", () => {
   const user = ref<{ id: string; name: string; role: Role } | null>(null),
+    notice = ref(""),
     ready = ref(false);
   const role = computed(() => user.value?.role ?? null);
   const engineer = computed(
@@ -37,6 +38,7 @@ export const useAuthStore = defineStore("auth", () => {
       user: NonNullable<typeof user.value>;
     }>("/auth/login", { username, password });
     sessionStorage.setItem("vision.token", result.token);
+    notice.value = "";
     user.value = result.user;
     sessionStorage.setItem("vision.user", JSON.stringify(result.user));
   }
@@ -51,6 +53,7 @@ export const useAuthStore = defineStore("auth", () => {
       user: NonNullable<typeof user.value>;
     }>("/auth/register", body);
     sessionStorage.setItem("vision.token", result.token);
+    notice.value = "";
     sessionStorage.setItem("vision.user", JSON.stringify(result.user));
     user.value = result.user;
   }
@@ -59,8 +62,20 @@ export const useAuthStore = defineStore("auth", () => {
     sessionStorage.removeItem("vision.token");
     user.value = null;
   }
+  async function updateProfile(name: string) {
+    const result = await api<NonNullable<typeof user.value>>("/auth/profile", {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    });
+    if (user.value) {
+      user.value.name = result.name;
+      sessionStorage.setItem("vision.user", JSON.stringify(user.value));
+    }
+    return result;
+  }
   return {
     user,
+    notice,
     role,
     ready,
     admin,
@@ -69,5 +84,6 @@ export const useAuthStore = defineStore("auth", () => {
     login,
     register,
     logout,
+    updateProfile,
   };
 });

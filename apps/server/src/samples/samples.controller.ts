@@ -12,6 +12,7 @@ import {
   Inject,
 } from "@nestjs/common";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { boxSchema } from "@vision/contracts";
 import type { FastifyReply } from "fastify";
 import { Db } from "../core/db.js";
@@ -41,21 +42,31 @@ export class SamplesController {
     ]);
     args.where.deletedAt = null;
     if (q.realOnly === "true") args.where.NOT = { source: "SIMULATION" };
-    if (q.annotation)
-      args.where.annotations =
-        q.annotation === "complete"
-          ? { some: { status: "COMPLETE" } }
-          : { none: { status: "COMPLETE" } };
+    if (q.annotation) {
+      const completed = await this.db.$queryRaw<
+        Array<{ sampleId: string }>
+      >(Prisma.sql`
+        SELECT a.sampleId FROM AnnotationSet a
+        WHERE a.status = 'COMPLETE' AND NOT EXISTS (
+          SELECT 1 FROM AnnotationSet newer
+          WHERE newer.sampleId = a.sampleId AND newer.version > a.version
+        )
+      `);
+      const ids = completed.map((row) => row.sampleId);
+      args.where.id =
+        q.annotation === "complete" ? { in: ids } : { notIn: ids };
+    }
     if (q.reviewed === "false")
       args.where.AND = [{ status: { in: ["PENDING", "NEEDS_WORK"] } }];
     if (q.reviewed === "true") args.where.AND = [{ status: "REVIEWED" }];
+    if (q.qualityStatus) args.where.quality = { status: q.qualityStatus };
     return page(
       await this.db.sample.findMany({
         ...args,
         include: {
           assets: true,
           quality: true,
-          reviews: true,
+          reviews: { orderBy: { createdAt: "desc" } },
           _count: {
             select: { annotations: { where: { status: "COMPLETE" } } },
           },
@@ -118,7 +129,7 @@ export class SamplesController {
               : dto.verdict === "ACCEPT"
                 ? "REVIEWED"
                 : "NEEDS_WORK",
-          ...(dto.hard ? { hard: true } : {}),
+          hard: dto.hard,
         },
       });
       return review;
@@ -162,7 +173,7 @@ export class SamplesController {
         task: { include: { plan: true } },
         assets: true,
         quality: true,
-        reviews: true,
+        reviews: { orderBy: { createdAt: "desc" } },
         annotations: { include: { boxes: true }, orderBy: { version: "desc" } },
         inspections: { include: { detections: true, reviews: true } },
         captureSet: { include: { samples: true } },
@@ -233,7 +244,39 @@ export class SamplesController {
       });
     });
   }
-  @Roles("ADMIN", "ENGINEER") @Delete(":id") async remove(
+  @Roles("ADMIN", "ENGINEER") @Post(":id/task") async assignTask(
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    const { taskId } = parse(
+      z.object({ taskId: z.string().min(1) }).strict(),
+      body,
+    );
+    return this.db.$transaction(async (tx) => {
+      const task = await tx.task.findUniqueOrThrow({
+        where: { id: taskId, status: { not: "DELETED" } },
+        include: { plan: true },
+      });
+      const classes = (task.plan?.rules as { classes?: string[] } | undefined)
+        ?.classes;
+      if (!classes?.length)
+        throw new DomainError(
+          "INVALID_STATE",
+          "请选择已关联检查方案的采样任务",
+        );
+      const sample = await tx.sample.findUniqueOrThrow({
+        where: { id, deletedAt: null },
+        include: { task: true, _count: { select: { annotations: true } } },
+      });
+      if (sample._count.annotations && sample.task?.planId !== task.planId)
+        throw new DomainError(
+          "INVALID_STATE",
+          "此图片已有标注，不能更换到不同检查方案",
+        );
+      return tx.sample.update({ where: { id }, data: { taskId } });
+    });
+  }
+  @Roles("ADMIN") @Delete(":id") async remove(
     @Param("id") id: string,
     @Body() body: unknown,
   ) {

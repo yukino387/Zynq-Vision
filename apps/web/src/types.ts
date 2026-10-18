@@ -8,4 +8,6 @@ export type {
   Dataset,
   Model,
   Deployment,
+  Firmware,
+  FirmwareDeployment,
 } from "@vision/contracts";

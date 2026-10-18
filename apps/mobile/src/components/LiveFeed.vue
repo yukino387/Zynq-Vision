@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, onMounted, nextTick, getCurrentInstance } from "vue";
+import { onResize } from "@dcloudio/uni-app";
 import { displayName } from "@vision/shared";
 import type { DetectionBox } from "@vision/contracts";
 import { live, liveDevice, frameAge, type LiveFrame } from "../live";
@@ -11,6 +12,8 @@ const props = defineProps<{
   deviceId?: string;
   /** 页面自己提供设备与判定信息时，只保留画面上的最小标记。 */
   minimal?: boolean;
+  /** 全屏取景时板端方图用 aspectFit 完整显示，默认填满容器。 */
+  fit?: "aspectFill" | "aspectFit";
 }>();
 const emit = defineEmits<{ expand: [] }>();
 
@@ -21,6 +24,23 @@ const device = computed(() =>
 );
 const frame = computed(() => props.override ?? live.frame);
 const held = computed(() => Boolean(props.override));
+const hostSize = ref({ width: 0, height: 0 });
+const instance = getCurrentInstance();
+function measure() {
+  void nextTick(() => {
+    uni
+      .createSelectorQuery()
+      .in(instance?.proxy)
+      .select(".live-feed")
+      .boundingClientRect((rect) => {
+        const bounds = rect as { width: number; height: number } | null;
+        if (bounds?.width && bounds.height) hostSize.value = bounds;
+      })
+      .exec();
+  });
+}
+onMounted(measure);
+onResize(measure);
 const imageSrc = computed(() =>
   frame.value ? `data:image/jpeg;base64,${frame.value.jpeg}` : "",
 );
@@ -33,12 +53,19 @@ const fresh = computed(
   () => age.value !== null && age.value < 4000 && !held.value,
 );
 const detections = computed(() => frame.value?.detections ?? null);
+const frameAspect = computed(() => {
+  const ratio = (frame.value?.width || 416) / (frame.value?.height || 416);
+  const { width, height } = hostSize.value;
+  if (props.fit === "aspectFit" && width && height) {
+    const fittedWidth = Math.min(width, height * ratio);
+    return { width: `${fittedWidth}px`, height: `${fittedWidth / ratio}px` };
+  }
+  return { "--frame-aspect": String(ratio) };
+});
 const runtimeLabel = computed(() => {
   if (!device.value) return "未连接";
   if (device.value.connectionState !== "ONLINE") return "等待连接";
-  return device.value.runtimeState === "RUNNING"
-    ? "检测运行中"
-    : "设备就绪";
+  return device.value.runtimeState === "RUNNING" ? "检测运行中" : "设备就绪";
 });
 
 const state = computed(() => {
@@ -106,24 +133,30 @@ function expand() {
     :class="{ interactable: expandable, dark: !frame }"
     @click="expand"
   >
-    <image
-      v-if="frame"
-      class="feed-image"
-      :src="imageSrc"
-      mode="aspectFill"
-      alt="设备实时画面"
-    />
-    <view v-if="frame && detections?.length" class="box-layer">
-      <view
-        v-for="(box, index) in detections"
-        :key="index"
-        class="det-box"
-        :style="boxStyle(box, frame)"
-      >
-        <text class="det-label"
-          >{{ displayName(box.label) }}
-          {{ (box.confidence * 100).toFixed(0) }}%</text
+    <view
+      class="feed-frame"
+      :class="{ fit: fit === 'aspectFit' }"
+      :style="frameAspect"
+    >
+      <image
+        v-if="frame"
+        class="feed-image"
+        :src="imageSrc"
+        :mode="fit ?? 'aspectFill'"
+        alt="设备实时画面"
+      />
+      <view v-if="frame && detections?.length" class="box-layer">
+        <view
+          v-for="(box, index) in detections"
+          :key="index"
+          class="det-box"
+          :style="boxStyle(box, frame)"
         >
+          <text class="det-label"
+            >{{ displayName(box.label) }}
+            {{ (box.confidence * 100).toFixed(0) }}%</text
+          >
+        </view>
       </view>
     </view>
 
@@ -159,10 +192,7 @@ function expand() {
       </view>
     </view>
 
-    <view
-      v-if="!minimal && frame && detections !== null"
-      class="verdict-chip"
-    >
+    <view v-if="!minimal && frame && detections !== null" class="verdict-chip">
       <text v-if="detections.length" class="warn"
         >{{ detections.length }} 处候选 · 待复核</text
       >
@@ -184,8 +214,25 @@ function expand() {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #10140f;
-  color: #eef1e6;
+  background: #102b36;
+  color: #f0f8fa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.feed-frame {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+/* 板端方图在全屏取景里必须完整显示；检测框跟随图片实际显示区域。 */
+.feed-frame.fit {
+  position: relative;
+  inset: auto;
+  flex: none;
+  width: 100%;
+  max-height: 100%;
+  aspect-ratio: var(--frame-aspect, 1);
 }
 .live-feed.interactable {
   cursor: pointer;
@@ -203,7 +250,7 @@ function expand() {
 }
 .det-box {
   position: absolute;
-  border: 2px solid #ee743d;
+  border: 2px solid #f28b61;
   box-sizing: border-box;
 }
 .det-label {
@@ -212,9 +259,9 @@ function expand() {
   top: -19px;
   max-width: 220px;
   padding: 2px 5px;
-  background: #ee743d;
+  background: #f28b61;
   color: #1b1e1c;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 15px;
   white-space: nowrap;
   overflow: hidden;
@@ -236,9 +283,9 @@ function expand() {
   align-items: center;
   gap: 6px;
   padding: 4px 8px;
-  background: #10140fcc;
+  background: #102b36cc;
   border: 1px solid #ffffff26;
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 1px;
   color: #c9d2c0;
 }
@@ -249,11 +296,11 @@ function expand() {
 }
 .live-chip.live {
   color: #d7ecc9;
-  border-color: #9bc78966;
+  border-color: #71ddc866;
 }
 .live-chip.live .dot {
-  background: #9bc789;
-  box-shadow: 0 0 0 4px #9bc78922;
+  background: #71ddc8;
+  box-shadow: 0 0 0 4px #71ddc822;
 }
 .live-chip.stale,
 .live-chip.waiting,
@@ -276,7 +323,7 @@ function expand() {
 .hud-mono {
   font-family: Consolas, monospace;
   font-variant-numeric: tabular-nums;
-  font-size: 10px;
+  font-size: 11px;
   color: #c9d2c0;
   text-shadow: 0 1px 2px #00000080;
 }
@@ -299,15 +346,15 @@ function expand() {
 }
 .hud-name {
   font-size: 12px;
-  color: #eef1e6;
+  color: #f0f8fa;
   text-shadow: 0 1px 3px #000000b0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .hud-sub {
-  font-size: 9px;
-  color: #b9c4ae;
+  font-size: 11px;
+  color: #aac6d0;
   text-shadow: 0 1px 3px #000000b0;
 }
 .hud-right {
@@ -317,7 +364,7 @@ function expand() {
   gap: 3px;
 }
 .hud-right .muted {
-  color: #b9c4ae;
+  color: #aac6d0;
 }
 .state-panel {
   position: absolute;
@@ -331,7 +378,7 @@ function expand() {
   align-items: center;
   gap: 7px;
   text-align: center;
-  background: #10140fd9;
+  background: #102b36d9;
   border: 1px solid #ffffff1f;
 }
 .state-title {
@@ -339,15 +386,15 @@ function expand() {
   font-weight: 550;
 }
 .state-detail {
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.7;
-  color: #aebaa3;
+  color: #aac6d0;
 }
 .spinner {
   width: 16px;
   height: 16px;
   border: 2px solid #ffffff26;
-  border-top-color: #ee743d;
+  border-top-color: #f28b61;
   border-radius: 50%;
   animation: spin 0.9s linear infinite;
 }
@@ -361,18 +408,18 @@ function expand() {
   left: 12px;
   top: 42px;
   padding: 3px 7px;
-  font-size: 9px;
-  background: #10140fcc;
+  font-size: 11px;
+  background: #102b36cc;
   border: 1px solid #ffffff26;
 }
 .verdict-chip .warn {
   color: #e0b764;
 }
 .verdict-chip .clear {
-  color: #b9c4ae;
+  color: #aac6d0;
 }
 .verdict-chip .muted-chip {
-  color: #93a08a;
+  color: #8db0bd;
 }
 .expand-hint {
   position: absolute;
@@ -381,7 +428,7 @@ function expand() {
   padding: 3px 6px;
   border: 1px solid #ffffff33;
   color: #d8e0cf;
-  font-size: 9px;
-  background: #10140f99;
+  font-size: 11px;
+  background: #102b3699;
 }
 </style>

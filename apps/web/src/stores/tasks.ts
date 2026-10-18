@@ -11,7 +11,9 @@ export const useTaskStore = defineStore("tasks", () => {
     else sessionStorage.removeItem("vision.task");
   });
   async function load() {
-    items.value = (await api<Page<Task>>("/tasks")).items;
+    items.value = (
+      await api<Page<Task>>("/tasks?realOnly=true&status=OPEN&pageSize=100")
+    ).items;
     if (
       selected.value &&
       !items.value.some((task) => task.id === selected.value)

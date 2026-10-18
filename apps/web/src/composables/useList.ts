@@ -14,7 +14,9 @@ export function useList<T>(endpoint: Ref<string>) {
     reviewed = ref(""),
     realOnly = ref(""),
     annotation = ref(""),
+    qualityStatus = ref(""),
     source = ref(""),
+    taskId = ref(""),
     from = ref(""),
     to = ref(""),
     /** 排序字段必须在该路由的 sort 白名单里，否则接口返回 400 */
@@ -37,7 +39,9 @@ export function useList<T>(endpoint: Ref<string>) {
         reviewed: reviewed.value,
         realOnly: realOnly.value,
         annotation: annotation.value,
+        qualityStatus: qualityStatus.value,
         source: source.value,
+        taskId: taskId.value,
         from: from.value ? new Date(from.value).toISOString() : "",
         to: to.value ? new Date(to.value).toISOString() : "",
         sort: sort.value,
@@ -83,6 +87,9 @@ export function useList<T>(endpoint: Ref<string>) {
       status.value = "";
       result.value = "";
       reviewed.value = "";
+      qualityStatus.value = "";
+      sort.value = "createdAt";
+      order.value = "desc";
       void load();
     },
     { immediate: true },
@@ -100,7 +107,9 @@ export function useList<T>(endpoint: Ref<string>) {
     reviewed,
     realOnly,
     annotation,
+    qualityStatus,
     source,
+    taskId,
     from,
     to,
     sort,

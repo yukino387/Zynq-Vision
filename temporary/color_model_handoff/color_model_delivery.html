@@ -1,0 +1,433 @@
+<title>彩色模型交付标准</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  :root {
+    --bg: #f4f6f9;
+    --surface: #ffffff;
+    --surface-2: #eef2f7;
+    --fg: #17212f;
+    --muted: #5c6a7d;
+    --line: #d9e0e9;
+    --accent: #2557c7;
+    --accent-soft: #e7eefc;
+    --warn: #a85a0b;
+    --warn-soft: #fbf0e2;
+    --ok: #1d765a;
+    --ok-soft: #e5f4ee;
+    --code-bg: #eef1f5;
+    --font-sans: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+    --radius: 10px;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e141c;
+      --surface: #151d28;
+      --surface-2: #1b2532;
+      --fg: #e4eaf2;
+      --muted: #98a6b8;
+      --line: #2a3645;
+      --accent: #8fb1ff;
+      --accent-soft: #1a2a45;
+      --warn: #f0b35b;
+      --warn-soft: #2b2114;
+      --ok: #6fd3b0;
+      --ok-soft: #14281f;
+      --code-bg: #0b1118;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e141c;
+    --surface: #151d28;
+    --surface-2: #1b2532;
+    --fg: #e4eaf2;
+    --muted: #98a6b8;
+    --line: #2a3645;
+    --accent: #8fb1ff;
+    --accent-soft: #1a2a45;
+    --warn: #f0b35b;
+    --warn-soft: #2b2114;
+    --ok: #6fd3b0;
+    --ok-soft: #14281f;
+    --code-bg: #0b1118;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 15.5px;
+    line-height: 1.75;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 0 64px;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  header.masthead {
+    padding-block: 44px 26px;
+    border-bottom: 1px solid var(--line);
+  }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 10px;
+  }
+  h1 {
+    font-size: clamp(28px, 5vw, 40px);
+    line-height: 1.15;
+    letter-spacing: -.01em;
+    margin: 0 0 12px;
+    text-wrap: balance;
+  }
+  .lede {
+    font-size: 17px;
+    color: var(--muted);
+    max-width: 62ch;
+    margin: 0;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    margin-top: 18px;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .meta b { color: var(--fg); font-weight: 600; }
+  section { padding-block: 30px 4px; border-bottom: 1px solid var(--line); }
+  section:last-of-type { border-bottom: 0; }
+  h2 {
+    font-size: 21px;
+    line-height: 1.3;
+    margin: 0 0 6px;
+    letter-spacing: -.005em;
+    text-wrap: balance;
+  }
+  h2 .kicker {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 400;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  h3 { font-size: 16px; margin: 22px 0 6px; }
+  p { margin: 10px 0; }
+  ul, ol { margin: 10px 0; padding-left: 22px; }
+  li { margin: 5px 0; }
+  strong { font-weight: 700; }
+  code {
+    font-family: var(--font-mono);
+    font-size: .88em;
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 1px 5px;
+    overflow-wrap: anywhere;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 12px 0;
+    line-height: 1.55;
+  }
+  pre code { background: none; border: 0; padding: 0; font-size: 12.5px; }
+  .callout {
+    background: var(--accent-soft);
+    border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    margin: 22px 0 8px;
+  }
+  .callout h3 { margin: 0 0 6px; font-size: 15px; }
+  .callout ol { margin: 0; }
+  .callout li { margin: 4px 0; }
+  .warn {
+    background: var(--warn-soft);
+    border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
+    border-radius: var(--radius);
+    padding: 13px 16px;
+    margin: 16px 0;
+  }
+  .warn strong { color: var(--warn); }
+  .ok {
+    background: var(--ok-soft);
+    border: 1px solid color-mix(in srgb, var(--ok) 28%, transparent);
+    border-radius: var(--radius);
+    padding: 13px 16px;
+    margin: 16px 0;
+  }
+  .ok strong { color: var(--ok); }
+  .table-scroll { overflow-x: auto; margin: 13px 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 520px; font-size: 14px; }
+  th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+  th { background: var(--surface-2); font-weight: 700; font-size: 13px; white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  td.mono, th.mono { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
+  .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 14px 0; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+  }
+  .card h3 { margin: 0 0 3px; font-size: 15px; }
+  .card p { margin: 2px 0; font-size: 14px; color: var(--muted); }
+  .facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; margin: 20px 0 4px; }
+  .fact { background: var(--surface); padding: 12px 14px; }
+  .fact span { display: block; font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .fact b { display: block; font-size: 15px; margin-top: 2px; }
+  .checklist { list-style: none; padding-left: 0; }
+  .checklist li { position: relative; padding-left: 28px; margin: 8px 0; }
+  .checklist li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 6px;
+    width: 15px;
+    height: 15px;
+    border: 1.5px solid var(--muted);
+    border-radius: 4px;
+  }
+  .tag {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: .04em;
+    border-radius: 999px;
+    padding: 1px 8px;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    background: var(--surface-2);
+  }
+  .tag.must { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, transparent); background: var(--warn-soft); }
+  .tag.fixed { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); background: var(--accent-soft); }
+  footer { padding-top: 26px; color: var(--muted); font-size: 13px; }
+  @media (max-width: 640px) {
+    .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-2 { grid-template-columns: 1fr; }
+    body { font-size: 15px; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    html { scroll-behavior: smooth; }
+  }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">Zynq-7020 · PS 固件 · 固定图 INT8</p>
+    <h1>彩色模型交付标准</h1>
+    <p class="lede">给训练侧队友的交付口径：按这份标准产出 <code>model.bin</code>，平台导入、板端下发和 PS 端色彩模式识别都不需要再改代码。</p>
+    <div class="meta">
+      <span>版本 <b>v1.0</b></span>
+      <span>日期 <b>2026-10-17</b></span>
+      <span>适用固件 <b>2026-10-17 16:13 及以后</b></span>
+      <span>适用平台 <b>CNN Studio / vision server</b></span>
+    </div>
+  </header>
+
+  <div class="callout">
+    <h3>三句话版本</h3>
+    <ol>
+      <li>用项目固定图训练，<code>colorMode=RGB</code>，输入 224×224×3；不要改网络、锚点、输出尺度。</li>
+      <li>交付 <code>model.bin</code>（6,416,360 字节）+ 六槽类别表 + 验证报告；类别名不写进模型包。</li>
+      <li>板端只要读到 <code>metadata[4]=3</code> 就自动走 RGB 预处理；<code>metadata[4]=1</code> 的灰度模型继续可用。</li>
+    </ol>
+  </div>
+
+  <div class="facts">
+    <div class="fact"><span>模型包</span><b>6,416,360 B</b></div>
+    <div class="fact"><span>权重</span><b>6,350,208 B</b></div>
+    <div class="fact"><span>metadata</span><b>66,024 B</b></div>
+    <div class="fact"><span>输入</span><b>224×224×{1,3}</b></div>
+  </div>
+
+  <section>
+    <h2><span class="kicker">01 · 链路现状</span>PS 端已经打通的部分</h2>
+    <p>板端加载路径是：模型包写入 SD 槽位 → <code>model_store.cpp</code> 校验并加载 <code>weights</code>/<code>metadata</code> → <code>live_main.cpp</code> 读 <code>metadata[4]</code> → <code>gray.cpp</code> 选灰度或 RGB 预处理 → 写入 <code>features</code> 的 1 或 3 个平面 → PL 固定图推理。</p>
+    <p><code>metadata[4]</code> 就是第一层卷积的输入通道数（<code>commands[0][4]</code>）。它是模型包自带的，不是固件配置、不需要 manifest、也不需要上位机告诉板子。平台导入时，服务器同样从 <code>model.bin</code> 的 metadata 读出通道数，自动生成 <code>preprocessProfile</code>。</p>
+    <div class="warn"><strong>固件前提：</strong>板上必须是 2026-10-17 16:13 之后构建的 ELF（含 <code>model_store</code> 与通道自动识别）。更早的固件没有这套模型库与彩色分支，彩色包能下发但不会按 RGB 预处理。当前板上若仍是旧固件，先用 <code>vitis_live/run_live.tcl</code> 加载最新 ELF，再验收彩色模型。QSPI 自启动镜像需另行重建，现有 <code>BOOT.bin</code> 早于该 ELF。</div>
+  </section>
+
+  <section>
+    <h2><span class="kicker">02 · 硬约束</span>固定图只允许改一个数</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>项目</th><th>要求</th><th>状态</th></tr></thead>
+        <tbody>
+          <tr><td>网络模板</td><td><code>ZYNQ7020_NEU_INT8_V1</code>，33 层固定图（<code>camera/training/graph.json</code>）</td><td><span class="tag fixed">固定</span></td></tr>
+          <tr><td>输入</td><td>224×224，channels = 1 或 3，INT8</td><td><span class="tag fixed">固定</span></td></tr>
+          <tr><td>唯一允许变化</td><td><code>commands[0][4]</code>：第一层输入通道 = 1 或 3</td><td><span class="tag">可改</span></td></tr>
+          <tr><td>权重尺寸</td><td>6,350,208 B；通道轴按 48/8 补齐，所以 1 通道与 3 通道包大小相同</td><td><span class="tag fixed">固定</span></td></tr>
+          <tr><td>metadata 尺寸</td><td>66,024 B（16,506 个 int32）</td><td><span class="tag fixed">固定</span></td></tr>
+          <tr><td>输出头</td><td><code>[1,33,7,7]</code> + <code>[1,33,14,14]</code></td><td><span class="tag fixed">固定</span></td></tr>
+          <tr><td>输出尺度</td><td><code>0.11581249687615341</code> 与 <code>0.15977688286248154</code></td><td><span class="tag fixed">固定</span></td></tr>
+          <tr><td>锚点</td><td>两路各 3 组，见 <code>packages/device-protocol/src/postprocess.ts</code></td><td><span class="tag fixed">固定</span></td></tr>
+          <tr><td>类别</td><td>固定 6 槽；不足的槽位用 <code>_unused_N</code></td><td><span class="tag fixed">固定</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="tag must">不要改层数、层尺寸、stride、kernel、feature 偏移、量化方案或锚点。彩色化只改变第一层“读几路输入”，不改变网络结构。</p>
+  </section>
+
+  <section>
+    <h2><span class="kicker">03 · 预处理</span>彩色输入必须和板端逐位对齐</h2>
+    <p>相机给的是 416×416 RGB565；PS 先解出 R/G/B 8-bit，再用 <code>camera/int8/gray_coefficients.h</code> 的定点系数做两遍 resize 到 224×224，最后量化成 INT8。</p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>环节</th><th>彩色（RGB）</th><th>灰度（GRAY）</th></tr></thead>
+        <tbody>
+          <tr><td>训练参数</td><td><code>colorMode = "RGB"</code></td><td><code>colorMode = "GRAY"</code></td></tr>
+          <tr><td><code>metadata[4]</code></td><td>3</td><td>1</td></tr>
+          <tr><td>manifest 预处理标识</td><td><code>RGB565_RGB224_INT8_V1</code></td><td><code>RGB565_GRAY224_INT8_V1</code></td></tr>
+          <tr><td>通道顺序</td><td>RGB，不是 BGR</td><td>亮度 luma</td></tr>
+          <tr><td>输入尺寸</td><td>224×224</td><td>224×224</td></tr>
+          <tr><td>量化</td><td colspan="2"><code>x_int8 = (clip(x, 0, 255) × 127 + 127) // 255</code>；网络输入 <code>x_int8 / 127</code>；zero point 0，scale 1/127</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><strong>必须使用项目自带的数据预处理</strong>：<code>camera/training/data.py</code> 的 <code>Samples(..., "RGB")</code> 会先按 BICUBIC 缩到 416，再模拟 RGB565 量化，最后用与 PS 相同的定点表做两遍 resize。不要自己写 resize、不要做 mean/std、不要转 HSV/YUV、不要用 416 或 320 的输入尺寸。</p>
+    <p>如果样本是原始采集文件（<code>raw</code>），必须是 416×416、little-endian RGB565，长度恰好 416×416×2 字节。</p>
+  </section>
+
+  <section>
+    <h2><span class="kicker">04 · 包格式</span>model.bin 的字节布局</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>偏移</th><th>长度</th><th>内容</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">0</td><td class="mono">4</td><td>magic <code>0x314e4e43</code></td></tr>
+          <tr><td class="mono">4</td><td class="mono">4</td><td>format = 1</td></tr>
+          <tr><td class="mono">8</td><td class="mono">4</td><td>weight_size = 6,350,208</td></tr>
+          <tr><td class="mono">12</td><td class="mono">4</td><td>metadata_size = 66,024</td></tr>
+          <tr><td class="mono">16</td><td class="mono">4</td><td>generation = 0</td></tr>
+          <tr><td class="mono">20</td><td class="mono">4</td><td>committed = 0</td></tr>
+          <tr><td class="mono">24</td><td class="mono">64</td><td>version：1–63 个 ASCII 字节，NUL 补齐</td></tr>
+          <tr><td class="mono">88</td><td class="mono">32</td><td>payload 的 SHA-256（weights + metadata）</td></tr>
+          <tr><td class="mono">120</td><td class="mono">4</td><td>header 前 120 字节的 CRC32</td></tr>
+          <tr><td class="mono">124</td><td class="mono">4</td><td>reserved = 0</td></tr>
+          <tr><td class="mono">128</td><td class="mono">6,350,208</td><td>weights</td></tr>
+          <tr><td class="mono">6,350,336</td><td class="mono">66,024</td><td>metadata</td></tr>
+          <tr><td class="mono">6,416,360</td><td class="mono">—</td><td>文件总长</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>metadata 的前 330 个 int32 是 33×10 的 commands 表；<code>commands[0][4]</code> 就是通道数。其余是逐层量化表，由导出链生成，不要手改。权重按 <code>[M/48, N/8, 4, 12, 8, K, K]</code> 打包，通道轴零补齐。</p>
+    <div class="warn"><strong>两个哈希不要混：</strong><code>manifest.weights.sha256</code> 是整个 <code>model.bin</code> 的 SHA-256；包头 88–119 字节是 payload（weights + metadata）的 SHA-256。包内 CRC32 只覆盖包头前 120 字节。</div>
+  </section>
+
+  <section>
+    <h2><span class="kicker">05 · 训练与导出</span>用项目链路，不要手工拼包</h2>
+    <p>推荐直接走平台训练任务：创建训练时把颜色模式设为 <strong>RGB</strong>，训练完成后导出目录里会同时得到 <code>model.bin</code>、<code>weights.bin</code>、<code>metadata.bin</code>、<code>manifest.json</code>、<code>checkpoint.pt</code> 和 <code>report.json</code>。</p>
+    <p>命令行训练时，spec 至少要包含：</p>
+    <pre><code>{
+  "version": "MILK-RGB-20261017",
+  "datasetChecksum": "&lt;冻结数据集校验值&gt;",
+  "options": { "colorMode": "RGB", "epochs": 50, "batchSize": 32, "seed": 7020 },
+  "classes": ["次品", "_unused_1", "_unused_2", "_unused_3", "_unused_4", "_unused_5"],
+  "items": [ ... 冻结样本 ... ]
+}</code></pre>
+    <p>运行：</p>
+    <pre><code>python camera/training/train.py --spec &lt;spec.json&gt; --output &lt;输出目录&gt;</code></pre>
+    <p>如果要从已有 <code>weights.bin</code>/<code>metadata.bin</code> 重新打包，使用：</p>
+    <pre><code>python camera/pack_model.py --weights &lt;weights.bin&gt; --metadata &lt;metadata.bin&gt; \
+  --channels 3 --version &lt;VERSION&gt; --output &lt;输出目录&gt;</code></pre>
+    <div class="warn"><strong>不要把灰度训练的权重直接加 <code>--channels 3</code>：</strong>包会通过校验、板子也会按 RGB 跑，但第一层只读到 R 通道，结果是错的。<code>--channels</code> 必须与训练时的 <code>colorMode</code> 一致。</div>
+    <p>版本号要求：1–63 个 ASCII 字节、不含 NUL、全局唯一；建议 <code>产品-COLOR-日期</code>，例如 <code>MILK-RGB-20261017</code>。</p>
+  </section>
+
+  <section>
+    <h2><span class="kicker">06 · 交付物</span>队友需要交哪些文件</h2>
+    <div class="grid-2">
+      <div class="card"><h3>模型制品</h3><p><code>model.bin</code>，必须恰好 6,416,360 字节；附整包 SHA-256。</p></div>
+      <div class="card"><h3>清单与类别</h3><p><code>manifest.json</code>（自动生成）+ 六槽类别表，按 classId 顺序列出；不足的槽写 <code>_unused_N</code>。</p></div>
+      <div class="card"><h3>训练报告</h3><p><code>report.json</code>、<code>checkpoint.pt</code>、训练参数、数据集 ID/校验值、colorMode。</p></div>
+      <div class="card"><h3>验证证据</h3><p>验证集原图 + 预测结果；推荐阈值和对应分数；最差样本与已知限制（背景、光照、场景）。</p></div>
+    </div>
+    <p>所有文件放在一个目录或压缩包里交接，目录名建议 <code>color_model_&lt;产品&gt;_&lt;日期&gt;/</code>，并附一页 <code>README</code> 写明版本、类别表、阈值、哈希和训练参数。不要直接改仓库源码或板端固件。</p>
+  </section>
+
+  <section>
+    <h2><span class="kicker">07 · 验收</span>交付前按顺序跑完</h2>
+    <ol>
+      <li><strong>文件完整性。</strong>用下面的脚本检查尺寸、magic、尺寸字段、CRC、payload 哈希和通道数；输出应为 <code>ok 3 6416360</code>。</li>
+      <li><strong>固定图校验。</strong><code>pack_model.py</code> 或 <code>export_int8</code> 不应报 <code>PL command template mismatch</code> / <code>PL shift</code> 错误。</li>
+      <li><strong>平台导入。</strong>模型仓库 → 导入模型制品，填写名称和六槽类别。预期提示“制品校验通过”；在模型详情的“技术详情”里，<code>manifest.input.channels</code> 为 3、<code>preprocessProfile</code> 为 <code>RGB565_RGB224_INT8_V1</code>。</li>
+      <li><strong>板端下发。</strong>先完成评估，再由管理员批准并创建部署。预期回执 <code>downloaded / verified / loaded / selfTest / active</code> 全为 true，板端不报校验错误。</li>
+      <li><strong>确认自动识别。</strong>模型激活后，板端 <code>metadata[4]</code> 应为 3；同一场景下彩色模型与灰度模型的 <code>conversion_us</code> 会不同，且推理帧的 <code>errorCode</code> 为 0。</li>
+      <li><strong>整数路径对齐。</strong>用 <code>pl_model.py</code> 的 <code>integer_forward</code> 对同一张预处理后的输入算一遍，与板端输出比较类别和分数；分数应在约定容差内。</li>
+      <li><strong>性能与稳定性。</strong>记录 <code>conversion_us</code>、<code>inference_us</code>、<code>cycle_us</code> 和 FPS，连续跑一段短测。彩色预处理目前是标量实现，首次上板务必记录真实数据，不要用灰度的数字代替。</li>
+      <li><strong>回归。</strong>切回一个灰度模型（<code>metadata[4]=1</code>），确认仍能正常加载和推理。</li>
+    </ol>
+    <pre><code>import hashlib, struct, zlib
+p = open('model.bin', 'rb').read()
+assert len(p) == 6416360, len(p)
+magic, fmt, w, m = struct.unpack('&lt;4I', p[:16])
+assert (magic, fmt, w, m) == (0x314e4e43, 1, 6350208, 66024)
+assert p[124:128] == b'\0' * 4
+assert zlib.crc32(p[:120]) &amp; 0xffffffff == struct.unpack('&lt;I', p[120:124])[0]
+payload = p[128:]
+assert hashlib.sha256(payload).digest() == p[88:120]
+channels = struct.unpack('&lt;i', p[128 + 6350208 + 16:128 + 6350208 + 20])[0]
+assert channels in (1, 3)
+print('ok', channels, len(p))</code></pre>
+  </section>
+
+  <section>
+    <h2><span class="kicker">08 · 业务接入</span>类别、阈值和显示</h2>
+    <p>模型包只带权重和量化表，<strong>不带类别名</strong>。六槽类别按 classId 顺序与平台标签表对齐；平台当前在 <code>packages/device-protocol/src/postprocess.ts</code> 里有一张固定的六类标签表，新业务上线时要同步更新这张表和导入时填写的类别。</p>
+    <ul>
+      <li>单类别业务（例如牛奶次品）：把目标类放第 0 槽，其余五槽填 <code>_unused_N</code>；后处理取分数最高的槽，未使用槽的分数必须足够低。</li>
+      <li>阈值不写进模型。检测阈值是平台业务参数（当前 <code>detect()</code> 默认 0.35）；队友在验证报告里给出推荐阈值和对应分数，由平台侧配置。</li>
+      <li>输出尺度和锚点是固定常量，不随训练变化；不要为了让分数好看去改它们。</li>
+      <li>如果演示使用 CNN Studio 上位机，它的 anchors/类别表也要同步；服务端和上位机是两套后处理，不能只改一边。</li>
+    </ul>
+    <div class="ok"><strong>无缝接入的判断标准：</strong>平台导入不报错、下发自检通过、板端按 RGB 预处理、同一场景下检测结果与训练侧整数参考一致、类别名和阈值符合业务约定。</div>
+  </section>
+
+  <section>
+    <h2><span class="kicker">09 · 禁止事项</span>这些改动会直接让包失效</h2>
+    <ul>
+      <li>改 <code>graph.json</code>、commands、feature 偏移、锚点或输出尺度。</li>
+      <li>改输入尺寸（416、320、256 都不行）、通道顺序（BGR）或归一化方式（mean/std）。</li>
+      <li>手改 <code>weights.bin</code>、<code>metadata.bin</code> 或 <code>model.bin</code> 的头部字段。</li>
+      <li>用 1/3 以外的通道数；用 <code>--channels 3</code> 去包装灰度权重。</li>
+      <li>只交 <code>checkpoint.pt</code> 或训练日志，不交 <code>model.bin</code>。</li>
+      <li>把“评估通过”当作“发布批准”；发布仍需管理员批准。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="kicker">10 · 交接前最后一遍</span>检查清单</h2>
+    <ul class="checklist">
+      <li><code>model.bin</code> 是 6,416,360 字节，CRC、payload SHA-256 和整包 SHA-256 都通过。</li>
+      <li>包内 <code>metadata[4] = 3</code>，训练确实是 <code>colorMode=RGB</code>。</li>
+      <li>六槽类别表齐全，顺序与平台标签表一致；未使用槽为 <code>_unused_N</code>。</li>
+      <li><code>report.json</code> 含验证指标、推荐阈值、数据集校验值和 colorMode。</li>
+      <li>平台导入、评估、批准、下发自检全部通过，且记录了三项耗时和 FPS。</li>
+      <li>已用同一场景对比彩色与灰度模型，确认 RGB 路径生效、结果符合预期。</li>
+      <li>交付目录附 <code>README</code>：版本、日期、类别、阈值、哈希、已知限制。</li>
+      <li>验收板已加载 2026-10-17 16:13 及以后的 ELF；若用 QSPI 自启动，BOOT.bin 已重建并烧写。</li>
+    </ul>
+  </section>
+
+  <footer>
+    这份标准对应当前固定图与 PS 固件行为。固件、图结构、输出尺度或后处理一旦变化，需要同步更新本页再交付。
+  </footer>
+</div>

@@ -1,0 +1,5 @@
+connect -url tcp:127.0.0.1:3121
+targets -set -filter {name == "APU"}
+foreach a {0xf8890084 0xf8890088 0xf8890314 0xf8000120 0xf8000100 0xf8000104 0xf8000108 0xf8007000 0xf8007010 0xf8007080 0xf800708c 0xe000d000 0xe000d004 0xe000d0a0 0x0 0x100000} {catch {puts "[mrd -force $a]"} e;puts $e}
+disconnect
+exit

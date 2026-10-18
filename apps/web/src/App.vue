@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { onMounted, watch, watchEffect, computed, ref, nextTick } from "vue";
+import {
+  onMounted,
+  onUnmounted,
+  watch,
+  watchEffect,
+  computed,
+  ref,
+  nextTick,
+} from "vue";
 import { chinese, displayName } from "@vision/shared";
 import { useRoute } from "vue-router";
 import { useAuthStore } from "./stores/auth";
@@ -10,6 +18,20 @@ import { useAppStore, type Theme } from "./stores/app";
 import { canAccess, navItems, roleDuties } from "./navigation";
 import type { RouteRecordRaw } from "vue-router";
 import AuthPanel from "./components/AuthPanel.vue";
+import Icon from "./components/Icon.vue";
+const navIcons: Record<string, string> = {
+  overview: "dashboard",
+  plans: "clipboard",
+  workbench: "camera",
+  records: "audit",
+  data: "database",
+  models: "layers",
+  firmware: "device",
+  diagnostics: "activity",
+  system: "server",
+  access: "users",
+  account: "users",
+};
 const auth = useAuthStore(),
   devices = useDeviceStore(),
   notices = useNotificationStore(),
@@ -49,6 +71,49 @@ function isCurrent(item: RouteRecordRaw) {
 const menuQuery = ref(""),
   sidebarOpen = ref(false),
   expanded = ref<string[]>([]);
+const narrowScreen = window.matchMedia("(max-width: 760px)");
+let previousOverflow = "";
+function closeWideNavigation() {
+  if (!narrowScreen.matches) sidebarOpen.value = false;
+}
+watch(sidebarOpen, async (open) => {
+  if (open) {
+    previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    await nextTick();
+    document
+      .querySelector<HTMLElement>(".nav-close")
+      ?.focus({ preventScroll: true });
+  } else {
+    document.body.style.overflow = previousOverflow;
+    await nextTick();
+    document
+      .querySelector<HTMLElement>(".menu-toggle")
+      ?.focus({ preventScroll: true });
+  }
+});
+function trapNavigation(event: KeyboardEvent) {
+  if (!sidebarOpen.value || event.key !== "Tab") return;
+  const controls = [
+    ...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>(
+      "a[href], button, input",
+    ),
+  ].filter((el) => el.getClientRects().length && !el.closest("[inert]"));
+  const first = controls[0],
+    last = controls.at(-1);
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last?.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first?.focus();
+  }
+}
+onMounted(() => narrowScreen.addEventListener("change", closeWideNavigation));
+onUnmounted(() => {
+  narrowScreen.removeEventListener("change", closeWideNavigation);
+  if (sidebarOpen.value) document.body.style.overflow = previousOverflow;
+});
 const matches = (text: string) => text.includes(menuQuery.value.trim());
 const sidebarItems = computed(() =>
   nav.value
@@ -110,6 +175,7 @@ watch(
         notices.error(e);
       }
     } else {
+      sidebarOpen.value = false;
       devices.stop();
       if (previousUser) {
         tasks.selected = "";
@@ -131,29 +197,52 @@ watch(
   >
     <!-- 键盘用户不必每次 Tab 穿过整条侧栏 -->
     <a class="skip" href="#main" @click.prevent="focusMain">跳到主内容</a>
-    <button
-      v-if="sidebarOpen"
-      class="nav-backdrop"
-      aria-label="关闭导航"
-      @click="sidebarOpen = false"
-    ></button>
-    <aside class="sidebar" :class="{ open: sidebarOpen }">
-      <RouterLink to="/" class="brand"
-        ><span>边缘视觉工作站</span
-        ><small>{{ roleDuties[auth.user.role].name }}</small></RouterLink
-      >
-      <input
-        v-model="menuQuery"
-        class="menu-search"
-        type="search"
-        aria-label="搜索功能"
-        placeholder="搜索功能，如标注、注册码"
-      />
-      <nav aria-label="主导航">
-        <template
-          v-for="(entry, navIndex) in sidebarItems"
-          :key="String(entry.item.name)"
+    <Transition name="fade">
+      <button
+        v-if="sidebarOpen"
+        class="nav-backdrop"
+        aria-label="关闭导航"
+        @click="sidebarOpen = false"
+      ></button>
+    </Transition>
+    <aside
+      id="workspace-nav"
+      class="sidebar"
+      :class="{ open: sidebarOpen }"
+      :role="sidebarOpen ? 'dialog' : undefined"
+      :aria-modal="sidebarOpen || undefined"
+      aria-label="工作区导航"
+      @keydown="trapNavigation"
+    >
+      <div class="brand-row">
+        <RouterLink to="/" class="brand" @click="choose">
+          <span class="brand-mark"><Icon name="scan" :size="23" /></span>
+          <span
+            >边缘视觉工作站<small>{{
+              roleDuties[auth.user.role].name
+            }}</small></span
+          >
+        </RouterLink>
+        <button
+          class="nav-close"
+          aria-label="关闭导航"
+          @click="sidebarOpen = false"
         >
+          <Icon name="close" />
+        </button>
+      </div>
+      <div v-if="auth.engineer" class="menu-search-wrap">
+        <Icon name="search" :size="16" />
+        <input
+          v-model="menuQuery"
+          class="menu-search"
+          type="search"
+          aria-label="搜索功能"
+          placeholder="搜索功能"
+        />
+      </div>
+      <nav aria-label="主导航">
+        <template v-for="entry in sidebarItems" :key="String(entry.item.name)">
           <template v-if="entry.item.meta?.tabs?.length">
             <button
               class="nav-parent"
@@ -161,12 +250,13 @@ watch(
               :aria-expanded="
                 !!menuQuery.trim() || expanded.includes(String(entry.item.name))
               "
+              :aria-controls="`menu-${String(entry.item.name)}`"
               @click="toggle(String(entry.item.name))"
             >
-              <span class="nav-number">{{
-                String(navIndex + 1).padStart(2, "0")
-              }}</span
-              >{{ entry.item.meta.title
+              <Icon
+                :name="navIcons[String(entry.item.name)] ?? 'device'"
+                :size="18"
+              />{{ entry.item.meta.title
               }}<span
                 aria-hidden="true"
                 class="nav-chevron"
@@ -178,24 +268,34 @@ watch(
               ></span>
             </button>
             <div
-              v-if="
-                menuQuery.trim() || expanded.includes(String(entry.item.name))
+              class="nav-collapse"
+              :class="{
+                expanded:
+                  !!menuQuery.trim() ||
+                  expanded.includes(String(entry.item.name)),
+              }"
+              :inert="
+                !menuQuery.trim() && !expanded.includes(String(entry.item.name))
               "
-              class="nav-children"
+              :aria-hidden="
+                !menuQuery.trim() && !expanded.includes(String(entry.item.name))
+              "
               :id="`menu-${String(entry.item.name)}`"
             >
-              <RouterLink
-                v-for="tab in entry.tabs"
-                :key="tab.tab"
-                class="sub"
-                :to="{ name: entry.item.name, params: { tab: tab.tab } }"
-                :class="{ selected: subCurrent(entry.item, tab.tab) }"
-                :aria-current="
-                  subCurrent(entry.item, tab.tab) ? 'page' : undefined
-                "
-                @click="choose"
-                >{{ tab.label }}</RouterLink
-              >
+              <div class="nav-children">
+                <RouterLink
+                  v-for="tab in entry.tabs"
+                  :key="tab.tab"
+                  class="sub"
+                  :to="{ name: entry.item.name, params: { tab: tab.tab } }"
+                  :class="{ selected: subCurrent(entry.item, tab.tab) }"
+                  :aria-current="
+                    subCurrent(entry.item, tab.tab) ? 'page' : undefined
+                  "
+                  @click="choose"
+                  >{{ tab.label }}</RouterLink
+                >
+              </div>
             </div>
           </template>
           <RouterLink
@@ -205,42 +305,68 @@ watch(
             :class="{ selected: isCurrent(entry.item) }"
             :aria-current="isCurrent(entry.item) ? 'page' : undefined"
             @click="choose"
-            ><span class="nav-number">{{
-              String(navIndex + 1).padStart(2, "0")
-            }}</span
-            >{{ entry.item.meta?.title }}</RouterLink
+            ><Icon
+              :name="navIcons[String(entry.item.name)] ?? 'device'"
+              :size="18"
+            />{{ entry.item.meta?.title }}</RouterLink
           >
         </template>
         <p v-if="!sidebarItems.length" class="menu-empty">没有找到相关功能</p>
       </nav>
       <div class="session">
-        <div>
+        <span class="session-avatar" aria-hidden="true">{{
+          displayName(auth.user.name).slice(0, 1)
+        }}</span>
+        <RouterLink
+          class="session-profile"
+          to="/account"
+          title="账号设置"
+          @click="choose"
+        >
           {{ displayName(auth.user.name)
           }}<small>{{ chinese(auth.user.role) }}</small>
-        </div>
-        <button @click="auth.logout" aria-label="退出登录">退出</button>
+        </RouterLink>
+        <button @click="auth.logout" aria-label="退出登录" title="退出登录">
+          <Icon name="logout" :size="17" />
+        </button>
       </div>
     </aside>
-    <div class="main-shell">
+    <div class="main-shell" :inert="sidebarOpen">
       <header class="topbar">
         <button
           class="menu-toggle"
           @click="sidebarOpen = !sidebarOpen"
           :aria-expanded="sidebarOpen"
+          aria-controls="workspace-nav"
+          aria-label="打开导航"
         >
-          菜单
+          <Icon name="menu" />
         </button>
-        <span>{{ currentPage }}</span>
+        <span class="topbar-location"
+          ><Icon
+            :name="navIcons[String(route.name)] ?? 'clipboard'"
+            :size="16"
+          />{{ currentPage }}</span
+        >
         <div class="topbar-actions">
-          <span
+          <RouterLink
+            class="account-link"
+            to="/account"
+            aria-label="账号设置"
+            title="账号设置"
+            @click="choose"
+            ><Icon name="users" :size="16" /><span>账号设置</span></RouterLink
+          >
+          <span class="connection-status"
             ><span
               class="connection-dot"
               :class="devices.connected ? 'ok' : 'info'"
             ></span
-            >{{ devices.connected ? "服务已连接" : "服务重连中" }}</span
+            >{{ devices.connected ? "平台连接正常" : "平台连接中" }}</span
           ><RouterLink v-if="auth.engineer" to="/system/health"
             >系统状态</RouterLink
           ><select
+            v-if="auth.engineer"
             class="theme-select"
             :value="app.theme"
             @change="onTheme"
@@ -258,27 +384,63 @@ watch(
         :data-page="String(route.name)"
         :data-tab="String(route.params.tab || route.meta.defaultTab || '')"
       >
-        <div class="role-context">
-          <strong>{{ roleDuties[auth.user.role].name }}</strong
-          ><span>{{ roleDuties[auth.user.role].summary }}</span>
-        </div>
         <!-- tab 切换也是路由切换，所以这一个过渡同时覆盖侧栏跳转和子页切换 -->
         <RouterView v-slot="{ Component }">
           <Transition name="page" mode="out-in">
-            <component :is="Component" />
+            <div :key="route.path" class="page-content">
+              <component :is="Component" />
+            </div>
           </Transition>
         </RouterView>
       </main>
     </div>
   </div>
-  <div class="toasts" aria-live="polite">
+  <TransitionGroup
+    name="toast"
+    tag="div"
+    class="toasts"
+    aria-live="polite"
+    aria-relevant="additions"
+  >
     <button
       v-for="m in notices.messages"
       :key="m.id"
       :class="{ error: m.error }"
       @click="notices.dismiss(m.id)"
     >
-      {{ m.text }} <span>关闭</span>
+      <Icon :name="m.error ? 'alert' : 'check'" :size="19" />
+      <span class="toast-message">{{ m.text }}</span
+      ><Icon name="close" :size="15" />
     </button>
-  </div>
+  </TransitionGroup>
 </template>
+<style scoped>
+.session-profile {
+  flex: 1;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+  border-radius: 6px;
+  padding: 4px;
+}
+.session-profile:hover {
+  background: #30372b;
+}
+.topbar-actions .account-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  color: var(--ink-2);
+}
+.account-link:hover {
+  background: var(--surface-2);
+}
+@media (max-width: 1000px) {
+  .account-link span {
+    display: none;
+  }
+}
+</style>

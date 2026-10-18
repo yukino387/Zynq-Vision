@@ -138,6 +138,132 @@ export function readModelReply(packet: Buffer): WireModelReply | null {
     sha256: packet.subarray(92, 124).toString("hex"),
   };
 }
+/** PS 应用固件协议（camera/firmware_layout.h）。槽位 0=A、1=B、2=golden、0xFFFFFFFF=无。 */
+export const FIRMWARE = {
+  magic: 0x314d5246,
+  replyMagic: 0x31524d46,
+  replySize: 160,
+  packet: 1400,
+  armToken: 0x41524d31,
+  noneSlot: 0xffffffff,
+  goldenSlot: 2,
+  maxAttempts: 3,
+  ops: {
+    INFO: 0,
+    BEGIN: 1,
+    DATA: 2,
+    FINISH: 3,
+    COMMIT: 4,
+    ROLLBACK: 5,
+    ABORT: 6,
+    LIST: 7,
+  },
+  result: {
+    OK: 0,
+    INVALID: 1,
+    BUSY: 2,
+    STORAGE: 3,
+    REJECTED: 4,
+    FULL: 5,
+    NOT_FOUND: 6,
+    UNUSABLE: 7,
+    PROTECTED: 8,
+    NOT_ARMED: 9,
+    ROLLED_BACK: 10,
+  },
+  flags: {
+    SUPPORTED: 1,
+    STAGED: 2,
+    VERIFIED: 4,
+    BUSY: 8,
+    TRIAL: 16,
+    ROLLBACK_AVAILABLE: 32,
+    GOLDEN_ACTIVE: 64,
+    REBOOT_PENDING: 128,
+  },
+  stage: {
+    IDLE: 0,
+    RECEIVING: 1,
+    VERIFYING: 2,
+    READY: 3,
+    ERASING: 4,
+    PROGRAMMING: 5,
+    VERIFYING_FLASH: 6,
+    WRITING_RECORD: 7,
+    REBOOT_PENDING: 8,
+    DONE: 9,
+  },
+  /** 回滚目标编码：previous 或 golden。 */
+  rollbackTarget: {
+    PREVIOUS: 0,
+    GOLDEN: 2,
+  },
+} as const;
+export interface WireFirmwareReply {
+  request: number;
+  result: number;
+  received: number;
+  total: number;
+  generation: number;
+  flags: number;
+  runningSlot: number;
+  activeSlot: number;
+  previousSlot: number;
+  pendingSlot: number;
+  attempts: number;
+  maxAttempts: number;
+  stage: number;
+  version: string;
+  sha256: string;
+  slotAImageSize: number;
+  slotBImageSize: number;
+}
+/**
+ * 20 字节请求头 + 数据。BEGIN 的 size 是整包长度且不带数据；
+ * DATA 的 size 必须等于数据长度（板端会校验）。
+ */
+export function firmwarePacket(
+  request: number,
+  operation: number,
+  offset = 0,
+  size = 0,
+  data: Buffer = Buffer.alloc(0),
+): Buffer {
+  const b = Buffer.alloc(20 + data.length);
+  b.writeUInt32LE(FIRMWARE.magic);
+  b.writeUInt32LE(request >>> 0, 4);
+  b.writeUInt32LE(operation, 8);
+  b.writeUInt32LE(offset >>> 0, 12);
+  b.writeUInt32LE(size >>> 0, 16);
+  data.copy(b, 20);
+  return b;
+}
+export function readFirmwareReply(packet: Buffer): WireFirmwareReply | null {
+  if (
+    packet.length !== FIRMWARE.replySize ||
+    packet.readUInt32LE(0) !== FIRMWARE.replyMagic
+  )
+    return null;
+  return {
+    request: packet.readUInt32LE(4),
+    result: packet.readUInt32LE(8),
+    received: packet.readUInt32LE(12),
+    total: packet.readUInt32LE(16),
+    generation: packet.readUInt32LE(20),
+    flags: packet.readUInt32LE(24),
+    runningSlot: packet.readUInt32LE(28),
+    activeSlot: packet.readUInt32LE(32),
+    previousSlot: packet.readUInt32LE(36),
+    pendingSlot: packet.readUInt32LE(40),
+    attempts: packet.readUInt32LE(44),
+    maxAttempts: packet.readUInt32LE(48),
+    stage: packet.readUInt32LE(52),
+    version: packet.subarray(56, 112).toString("ascii").split("\0")[0]!,
+    sha256: packet.subarray(112, 144).toString("hex"),
+    slotAImageSize: packet.readUInt32LE(144),
+    slotBImageSize: packet.readUInt32LE(148),
+  };
+}
 interface Partial {
   streams: Map<number, { data: Buffer; offsets: Set<number> }>;
   created: number;

@@ -24,7 +24,7 @@ set(USER_UNDEFINED_SYMBOLS
 # Example 2: Adding ../../common/include will consider the path as relative to this component directory.
 # Example 3: Adding ${CMAKE_SOURCE_DIR}/data/include to add data/include from this project.
 
-set(USER_INCLUDE_DIRECTORIES "C:/00_workplace/fpga/cnn_accelerator" "C:/00_workplace/fpga/cnn_accelerator/vitis_live/camera_platform_live/export/camera_platform_live/sw/camera_domain/hw_artifacts/drivers/conv_v1_0/src")
+set(USER_INCLUDE_DIRECTORIES "C:/00_workplace/fpga/cnn_accelerator" "C:/00_workplace/fpga/cnn_accelerator/camera" "C:/00_workplace/fpga/cnn_accelerator/camera/build/firmware" "C:/00_workplace/fpga/cnn_accelerator/vitis_live/camera_platform_live/export/camera_platform_live/sw/camera_domain/hw_artifacts/drivers/conv_v1_0/src")
 
 #Add any source below, they will be added as Compile sources.
 #Example 1: Adding /proj/data/helloworld.c will pass /proj/data/helloworld.c
@@ -37,7 +37,9 @@ set(USER_COMPILE_SOURCES
 "C:/00_workplace/fpga/cnn_accelerator/camera/int8/weights.S"
 "C:/00_workplace/fpga/cnn_accelerator/camera/int8/model_store.cpp"
 "C:/00_workplace/fpga/cnn_accelerator/camera/camera_input.cpp"
-"C:/00_workplace/fpga/cnn_accelerator/camera/udp_output.cpp")
+"C:/00_workplace/fpga/cnn_accelerator/camera/udp_output.cpp"
+"C:/00_workplace/fpga/cnn_accelerator/camera/firmware_ota.cpp"
+"C:/00_workplace/fpga/cnn_accelerator/camera/firmware_qspi.cpp")
 
 # -----------------------------------------
 

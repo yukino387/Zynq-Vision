@@ -6,11 +6,13 @@ import Records from "./views/Records.vue";
 import InspectionDetail from "./views/InspectionDetail.vue";
 import Data from "./views/Data.vue";
 import Models from "./views/Models.vue";
+import Firmware from "./views/Firmware.vue";
 import Devices from "./views/Devices.vue";
 import System from "./views/System.vue";
 import NotFound from "./views/NotFound.vue";
 import Access from "./views/Access.vue";
 import Plans from "./views/Plans.vue";
+import Account from "./views/Account.vue";
 
 export interface TabMeta {
   tab: string;
@@ -43,17 +45,23 @@ export const roleDuties = {
     summary: "配置方案、分配采样、审核数据、训练与批准发布",
   },
   OPERATOR: {
-    name: "现场工作区",
+    name: "操作员工作区",
     summary: "按任务采样、查看结果、提交复核意见",
   },
   ENGINEER: {
     name: "技术维护区",
-    summary: "维护设备、处理标注与训练；审核和正式发布由管理员负责",
+    summary: "维护设备、标注与训练；方案、任务管理及业务数据删除由管理员负责",
   },
 };
 
 /** 路由是导航的唯一真源：侧栏、顶栏标题、视图内 tab 条、角色可见性全部从这里派生。 */
 export const routes: RouteRecordRaw[] = [
+  {
+    path: "/account",
+    name: "account",
+    component: Account,
+    meta: { title: "账号设置", nav: false, discipline: "business" },
+  },
   {
     path: "/overview",
     name: "overview",
@@ -97,7 +105,7 @@ export const routes: RouteRecordRaw[] = [
     meta: {
       title: "检测记录",
       nav: true,
-      order: 3,
+      order: 4,
       discipline: "business",
       defaultTab: "queue",
       tabs: [
@@ -113,7 +121,8 @@ export const routes: RouteRecordRaw[] = [
     meta: {
       title: "采样与数据",
       nav: true,
-      order: 4,
+      order: 5,
+      roles: ENGINEER,
       discipline: "business",
       defaultTab: "samples",
       tabs: [
@@ -133,15 +142,31 @@ export const routes: RouteRecordRaw[] = [
     meta: {
       title: "模型与发布",
       nav: true,
-      order: 5,
+      order: 6,
       roles: ENGINEER,
       discipline: "business",
       defaultTab: "registry",
       tabs: [
         { tab: "registry", label: "模型仓库" },
         { tab: "training", label: "训练任务" },
-        { tab: "benchmarks", label: "模型评估" },
         { tab: "deployments", label: "批准发布与回退", roles: ["ADMIN"] },
+      ],
+    },
+  },
+  {
+    path: "/firmware/:tab?",
+    name: "firmware",
+    component: Firmware,
+    meta: {
+      title: "固件与更新",
+      nav: true,
+      order: 7,
+      roles: ENGINEER,
+      discipline: "business",
+      defaultTab: "registry",
+      tabs: [
+        { tab: "registry", label: "固件仓库" },
+        { tab: "deployments", label: "更新记录" },
       ],
     },
   },
@@ -153,7 +178,7 @@ export const routes: RouteRecordRaw[] = [
       title: "设备诊断",
       roles: ENGINEER,
       nav: true,
-      order: 6,
+      order: 8,
       discipline: "hmi",
       defaultTab: "registry",
       tabs: [
@@ -171,7 +196,7 @@ export const routes: RouteRecordRaw[] = [
     meta: {
       title: "系统管理",
       nav: true,
-      order: 7,
+      order: 9,
       roles: ENGINEER,
       discipline: "business",
       defaultTab: "health",
@@ -190,7 +215,7 @@ export const routes: RouteRecordRaw[] = [
     meta: {
       title: "人员与权限",
       nav: true,
-      order: 8,
+      order: 10,
       roles: ["ADMIN"],
       defaultTab: "users",
       tabs: [

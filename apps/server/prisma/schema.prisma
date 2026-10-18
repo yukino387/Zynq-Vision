@@ -52,6 +52,7 @@ model User {
  name String
  username String @unique
  passwordHash String
+ sessionVersion Int @default(0)
  role Role
  disabled Boolean @default(false)
  createdAt DateTime @default(now())
@@ -92,6 +93,7 @@ model Device {
  tokens DeviceToken[]
  inspections Inspection[]
  deployments Deployment[]
+ firmwareDeployments FirmwareDeployment[]
  events DeviceEvent[]
  benchmarks Benchmark[]
  commands Command[]
@@ -113,6 +115,7 @@ model InspectionPlan {
  version Int
  rules Json
  createdAt DateTime @default(now())
+ deletedAt DateTime?
  tasks Task[]
  @@unique([name,version])
 }
@@ -203,6 +206,7 @@ model Asset {
  createdAt DateTime @default(now())
  deletedAt DateTime?
  artifacts ModelArtifact[]
+ firmwarePackages Firmware[]
  @@index([sha256])
 }
 model QualityReport {
@@ -397,6 +401,41 @@ model Deployment {
  updatedAt DateTime @updatedAt
  @@index([deviceId,status])
 }
+model Firmware {
+ id String @id @default(cuid())
+ name String
+ version String @unique
+ sha256 String
+ size Int
+ imageSize Int
+ entry Int
+ segments Json
+ status String @default("READY")
+ notes String?
+ assetId String
+ asset Asset @relation(fields:[assetId],references:[id])
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ deployments FirmwareDeployment[]
+}
+model FirmwareDeployment {
+ id String @id @default(cuid())
+ deviceId String
+ device Device @relation(fields:[deviceId],references:[id])
+ firmwareId String
+ firmware Firmware @relation(fields:[firmwareId],references:[id])
+ previousVersion String?
+ previousSha256 String?
+ previousSlot Int?
+ status String @default("APPROVED")
+ progress Int @default(0)
+ error String?
+ receipt Json @default("{}")
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ @@index([deviceId,status])
+ @@index([firmwareId])
+}
 model SyncJob {
  id String @id @default(cuid())
  clientId String
@@ -478,6 +517,8 @@ model RegistrationCode {
  codeHash String @unique
  prefix String
  label String
+ /// 注册码只能创建 OPERATOR 或 ENGINEER；ADMIN 账号由管理员直接创建。
+ role Role @default(OPERATOR)
  issuedById String
  expiresAt DateTime
  usedAt DateTime?

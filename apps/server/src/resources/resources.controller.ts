@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Param,
   Query,
   Body,
@@ -15,7 +16,7 @@ import { roles, createPlanSchema } from "@vision/contracts";
 import { Prisma } from "@prisma/client";
 import { Db } from "../core/db.js";
 import { Events } from "../core/events.js";
-import { Roles, type Request } from "../core/auth.js";
+import { Roles, newPasswordSchema, type Request } from "../core/auth.js";
 import { parse, DomainError } from "../core/errors.js";
 import { listing, page } from "../core/list.js";
 const names = z.string().min(1).max(120);
@@ -49,7 +50,7 @@ export class UsersController {
         .object({
           name: names,
           username: names,
-          password: z.string().min(12).max(100),
+          password: z.string().min(8).max(100),
           role: z.enum(roles),
         })
         .strict(),
@@ -102,6 +103,32 @@ export class UsersController {
     if (user.disabled || dto.role) this.events.closeUser(id);
     return user;
   }
+  @Post(":id/password") async resetPassword(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+  ) {
+    if (id === req.actor.id)
+      throw new DomainError(
+        "INVALID_STATE",
+        "请到账号设置中验证当前密码后修改自己的密码",
+        400,
+      );
+    const dto = parse(
+      z.object({ newPassword: newPasswordSchema }).strict(),
+      body,
+    );
+    const user = await this.db.user.update({
+      where: { id },
+      data: {
+        passwordHash: await hash(dto.newPassword, 12),
+        sessionVersion: { increment: 1 },
+      },
+      select: safeUser,
+    });
+    this.events.closeUser(id, "Password changed");
+    return user;
+  }
 }
 @Controller("api/stations")
 export class StationsController {
@@ -131,24 +158,42 @@ export class TasksController {
       "updatedAt",
       "stationId",
     ]);
+    const conditions: Prisma.TaskWhereInput[] = [
+      { status: { not: "DELETED" } },
+    ];
+    args.where.AND = conditions;
+    if (q.realOnly === "true") {
+      const plans = await this.db.inspectionPlan.findMany({
+        select: { id: true, rules: true },
+      });
+      const simulatedPlans = plans
+        .filter(
+          (plan) => (plan.rules as { source?: string }).source === "SIMULATION",
+        )
+        .map((plan) => plan.id);
+      if (simulatedPlans.length)
+        conditions.push({
+          OR: [{ planId: null }, { planId: { notIn: simulatedPlans } }],
+        });
+    }
     return page(
       await this.db.task.findMany({
         ...args,
         include: {
           plan: true,
           station: true,
-          _count: { select: { samples: true } },
+          _count: { select: { samples: { where: { deletedAt: null } } } },
         },
       }),
       await this.db.task.count({ where: args.where }),
       q,
     );
   }
-  @Roles("ADMIN", "ENGINEER") @Post() async create(@Body() body: unknown) {
+  @Roles("ADMIN") @Post() async create(@Body() body: unknown) {
     const data = parse(
       z
         .object({
-          name: names,
+          name: z.string().trim().min(1).max(120),
           target: z.number().int().positive(),
           stationId: z.string().optional(),
           planId: z.string().optional(),
@@ -158,26 +203,56 @@ export class TasksController {
     );
     if (data.planId)
       await this.db.inspectionPlan.findUniqueOrThrow({
-        where: { id: data.planId },
+        where: { id: data.planId, deletedAt: null },
       });
     return this.db.task.create({ data });
   }
   @Get(":id") detail(@Param("id") id: string) {
     return this.db.task.findUniqueOrThrow({
-      where: { id },
+      where: { id, status: { not: "DELETED" } },
       include: {
         plan: true,
         station: true,
-        _count: { select: { samples: true } },
+        _count: { select: { samples: { where: { deletedAt: null } } } },
       },
     });
   }
+  @Roles("ADMIN") @Patch(":id") update(
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    const data = parse(
+      z
+        .object({
+          name: z.string().trim().min(1).max(120),
+          target: z.number().int().positive(),
+          status: z.enum(["OPEN", "COMPLETED"]),
+        })
+        .strict(),
+      body,
+    );
+    return this.db.task.update({
+      where: { id, status: { not: "DELETED" } },
+      data,
+    });
+  }
+  @Roles("ADMIN") @Delete(":id") async remove(
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    parse(z.object({ confirm: z.literal(true) }).strict(), body);
+    // Preserve task/plan links needed by existing annotations and inspection history.
+    await this.db.task.update({ where: { id }, data: { status: "DELETED" } });
+    return { id };
+  }
 }
+@Roles("ADMIN", "ENGINEER")
 @Controller("api/plans")
 export class PlansController {
   constructor(@Inject(Db) private db: Db) {}
   @Get() async list(@Query() query: unknown) {
     const { q, args } = listing(query, ["name", "createdAt", "version"]);
+    args.where.deletedAt = null;
     return page(
       await this.db.inspectionPlan.findMany(args),
       await this.db.inspectionPlan.count({ where: args.where }),
@@ -199,6 +274,17 @@ export class PlansController {
         },
       });
     });
+  }
+  @Roles("ADMIN") @Delete(":id") async remove(
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    parse(z.object({ confirm: z.literal(true) }).strict(), body);
+    await this.db.inspectionPlan.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
+    return { id };
   }
 }
 @Controller("api/workpieces")

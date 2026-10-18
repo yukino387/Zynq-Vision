@@ -138,7 +138,9 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
         telemetry: s.telemetry,
         capabilities: t.capabilities,
         lastSeenAt: s.lastSeen ? new Date(s.lastSeen).toISOString() : null,
-        firmwareVersion: d.firmwareVersion,
+        firmwareVersion:
+          (s.reportedState as DeviceState).firmwareVersion ??
+          d.firmwareVersion,
         protocolVersion: d.protocolVersion,
         error: s.error,
       };
@@ -160,6 +162,7 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
             : null,
           connectionState: snapshot.connectionState,
           runtimeState: snapshot.runtimeState,
+          firmwareVersion: snapshot.firmwareVersion,
           reportedState: snapshot.reportedState as Prisma.InputJsonValue,
         },
       });

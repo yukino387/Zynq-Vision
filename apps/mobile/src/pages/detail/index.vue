@@ -31,6 +31,7 @@ const inspection = ref<Inspection | null>(null),
   hard = ref(false),
   note = ref(""),
   busy = ref(false),
+  saved = ref(false),
   options = [
     ["CORRECT", "正确"],
     ["FALSE_POSITIVE", "误检"],
@@ -68,7 +69,9 @@ function boxStyle(box: DetectionBox) {
   };
 }
 async function save() {
-  if (!inspection.value) return;
+  if (!inspection.value || busy.value) return;
+  error.value = "";
+  saved.value = false;
   busy.value = true;
   try {
     await request("/reviews", "POST", {
@@ -78,6 +81,7 @@ async function save() {
       hard: hard.value,
     });
     uni.showToast({ title: "审核已保存", icon: "success" });
+    saved.value = true;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
     notify(e);
@@ -102,7 +106,10 @@ async function save() {
       </view>
       <text class="subtitle">{{ reasonLabel(inspection.reason) }}</text>
 
-      <view class="evidence">
+      <view
+        class="evidence"
+        :style="{ aspectRatio: `${assetWidth} / ${assetHeight}` }"
+      >
         <RemoteImage :asset-id="asset?.id" mode="aspectFit" label="无预览图" />
         <view class="box-layer">
           <view
@@ -172,6 +179,9 @@ async function save() {
       </view>
 
       <view class="section-head"><text>人工复核</text></view>
+      <view v-if="saved" class="success-note"
+        >本次复核已保存，可返回记录继续处理。</view
+      >
       <view class="review-options">
         <text
           v-for="o in options"
@@ -183,13 +193,9 @@ async function save() {
       </view>
       <view class="field row">
         <text style="margin: 0">加入困难样本</text>
-        <switch color="#dd5b2a" :checked="hard" @change="setHard" />
+        <switch color="#087f82" :checked="hard" @change="setHard" />
       </view>
-      <textarea
-        v-model="note"
-        placeholder="添加现场备注"
-        maxlength="2000"
-      />
+      <textarea v-model="note" placeholder="添加现场备注" maxlength="2000" />
       <button
         class="primary"
         style="margin-top: 18px"
@@ -219,7 +225,7 @@ async function save() {
   width: 100%;
   aspect-ratio: 1 / 1;
   background: #1b1f18;
-  border: 1px solid #b7bda9;
+  border: 1px solid #dce6e9;
   overflow: hidden;
   margin-top: 4px;
 }
@@ -229,7 +235,7 @@ async function save() {
 }
 .det-box {
   position: absolute;
-  border: 2px solid #dd5b2a;
+  border: 2px solid #087f82;
   box-sizing: border-box;
 }
 .det-label {
@@ -237,9 +243,9 @@ async function save() {
   left: -2px;
   top: -18px;
   padding: 2px 5px;
-  background: #dd5b2a;
+  background: #087f82;
   color: #fff8eb;
-  font-size: 9px;
+  font-size: 11px;
   line-height: 14px;
   white-space: nowrap;
 }
@@ -247,28 +253,28 @@ async function save() {
   position: absolute;
   right: 8px;
   bottom: 7px;
-  font-size: 9px;
-  color: #eef1e6;
-  background: #10140fba;
+  font-size: 11px;
+  color: #f0f8fa;
+  background: #102b36ba;
   padding: 2px 5px;
 }
 .detections {
-  border-top: 1px solid #b7bda9;
-  border-bottom: 1px solid #b7bda9;
+  border-top: 1px solid #dce6e9;
+  border-bottom: 1px solid #dce6e9;
 }
 .detection {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 2px;
-  border-bottom: 1px solid #d6d8cc;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e6edef;
 }
 .detection:last-child {
   border-bottom: 0;
 }
 .index {
-  font-size: 10px;
-  color: #8a947f;
+  font-size: 11px;
+  color: #8ca4ad;
 }
 .det-copy {
   flex: 1;
@@ -279,11 +285,30 @@ async function save() {
   font-size: 12px;
 }
 .det-pos {
-  font-size: 9px;
-  color: #6b775e;
+  font-size: 11px;
+  color: #637d87;
 }
 .score {
   font-size: 13px;
   color: #8a6a24;
+}
+
+.evidence {
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid #dce6e9;
+}
+.detections {
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid #e4ecef;
+  background: white;
+}
+.det-pos {
+  font-size: 11px;
+}
+.card .list-item .mono {
+  text-align: right;
+  max-width: 66%;
 }
 </style>

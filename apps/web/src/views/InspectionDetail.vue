@@ -2,6 +2,7 @@
 import { watch, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useNotificationStore } from "../stores/notifications";
+import { useAuthStore } from "../stores/auth";
 import { api } from "../api";
 import type { Inspection } from "../types";
 import AsyncState from "../components/AsyncState.vue";
@@ -16,6 +17,7 @@ type InspectionRecord = Inspection & {
 
 const route = useRoute(),
   router = useRouter(),
+  auth = useAuthStore(),
   notices = useNotificationStore(),
   inspection = ref<InspectionRecord | null>(null),
   loading = ref(false),
@@ -65,8 +67,8 @@ async function saved(next: boolean) {
   <div class="page-heading">
     <div>
       <h1>单件详情</h1>
-      <p v-if="inspection" class="mono">
-        # {{ inspection.id.slice(-10) }} ·
+      <p v-if="inspection" :class="{ mono: auth.engineer }">
+        <span v-if="auth.engineer"># {{ inspection.id.slice(-10) }} · </span>
         {{ new Date(inspection.createdAt).toLocaleString("zh-CN") }}
       </p>
     </div>

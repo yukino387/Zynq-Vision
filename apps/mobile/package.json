@@ -1,26 +1,28 @@
 {
   "name": "@vision/mobile",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "uni --host 0.0.0.0",
     "build": "uni build",
+    "build:app": "uni build -p app",
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
-    "@vision/contracts": "workspace:*",
-    "@vision/shared": "workspace:*",
     "@dcloudio/uni-app": "3.0.0-alpha-5030120260930001",
+    "@dcloudio/uni-app-plus": "3.0.0-alpha-5030120260930001",
     "@dcloudio/uni-components": "3.0.0-alpha-5030120260930001",
     "@dcloudio/uni-h5": "3.0.0-alpha-5030120260930001",
+    "@vision/contracts": "workspace:*",
+    "@vision/shared": "workspace:*",
     "vue": "3.4.21"
   },
   "devDependencies": {
     "@dcloudio/types": "3.4.31",
     "@dcloudio/vite-plugin-uni": "3.0.0-alpha-5030120260930001",
+    "@vue/runtime-core": "3.4.21",
     "vite": "5.2.8",
-    "vue-tsc": "^3.1.1",
-    "@vue/runtime-core": "3.4.21"
+    "vue-tsc": "^3.1.1"
   }
 }

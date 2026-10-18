@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import InfoFields from "../components/InfoFields.vue";
 import { chinese, displayName, fieldLabel } from "@vision/shared";
-import { ref, computed, watch } from "vue";
+import { ref, computed, watch, toRaw } from "vue";
 import { useRoute } from "vue-router";
 import type { Named } from "../types";
-import type { DeviceSnapshot, Model, ResidentModel } from "@vision/contracts";
+import type {
+  DeviceSnapshot,
+  DeviceState,
+  Model,
+  ResidentModel,
+} from "@vision/contracts";
 import { api, post } from "../api";
 import { useDeviceStore } from "../stores/devices";
 import { useNotificationStore } from "../stores/notifications";
@@ -13,6 +17,9 @@ import Status from "../components/Status.vue";
 import Drawer from "../components/Drawer.vue";
 import AsyncState from "../components/AsyncState.vue";
 import SortableTh from "../components/SortableTh.vue";
+import Icon from "../components/Icon.vue";
+import Sparkline from "../components/Sparkline.vue";
+import DistributionBar from "../components/DistributionBar.vue";
 const route = useRoute(),
   devices = useDeviceStore(),
   notices = useNotificationStore(),
@@ -28,11 +35,9 @@ const tab = computed(() =>
   creating = ref(false),
   name = ref(""),
   serial = ref(""),
-  type = ref("SIMULATOR"),
   stationId = ref(""),
   stations = ref<Named[]>([]),
   command = ref("GET_STATUS"),
-  fault = ref("NONE"),
   brightness = ref(0),
   targetModel = ref(""),
   targetPlan = ref(""),
@@ -40,6 +45,77 @@ const tab = computed(() =>
 /** 遥测是微秒，界面按毫秒显示。 */
 const metric = (us: number | undefined) =>
   us === undefined ? "—" : (us / 1000).toFixed(1);
+const firmware = computed(() => selected.value?.reportedState.firmware ?? null);
+const slotName = (slot: number | null | undefined) =>
+  slot === 0
+    ? "A"
+    : slot === 1
+      ? "B"
+      : slot === 2
+        ? "Golden"
+        : slot === 0xffffffff || slot == null
+          ? "无"
+          : `#${slot}`;
+/** 趋势只保留当前选中设备最近 120 帧；切换设备时 store 会清空。 */
+const fpsValues = computed(() => devices.history.map((item) => item.fps));
+const inferenceValues = computed(() =>
+  devices.history.map((item) =>
+    item.inferenceUs === null ? null : item.inferenceUs / 1000,
+  ),
+);
+const cycleValues = computed(() =>
+  devices.history.map((item) =>
+    item.cycleUs === null ? null : item.cycleUs / 1000,
+  ),
+);
+const stageSlices = computed(() => {
+  const telemetry = devices.current?.telemetry;
+  if (!telemetry) return [];
+  return [
+    {
+      label: "采集",
+      value: (telemetry.captureUs ?? 0) / 1000,
+      tone: "info" as const,
+    },
+    {
+      label: "预处理",
+      value: (telemetry.conversionUs ?? 0) / 1000,
+      tone: "quiet" as const,
+    },
+    {
+      label: "推理",
+      value: (telemetry.inferenceUs ?? 0) / 1000,
+      tone: "ok" as const,
+    },
+    {
+      label: "传输",
+      value: (telemetry.transferUs ?? 0) / 1000,
+      tone: "warn" as const,
+    },
+  ];
+});
+const statusSlices = computed(() => {
+  const counts: Record<string, number> = {
+    ONLINE: 0,
+    STALE: 0,
+    OFFLINE: 0,
+    UNKNOWN: 0,
+  };
+  for (const device of devices.devices) {
+    const key = String(device.connectionState);
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return [
+    { label: "在线", value: counts.ONLINE ?? 0, tone: "ok" as const },
+    { label: "连接不稳", value: counts.STALE ?? 0, tone: "warn" as const },
+    { label: "离线", value: counts.OFFLINE ?? 0, tone: "quiet" as const },
+    { label: "未知", value: counts.UNKNOWN ?? 0, tone: "info" as const },
+  ];
+});
+/** 模拟器只保留在服务端做自动化验证，界面不展示它的事件。 */
+const debugEvents = computed(() =>
+  devices.recent.filter((event) => event.source !== "SIMULATION"),
+);
 /** 设备表读的是 store 快照（全量、不分页），排序只能在客户端做。
  *  异常状态排前面：运维先看要处理的。 */
 const devSort = ref("connectionState"),
@@ -77,11 +153,15 @@ async function load() {
   error.value = "";
   try {
     await devices.snapshot();
-    rows.value = (
+    const items = (
       await api<{ items: Named[] }>(
         tab.value === "stations" ? "/stations" : "/events",
       )
     ).items;
+    rows.value =
+      tab.value === "events"
+        ? items.filter((item) => item.source !== "SIMULATION")
+        : items;
     stations.value = (await api<{ items: Named[] }>("/stations")).items;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
@@ -104,6 +184,20 @@ async function open(d: DeviceSnapshot) {
 const residentModels = computed(
   () => selected.value?.reportedState.models ?? [],
 );
+/** 详情只在打开设备时变一次；不要放在模板里，否则每次遥测重渲染都会序列化整份详情。 */
+const detailText = computed(() =>
+  detail.value == null ? "" : JSON.stringify(toRaw(detail.value), null, 2),
+);
+/** 目标和实际版本并排展示；缺字段时明确区分“未设置”和“未上报”。 */
+function versionText(
+  state: DeviceState | null | undefined,
+  key: "modelVersion" | "planVersion" | "inspectionEnabled",
+  empty: string,
+) {
+  const value = state?.[key];
+  if (value === undefined || value === null || value === "") return empty;
+  return typeof value === "boolean" ? (value ? "是" : "否") : String(value);
+}
 async function switchModel(entry: ResidentModel) {
   if (!selected.value) return;
   busy.value = true;
@@ -163,11 +257,7 @@ async function action(kind: string) {
       await post(`/devices/${id}/commands`, {
         type: command.value,
         value:
-          command.value === "FAULT"
-            ? fault.value
-            : command.value === "SET_BRIGHTNESS"
-              ? brightness.value
-              : undefined,
+          command.value === "SET_BRIGHTNESS" ? brightness.value : undefined,
       });
     await devices.snapshot();
     const d = devices.devices.find((d) => d.id === id);
@@ -189,7 +279,7 @@ async function create() {
         : {
             name: name.value,
             serialNumber: serial.value,
-            type: type.value,
+            type: "ZYNQ",
             stationId: stationId.value || undefined,
           },
     );
@@ -206,6 +296,7 @@ async function create() {
   <div class="page-heading">
     <div>
       <h1>
+        <Icon name="device" :size="22" />
         {{
           route.meta.tabs?.find((t) => t.tab === tab)?.label ?? route.meta.title
         }}
@@ -215,28 +306,21 @@ async function create() {
         {{ devices.current?.protocolVersion ?? "协议版本未上报" }}
       </p>
     </div>
-    <div class="heading-actions">
-      <button :class="{ busy: loading }" :disabled="loading" @click="load">
-        刷新</button
-      ><button
-        class="primary"
-        v-if="auth.engineer && ['registry', 'stations'].includes(tab)"
-        @click="creating = true"
-      >
-        {{ tab === "stations" ? "创建工位" : "注册设备" }}
-      </button>
-    </div>
   </div>
 
-  <details v-if="tab === 'registry'" class="advanced-metrics" open>
-    <summary>查看实时运行指标</summary>
-    <!-- 从工作台搬来的运行遥测：操作工不需要看，工程师需要常显。 -->
-    <div class="panel section-space">
-      <div class="panel-head">
-        <h3>最近一帧耗时</h3>
+  <section
+    v-if="tab === 'registry'"
+    class="panel section-space telemetry-panel"
+  >
+    <div class="panel-head">
+      <h3><Icon name="activity" /> 运行趋势</h3>
+      <div class="panel-head-meta">
+        <span class="mono">{{ devices.history.length }} 帧采样</span>
         <Status :value="devices.current?.connectionState" />
       </div>
-      <div class="cells">
+    </div>
+    <div class="panel-body">
+      <div class="cells telemetry-cells">
         <div>
           <small>采集</small
           ><strong class="mono"
@@ -286,106 +370,203 @@ async function create() {
           }}</strong>
         </div>
       </div>
-    </div>
-  </details>
-  <AsyncState
-    :loading="loading"
-    :error="error"
-    :empty="!rows.length && !devices.devices.length"
-    :hint="
-      tab === 'stations'
-        ? '还没有工位。工位用于把设备和产品绑在一起。'
-        : '还没有设备。注册设备后，它上报的遥测会显示在顶部。'
-    "
-    @retry="load"
-    ><div v-if="tab === 'registry'" class="panel table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <SortableTh
-              field="name"
-              label="设备"
-              :active="devSort"
-              :order="devOrder"
-              @sort="sortDevices"
-            />
-            <th>来源</th>
-            <SortableTh
-              field="connectionState"
-              label="网络"
-              :active="devSort"
-              :order="devOrder"
-              @sort="sortDevices"
-            />
-            <SortableTh
-              field="runtimeState"
-              label="运行"
-              :active="devSort"
-              :order="devOrder"
-              @sort="sortDevices"
-            />
-            <th>实际模型</th>
-            <th>同步状态</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="d in deviceRows" :key="d.id">
-            <td>
-              <strong>{{ displayName(d.name) }}</strong
-              ><small class="mono">{{ d.id.slice(-10) }}</small>
-            </td>
-            <td>
-              <span
-                class="tag"
-                :class="{ simulated: d.source === 'SIMULATION' }"
-                >{{ chinese(d.type) }}</span
-              >
-            </td>
-            <td><Status :value="d.connectionState" /></td>
-            <td><Status :value="d.runtimeState" /></td>
-            <td class="mono">
-              {{ d.reportedState.modelVersion ?? "未上报" }}
-            </td>
-            <td><Status :value="d.syncState" /></td>
-            <td>
-              <button class="table-action" @click="open(d)">控制与详情</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <div v-else-if="tab === 'debug'" class="panel">
-      <div class="panel-head">
-        <h3>实时事件 / 最近 30 条</h3>
-        <Status :value="devices.connected ? 'ONLINE' : 'OFFLINE'" />
+      <div class="chart-grid">
+        <Sparkline label="帧率" :values="fpsValues" unit=" fps" :height="88" />
+        <Sparkline
+          label="推理耗时"
+          :values="inferenceValues"
+          unit=" ms"
+          :height="88"
+        />
+        <Sparkline
+          label="帧周期"
+          :values="cycleValues"
+          unit=" ms"
+          :height="88"
+        />
       </div>
-      <div class="panel-body">
-        <pre v-for="e in devices.recent" :key="e.sequence">{{
-          JSON.stringify(e, null, 2)
-        }}</pre>
-        <div v-if="!devices.recent.length" class="empty">暂无事件</div>
+      <div class="chart-grid two">
+        <div class="chart-block">
+          <h4><Icon name="timer" :size="15" /> 最近一帧耗时构成</h4>
+          <DistributionBar :slices="stageSlices" unit=" ms" />
+        </div>
+        <div class="chart-block">
+          <h4><Icon name="device" :size="15" /> 设备连接状态</h4>
+          <DistributionBar :slices="statusSlices" />
+        </div>
+      </div>
+      <p v-if="!devices.history.length" class="note">
+        趋势数据来自实时遥测；连接设备并开始运行后开始累积。
+      </p>
+    </div>
+  </section>
+  <div v-if="tab === 'registry'" class="panel">
+    <div class="panel-head">
+      <h3><Icon name="device" /> 设备列表</h3>
+      <div class="panel-head-actions row-actions">
+        <span class="mono">{{ deviceRows.length }} 台</span>
+        <button
+          class="table-action"
+          :class="{ busy: loading }"
+          :disabled="loading"
+          @click="load"
+        >
+          <Icon name="refresh" :size="14" /> 刷新
+        </button>
+        <button v-if="auth.engineer" class="primary" @click="creating = true">
+          <Icon name="device" :size="14" /> 注册设备
+        </button>
       </div>
     </div>
-    <div v-else-if="tab === 'stations'" class="panel table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>工位名称</th>
-            <th>工位代码</th>
-            <th>创建时间</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="r in rows" :key="r.id">
-            <td>{{ displayName(r.name) }}</td>
-            <td class="mono">{{ r.code }}</td>
-            <td>{{ new Date(r.createdAt).toLocaleString() }}</td>
-          </tr>
-        </tbody>
-      </table>
+    <AsyncState
+      :loading="loading"
+      :error="error"
+      :empty="!deviceRows.length"
+      hint="还没有设备。注册设备后，它上报的遥测会显示在顶部。"
+      @retry="load"
+    >
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <SortableTh
+                field="name"
+                label="设备"
+                :active="devSort"
+                :order="devOrder"
+                @sort="sortDevices"
+              />
+              <th class="col-type">类型</th>
+              <SortableTh
+                field="connectionState"
+                label="网络"
+                :active="devSort"
+                :order="devOrder"
+                @sort="sortDevices"
+              />
+              <SortableTh
+                class="col-runtime"
+                field="runtimeState"
+                label="运行"
+                :active="devSort"
+                :order="devOrder"
+                @sort="sortDevices"
+              />
+              <th class="col-model">实际模型</th>
+              <th class="col-sync">同步状态</th>
+              <th class="col-action">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="d in deviceRows" :key="d.id">
+              <td class="device-cell">
+                <strong>{{ displayName(d.name) }}</strong
+                ><small class="mono">{{ d.id.slice(-10) }}</small
+                ><button class="table-action mobile-only" @click="open(d)">
+                  详情
+                </button>
+              </td>
+              <td class="col-type">
+                <span class="tag">{{ chinese(d.type) }}</span>
+              </td>
+              <td><Status :value="d.connectionState" /></td>
+              <td class="col-runtime"><Status :value="d.runtimeState" /></td>
+              <td class="mono col-model">
+                {{ d.reportedState.modelVersion ?? "未上报" }}
+              </td>
+              <td class="col-sync"><Status :value="d.syncState" /></td>
+              <td class="col-action action-cell">
+                <div class="row-actions">
+                  <button class="table-action" @click="open(d)">
+                    控制与详情
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </AsyncState>
+  </div>
+  <div v-else-if="tab === 'debug'" class="panel">
+    <div class="panel-head">
+      <h3>实时事件 / 最近 30 条</h3>
+      <Status :value="devices.connected ? 'ONLINE' : 'OFFLINE'" />
     </div>
-    <div v-else class="panel">
+    <div class="panel-body">
+      <pre v-for="e in debugEvents" :key="e.sequence">{{
+        JSON.stringify(e, null, 2)
+      }}</pre>
+      <div v-if="!debugEvents.length" class="empty">暂无事件</div>
+    </div>
+  </div>
+  <div v-else-if="tab === 'stations'" class="panel">
+    <div class="panel-head">
+      <h3><Icon name="device" /> 工位列表</h3>
+      <div class="panel-head-actions row-actions">
+        <span class="mono">{{ rows.length }} 个</span>
+        <button
+          class="table-action"
+          :class="{ busy: loading }"
+          :disabled="loading"
+          @click="load"
+        >
+          <Icon name="refresh" :size="14" /> 刷新
+        </button>
+        <button v-if="auth.engineer" class="primary" @click="creating = true">
+          <Icon name="device" :size="14" /> 创建工位
+        </button>
+      </div>
+    </div>
+    <AsyncState
+      :loading="loading"
+      :error="error"
+      :empty="!rows.length"
+      hint="还没有工位。工位用于把设备和产品绑在一起。"
+      @retry="load"
+    >
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>工位名称</th>
+              <th>工位代码</th>
+              <th>创建时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in rows" :key="r.id">
+              <td>{{ displayName(r.name) }}</td>
+              <td class="mono">{{ r.code }}</td>
+              <td>{{ new Date(r.createdAt).toLocaleString() }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </AsyncState>
+  </div>
+  <div v-else class="panel">
+    <div class="panel-head">
+      <h3><Icon name="device" /> 设备事件</h3>
+      <div class="panel-head-actions row-actions">
+        <span class="mono">{{ rows.length }} 条</span>
+        <button
+          class="table-action"
+          :class="{ busy: loading }"
+          :disabled="loading"
+          @click="load"
+        >
+          <Icon name="refresh" :size="14" /> 刷新
+        </button>
+      </div>
+    </div>
+    <AsyncState
+      :loading="loading"
+      :error="error"
+      :empty="!rows.length"
+      hint="设备上报状态变化、采样完成或报错时会在这里留一条。设备离线期间不会有新事件。"
+      @retry="load"
+    >
       <div class="panel-body">
         <div v-for="r in rows" :key="r.id" class="list-line">
           <div>
@@ -399,24 +580,17 @@ async function create() {
             </details>
           </div>
         </div>
-        <div v-if="!rows.length" class="empty">
-          暂无设备事件
-          <p class="muted">
-            设备上报状态变化、采样完成或报错时会在这里留一条。设备离线期间不会有新事件。
-          </p>
-        </div>
       </div>
-    </div></AsyncState
-  ><Drawer
+    </AsyncState>
+  </div>
+  <Drawer
     v-if="selected"
     :title="displayName(selected.name)"
     @close="selected = null"
     ><div class="toolbar">
       <Status :value="selected.connectionState" /><Status
         :value="selected.runtimeState"
-      /><span v-if="selected.source === 'SIMULATION'" class="tag simulated"
-        >模拟设备</span
-      >
+      /><Status :value="selected.syncState" />
     </div>
     <p class="note" v-if="selected.type === 'ZYNQ'">
       连接设备会接管图像接收，请先断开其他上位机。
@@ -426,23 +600,63 @@ async function create() {
         连接设备</button
       ><button @click="action('disconnect')" :disabled="busy">断开连接</button>
     </div>
-    <div class="two-columns">
-      <section>
-        <h3>目标版本</h3>
-        <InfoFields
-          :value="selected.desiredState"
-          :fields="['modelVersion', 'planVersion', 'inspectionEnabled']"
-        />
-      </section>
-      <section>
-        <h3>实际版本</h3>
-        <InfoFields
-          :value="selected.reportedState"
-          :fields="['modelVersion', 'planVersion', 'inspectionEnabled']"
-        />
-      </section>
-    </div>
-    <Status :value="selected.syncState" />
+    <section class="version-compare">
+      <h3>目标版本 / 实际版本</h3>
+      <div class="compare-row compare-head">
+        <span>项目</span><span>目标</span><span>实际</span>
+      </div>
+      <div class="compare-row">
+        <span>模型版本</span>
+        <b class="mono">{{
+          versionText(selected.desiredState, "modelVersion", "未设置")
+        }}</b>
+        <b class="mono">{{
+          versionText(selected.reportedState, "modelVersion", "未上报")
+        }}</b>
+      </div>
+      <div class="compare-row">
+        <span>方案版本</span>
+        <b class="mono">{{
+          versionText(selected.desiredState, "planVersion", "未设置")
+        }}</b>
+        <b class="mono">{{
+          versionText(selected.reportedState, "planVersion", "未上报")
+        }}</b>
+      </div>
+      <div class="compare-row">
+        <span>固件版本</span>
+        <b class="mono">—</b>
+        <b class="mono">{{ selected.firmwareVersion ?? "未上报" }}</b>
+      </div>
+      <div v-if="firmware" class="compare-row">
+        <span>固件槽位</span>
+        <b class="mono">—</b>
+        <b class="mono"
+          >运行 {{ slotName(firmware.runningSlot) }} · active
+          {{ slotName(firmware.activeSlot) }} · pending
+          {{ slotName(firmware.pendingSlot) }}</b
+        >
+      </div>
+      <div v-if="firmware" class="compare-row">
+        <span>试运行</span>
+        <b class="mono">—</b>
+        <b class="mono"
+          >{{ firmware.attempts }}/{{ firmware.maxAttempts }}
+          <template v-if="firmware.flags & 16"> · 待确认</template>
+          <template v-else-if="firmware.flags & 8"> · 更新中</template>
+          <template v-else> · 已确认</template></b
+        >
+      </div>
+      <div class="compare-row">
+        <span>检测启用</span>
+        <b>{{
+          versionText(selected.desiredState, "inspectionEnabled", "未设置")
+        }}</b>
+        <b>{{
+          versionText(selected.reportedState, "inspectionEnabled", "未上报")
+        }}</b>
+      </div>
+    </section>
     <template v-if="residentModels.length">
       <h3 class="section-space">设备模型库</h3>
       <div class="table-wrap">
@@ -453,7 +667,7 @@ async function create() {
               <th>版本</th>
               <th>摘要</th>
               <th>状态</th>
-              <th></th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -465,22 +679,24 @@ async function create() {
                 <span v-if="m.active" class="tag">当前</span>
                 <span v-else-if="m.previous" class="tag">上一版</span>
               </td>
-              <td>
-                <button
-                  v-if="!m.active"
-                  class="table-action"
-                  :disabled="busy"
-                  @click="switchModel(m)"
-                >
-                  切换
-                </button>
-                <button
-                  class="table-action"
-                  :disabled="busy || m.active || m.previous"
-                  @click="removeModel(m)"
-                >
-                  删除
-                </button>
+              <td class="action-cell">
+                <div class="row-actions">
+                  <button
+                    v-if="!m.active"
+                    class="table-action"
+                    :disabled="busy"
+                    @click="switchModel(m)"
+                  >
+                    切换
+                  </button>
+                  <button
+                    class="table-action danger"
+                    :disabled="busy || m.active || m.previous"
+                    @click="removeModel(m)"
+                  >
+                    删除
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -494,12 +710,12 @@ async function create() {
       设备 SD 卡上还没有已提交的模型。
     </p>
     <h3 class="section-space">设备能力</h3>
-    <dl class="key-values">
-      <template v-for="(value, key) in selected.capabilities" :key="key"
-        ><dt>{{ fieldLabel(key) }}</dt>
-        <dd>{{ value ? "支持" : "不支持" }}</dd></template
-      >
-    </dl>
+    <div class="capability-grid">
+      <div v-for="(value, key) in selected.capabilities" :key="key">
+        <span>{{ fieldLabel(key) }}</span>
+        <b :class="{ off: !value }">{{ value ? "支持" : "不支持" }}</b>
+      </div>
+    </div>
     <template v-if="auth.engineer"
       ><h3 class="section-space">设备命令</h3>
       <label
@@ -514,9 +730,6 @@ async function create() {
           <option v-if="selected.type === 'ZYNQ'" value="SET_BRIGHTNESS">
             调整亮度
           </option>
-          <option v-if="selected.type === 'SIMULATOR'" value="FAULT">
-            模拟故障
-          </option>
         </select></label
       ><label v-if="command === 'SET_BRIGHTNESS'"
         >亮度<input
@@ -524,42 +737,29 @@ async function create() {
           type="number"
           min="-4"
           max="4" /></label
-      ><label v-if="command === 'FAULT'"
-        >模拟故障<select v-model="fault">
-          <option
-            v-for="f in [
-              'NONE',
-              'NETWORK_LOST',
-              'DEVICE_TIMEOUT',
-              'INVALID_MODEL',
-              'CHECKSUM_ERROR',
-              'INFERENCE_ERROR',
-              'DEPLOYMENT_FAILED',
-              'LOW_FPS',
-              'HIGH_LATENCY',
-              'QUEUE_OVERFLOW',
-            ]"
-            :key="f"
-            :value="f"
-          >
-            {{ chinese(f) }}
-          </option>
-        </select></label
       ><button @click="action('command')" :disabled="busy">发送命令</button>
-      <h3 class="section-space">设置目标版本</h3>
-      <label
-        >目标模型版本<select v-model="targetModel">
-          <option value="">未设置</option>
-          <option v-for="m in residentModels" :key="m.index" :value="m.version">
-            {{ m.version }}
-          </option>
-        </select></label
-      ><label>目标方案版本<input v-model="targetPlan" /></label
-      ><button @click="action('desired')" :disabled="busy">保存目标版本</button>
+      <template v-if="auth.admin">
+        <h3 class="section-space">设置目标版本</h3>
+        <label
+          >目标模型版本<select v-model="targetModel">
+            <option value="">未设置</option>
+            <option
+              v-for="m in residentModels"
+              :key="m.index"
+              :value="m.version"
+            >
+              {{ m.version }}
+            </option>
+          </select></label
+        ><label>目标方案版本<input v-model="targetPlan" /></label
+        ><button @click="action('desired')" :disabled="busy">
+          保存目标版本
+        </button>
+      </template>
     </template>
     <details class="section-space">
       <summary>原始状态 / 命令 / 事件</summary>
-      <pre>{{ JSON.stringify(detail, null, 2) }}</pre>
+      <pre>{{ detailText }}</pre>
     </details></Drawer
   ><Drawer
     v-if="creating"
@@ -572,11 +772,6 @@ async function create() {
         }}<input v-model="serial" required /></label
       ><template v-if="tab !== 'stations'"
         ><label
-          >类型<select v-model="type">
-            <option value="SIMULATOR">{{ chinese("SIMULATOR") }}</option>
-            <option value="ZYNQ">{{ chinese("ZYNQ") }}</option>
-          </select></label
-        ><label
           >工位<select v-model="stationId">
             <option value="">未分配</option>
             <option v-for="s in stations" :key="s.id" :value="s.id">
@@ -588,3 +783,164 @@ async function create() {
     </form></Drawer
   >
 </template>
+<style scoped>
+.page-heading h1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.page-heading h1 .icon {
+  color: var(--forest);
+}
+.panel-head h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.panel-head h3 .icon {
+  color: var(--muted);
+}
+.panel-head-actions .primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+}
+.panel-head-meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.telemetry-panel .panel-body {
+  display: grid;
+  gap: 18px;
+}
+.telemetry-cells {
+  border: 1px solid var(--line);
+}
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+.chart-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.chart-block {
+  min-width: 0;
+}
+.chart-block h4 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.chart-block h4 .icon {
+  color: var(--muted);
+}
+.version-compare {
+  margin-top: 17px;
+  border: 1px solid var(--line);
+}
+.version-compare h3 {
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.compare-row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.compare-row:last-child {
+  border-bottom: 0;
+}
+.compare-row > span {
+  color: var(--muted);
+}
+.compare-row > b {
+  min-width: 0;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.compare-head {
+  padding-block: 7px;
+  background: var(--surface-2);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.compare-head > span {
+  color: var(--muted);
+}
+.capability-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 20px;
+}
+.capability-grid > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.capability-grid span {
+  color: var(--muted);
+}
+.capability-grid b {
+  font-weight: 500;
+}
+.capability-grid b.off {
+  color: var(--muted);
+}
+.mobile-only {
+  display: none;
+}
+@media (max-width: 640px) {
+  .mobile-only {
+    display: inline-flex;
+    margin-top: 7px;
+  }
+  .col-type,
+  .col-model,
+  .col-sync,
+  .col-action,
+  .col-runtime {
+    display: none;
+  }
+  .device-cell {
+    white-space: normal;
+  }
+  .compare-row {
+    grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1fr);
+    gap: 6px;
+    padding-inline: 11px;
+  }
+  .compare-row > b {
+    font-size: 12px;
+  }
+  .telemetry-cells > div:last-child {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--line);
+  }
+  .chart-grid :deep(.spark svg) {
+    height: 64px;
+  }
+}
+@media (max-width: 900px) {
+  .chart-grid,
+  .chart-grid.two {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

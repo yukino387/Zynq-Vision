@@ -1,0 +1,22 @@
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+const ROOT="C:/00_workplace/fpga/cnn_accelerator", CHROME="C:/Program Files/Google/Chrome/Application/chrome.exe";
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const chrome=spawn(CHROME,[`--remote-debugging-port=9888`,"--headless=new","--disable-gpu","--no-first-run",`--user-data-dir=${ROOT}/temporary/ui_overhaul/profile-mobile`,"--window-size=390,844","about:blank"],{stdio:"ignore"});
+let wsUrl; for(let i=0;i<60;i++){try{const l=await (await fetch("http://127.0.0.1:9888/json/list")).json();const p=l.find(t=>t.type==="page");if(p?.webSocketDebuggerUrl){wsUrl=p.webSocketDebuggerUrl;break}}catch{}await sleep(250)}
+const ws=new WebSocket(wsUrl); await new Promise(r=>ws.addEventListener("open",r));
+let seq=0; const pend=new Map(); const logs=[];
+ws.addEventListener("message",e=>{const m=JSON.parse(e.data);
+ if(m.method==="Runtime.consoleAPICalled"&&m.params.type==="error") logs.push("console: "+JSON.stringify(m.params.args.map(a=>a.value??a.description)).slice(0,200));
+ if(m.method==="Runtime.exceptionThrown") logs.push("exception: "+(m.params.exceptionDetails.text??"")+" "+(m.params.exceptionDetails.exception?.description??"").slice(0,200));
+ if(m.id&&pend.has(m.id)){const{res,rej}=pend.get(m.id);pend.delete(m.id);m.error?rej(new Error(JSON.stringify(m.error))):res(m.result)}});
+const send=(method,params={})=>{const id=++seq;ws.send(JSON.stringify({id,method,params}));return new Promise((res,rej)=>pend.set(id,{res,rej}))};
+const ev=async x=>{const r=await send("Runtime.evaluate",{expression:x,returnByValue:true});return r.result?.value};
+await send("Page.enable"); await send("Runtime.enable");
+await send("Emulation.setDeviceMetricsOverride",{width:390,height:844,deviceScaleFactor:2,mobile:true});
+await send("Page.navigate",{url:"http://127.0.0.1:5174/mobile/"}); await sleep(5000);
+console.log("hash:", await ev(`location.hash`));
+console.log("body 文本:", JSON.stringify((await ev(`document.body.innerText`))?.slice(0,200)));
+console.log("根节点子元素:", await ev(`document.getElementById("app")?.children.length ?? "无 #app"`));
+if(logs.length) console.log("错误:", logs.slice(0,5).join("\n  "));
+chrome.kill();

@@ -11,10 +11,21 @@ const commands = (
     readFileSync(resolve(root, "camera/training/graph.json"), "utf8"),
   ) as { commands: number[][] }
 ).commands;
+export const ZYNQ_PACKAGE_BYTES = 6416360;
+export const ZYNQ_WEIGHT_BYTES = 6350208;
+export const ZYNQ_METADATA_BYTES = 66024;
+export const DEFAULT_CLASSES = [
+  "龟裂",
+  "夹杂",
+  "斑块",
+  "麻点",
+  "轧入氧化皮",
+  "划痕",
+];
 export function zynqManifest(
   weights: Buffer,
   channels: 1 | 3 = 1,
-  classes: string[] = ["龟裂", "夹杂", "斑块", "麻点", "轧入氧化皮", "划痕"],
+  classes: string[] = DEFAULT_CLASSES,
 ): ModelManifest {
   return {
     formatVersion: 1,
@@ -42,6 +53,42 @@ export function zynqManifest(
   };
 }
 
+/** 从 model.bin 读取导入所需的版本和输入通道；其余字段仍由 validateZynqPackage 校验。 */
+export function inspectZynqPackage(weights: Buffer): {
+  version: string;
+  channels: 1 | 3;
+} {
+  const fail = () => {
+    throw new DomainError(
+      "MODEL_INCOMPATIBLE",
+      "Invalid fixed-graph PL model package",
+      422,
+    );
+  };
+  if (
+    weights.length !== ZYNQ_PACKAGE_BYTES ||
+    weights.readUInt32LE(0) !== 0x314e4e43 ||
+    weights.readUInt32LE(4) !== 1 ||
+    weights.readUInt32LE(8) !== ZYNQ_WEIGHT_BYTES ||
+    weights.readUInt32LE(12) !== ZYNQ_METADATA_BYTES
+  )
+    return fail();
+  const raw = weights.subarray(24, 88);
+  const end = raw.indexOf(0);
+  const version = (end < 0 ? raw : raw.subarray(0, end)).toString("ascii");
+  if (
+    version.length < 1 ||
+    version.length > 63 ||
+    [...version].some((c) => c.charCodeAt(0) < 1 || c.charCodeAt(0) > 127)
+  )
+    return fail();
+  const channels = weights.readInt32LE(
+    128 + ZYNQ_WEIGHT_BYTES + 4 * 4,
+  );
+  if (channels !== 1 && channels !== 3) return fail();
+  return { version, channels };
+}
+
 export function validateZynqPackage(
   weights: Buffer,
   version: string,
@@ -55,7 +102,7 @@ export function validateZynqPackage(
     );
   };
   if (
-    weights.length !== 6416360 ||
+    weights.length !== ZYNQ_PACKAGE_BYTES ||
     version.length < 1 ||
     version.length > 63 ||
     [...version].some((c) => c.charCodeAt(0) < 1 || c.charCodeAt(0) > 127)
@@ -74,8 +121,8 @@ export function validateZynqPackage(
       .length ||
     weights.readUInt32LE(0) !== 0x314e4e43 ||
     weights.readUInt32LE(4) !== 1 ||
-    weights.readUInt32LE(8) !== 6350208 ||
-    weights.readUInt32LE(12) !== 66024 ||
+    weights.readUInt32LE(8) !== ZYNQ_WEIGHT_BYTES ||
+    weights.readUInt32LE(12) !== ZYNQ_METADATA_BYTES ||
     weights.readUInt32LE(16) !== 0 ||
     weights.readUInt32LE(20) !== 0 ||
     weights.readUInt32LE(124) !== 0 ||
@@ -95,7 +142,7 @@ export function validateZynqPackage(
       weights.subarray(88, 120).toString("hex")
   )
     return fail();
-  const metadata = weights.subarray(128 + 6350208);
+  const metadata = weights.subarray(128 + ZYNQ_WEIGHT_BYTES);
   commands.forEach((command, i) =>
     command.forEach((value, j) => {
       if (

@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import InfoFields from "../components/InfoFields.vue";
 import { chinese, displayName } from "@vision/shared";
-import { ref, computed, watch } from "vue";
+import { ref, computed, watch, nextTick, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import type { Named, Sample } from "../types";
+import type { Named, Sample, Task } from "../types";
 import type { InspectionPlan } from "@vision/contracts";
 import { useList } from "../composables/useList";
-import { api, post, download } from "../api";
+import { api, post, download, errorText } from "../api";
 import { useNotificationStore } from "../stores/notifications";
 import { useAuthStore } from "../stores/auth";
 import { useTaskStore } from "../stores/tasks";
@@ -38,11 +38,65 @@ const endpoint = computed(() =>
 const gallery = ref(true);
 const plans = ref<InspectionPlan[]>([]),
   taskPlanId = ref("");
+const editingTask = ref<Task | null>(null);
 const importProgress = ref({ done: 0, total: 0 });
 const sampleScope = ref("REAL"),
   annotationFilter = ref("");
+const sampleTabs = ["samples", "annotation", "review", "quality"];
+const sourceOptions = [
+  ["REAL", "全部来源"],
+  ["BOARD", "板卡采样"],
+  ["MOBILE", "手机采样"],
+  ["IMPORT", "导入图片"],
+];
+const reviewOptions = [
+  ["ACCEPT", "通过"],
+  ["NEEDS_WORK", "退回补充"],
+  ["REJECT", "拒绝"],
+];
+const filterTask = ref(""),
+  taskOptions = ref<Task[]>([]),
+  batchNote = ref("");
+const importOpen = ref(false),
+  importTaskId = ref("");
+const importInput = ref<HTMLInputElement | null>(null);
+const importTask = computed(() =>
+  taskOptions.value.find((t) => t.id === importTaskId.value),
+);
+const importTaskClasses = computed(() =>
+  Array.isArray(importTask.value?.plan?.rules?.classes)
+    ? importTask.value.plan.rules.classes
+    : [],
+);
+const deleteRequest = ref<{
+  kind: "samples" | "datasets" | "tasks";
+  rows: Named[];
+} | null>(null);
+const advancing = ref(false);
+const assignmentTaskId = ref("");
+const annotationTasks = computed(() =>
+  taskOptions.value.filter(
+    (t) =>
+      t.status === "OPEN" &&
+      Array.isArray(t.plan?.rules?.classes) &&
+      t.plan.rules.classes.length > 0,
+  ),
+);
 list.pageSize.value = 50;
 const assets = (row: Named) => (row.assets as Asset[] | undefined) ?? [];
+const assetFilename = (asset: Asset) =>
+  `${asset.id}${({ "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp" } as Record<string, string>)[asset.mimeType] ?? ".raw"}`;
+const qualityFields = [
+  ["width", "宽度（像素）"],
+  ["height", "高度（像素）"],
+  ["brightness", "平均亮度（0–255）"],
+  ["contrast", "对比度"],
+  ["sharpness", "清晰度"],
+] as const;
+const qualityValue = (value: unknown) =>
+  typeof value === "number" && Number.isFinite(value)
+    ? Math.round(value * 100) / 100
+    : "未检测";
 const selectedIds = ref<string[]>([]),
   sample = ref<Sample | null>(null),
   annotating = ref(false),
@@ -57,6 +111,17 @@ const selectedIds = ref<string[]>([]),
   datasetId = ref(""),
   datasets = ref<Named[]>([]);
 const creatingDataset = ref(false);
+const planSearch = ref("");
+const matchingPlans = computed(() =>
+  plans.value.filter((plan) =>
+    `${plan.name} ${plan.rules.product} ${plan.rules.classes.join(" ")}`
+      .toLowerCase()
+      .includes(planSearch.value.toLowerCase()),
+  ),
+);
+const selectedPlan = computed(() =>
+  plans.value.find((plan) => plan.id === taskPlanId.value),
+);
 const isDatasetCreation = computed(
   () => tab.value === "datasets" || creatingDataset.value,
 );
@@ -72,13 +137,92 @@ const datasetQuality = computed(
 const datasetItems = computed(
   () => (dataset.value?.items as unknown[] | undefined)?.length ?? 0,
 );
+const datasetRows = computed(
+  () =>
+    (dataset.value?.items ?? []) as Array<{
+      sampleId: string;
+      needsUpdate: boolean;
+      sample: Named & { deletedAt?: string; assets: Asset[] };
+      annotationSet: { version: number };
+    }>,
+);
 const annotationReady = (row: Named) =>
-  Number(
-    (row._count as { annotations?: number } | undefined)?.annotations ?? 0,
-  ) > 0;
+  (row.annotations as Array<{ status?: string }> | undefined)?.[0]?.status ===
+  "COMPLETE";
+const lastReview = (row: Named) =>
+  (row.reviews as Array<{ verdict: string; note: string }> | undefined)?.[0];
+const annotationLabel = (row: Named) => {
+  const annotations = row.annotations as
+    Array<{ status?: string; boxes?: unknown[] }> | undefined;
+  const latest = annotations?.[0];
+  if (latest?.status === "DRAFT") return "标注草稿 · 待完成";
+  if (!latest || latest.status !== "COMPLETE") return "待标注";
+  return latest.boxes?.length
+    ? `已标注 ${latest.boxes.length} 项`
+    : "已确认无对象";
+};
+const annotationPosition = computed(() => {
+  const index = list.items.value.findIndex(
+    (row) => row.id === sample.value?.id,
+  );
+  return index < 0
+    ? 0
+    : (list.page.value - 1) * list.pageSize.value + index + 1;
+});
+const annotationTotal = computed(() => list.total.value);
+const datasetReady = computed(() => {
+  const items = datasetRows.value;
+  return (
+    items.length > 0 &&
+    items.every(
+      (item) =>
+        item.sample.status === "REVIEWED" &&
+        !item.sample.deletedAt &&
+        !item.needsUpdate,
+    )
+  );
+});
+const datasetPending = computed(() => {
+  const items = datasetRows.value;
+  return items.filter(
+    (item) =>
+      item.sample.status !== "REVIEWED" ||
+      item.sample.deletedAt ||
+      item.needsUpdate,
+  ).length;
+});
+watch(
+  () => [
+    list.page.value,
+    list.search.value,
+    list.status.value,
+    list.annotation.value,
+    list.source.value,
+    list.realOnly.value,
+    list.taskId.value,
+    list.sort.value,
+    list.order.value,
+    list.pageSize.value,
+    tab.value,
+  ],
+  () => {
+    selectedIds.value = [];
+    batchNote.value = "";
+  },
+);
 const completedOnPage = computed(() =>
   list.items.value.filter(annotationReady),
 );
+let opening = 0;
+watch(tab, () => {
+  opening++;
+  sample.value = null;
+  dataset.value = null;
+  createOpen.value = false;
+  importOpen.value = false;
+  deleteRequest.value = null;
+  editingTask.value = null;
+});
 function openDatasetCreation() {
   creatingDataset.value = true;
   createOpen.value = true;
@@ -92,27 +236,42 @@ watch(
     route.query.datasetId,
     route.query.create,
     route.query.planId,
+    route.query.taskId,
+    route.query.open,
   ],
   () => {
     creatingDataset.value = tab.value === "datasets";
     taskPlanId.value = String(route.query.planId ?? "");
+    if (auth.engineer)
+      void api<{ items: Task[] }>("/tasks?realOnly=true&pageSize=100")
+        .then((r) => {
+          taskOptions.value = r.items;
+        })
+        .catch(notices.error);
     if (auth.engineer && tab.value === "tasks")
       void api<{ items: InspectionPlan[] }>("/plans?pageSize=100")
         .then((r) => {
-          plans.value = r.items.filter((p) => Array.isArray(p.rules.classes));
+          plans.value = r.items.filter(
+            (p) =>
+              Array.isArray(p.rules.classes) &&
+              (p.rules as { source?: string }).source !== "SIMULATION",
+          );
         })
         .catch(notices.error);
     selectedIds.value = [];
     datasetId.value = String(route.query.datasetId ?? "");
-    sampleScope.value = String(route.query.source ?? "REAL");
+    filterTask.value = String(route.query.taskId ?? "");
+    list.taskId.value = sampleTabs.includes(tab.value) ? filterTask.value : "";
+    sampleScope.value = ["BOARD", "MOBILE", "IMPORT"].includes(
+      String(route.query.source),
+    )
+      ? String(route.query.source)
+      : "REAL";
     annotationFilter.value = String(
       route.query.annotation ?? (tab.value === "annotation" ? "pending" : ""),
     );
-    list.realOnly.value =
-      !["tasks", "datasets"].includes(tab.value) && sampleScope.value === "REAL"
-        ? "true"
-        : "";
-    list.source.value = ["BOARD", "MOBILE", "IMPORT", "SIMULATION"].includes(
+    list.realOnly.value = "true";
+    list.source.value = ["BOARD", "MOBILE", "IMPORT"].includes(
       sampleScope.value,
     )
       ? sampleScope.value
@@ -122,25 +281,47 @@ watch(
       : annotationFilter.value;
     list.reviewed.value = tab.value === "review" ? "false" : "";
     list.status.value = "";
-    if (route.query.create === "1") {
+    if (tab.value !== "quality") list.qualityStatus.value = "";
+    if (
+      route.query.create === "1" &&
+      auth.engineer &&
+      (tab.value !== "tasks" || auth.admin)
+    ) {
       creatingDataset.value = tab.value === "datasets";
       createOpen.value = true;
     }
     if (datasetId.value) void selectDataset();
+    if (tab.value === "datasets" && typeof route.query.open === "string")
+      void api<Named>(`/datasets/${encodeURIComponent(route.query.open)}`)
+        .then((row) => {
+          if (tab.value === "datasets" && route.query.open === row.id)
+            dataset.value = row;
+        })
+        .catch(notices.error);
     list.filter();
   },
   { immediate: true },
 );
-watch([sampleScope, annotationFilter], () => {
-  list.realOnly.value = sampleScope.value === "REAL" ? "true" : "";
-  list.source.value = ["BOARD", "MOBILE", "IMPORT", "SIMULATION"].includes(
-    sampleScope.value,
-  )
+watch([sampleScope, annotationFilter, filterTask], () => {
+  if (!sampleTabs.includes(tab.value)) return;
+  list.realOnly.value = "true";
+  list.source.value = ["BOARD", "MOBILE", "IMPORT"].includes(sampleScope.value)
     ? sampleScope.value
     : "";
   list.annotation.value = annotationFilter.value;
+  list.taskId.value = filterTask.value;
   list.filter();
 });
+watch(
+  () => list.status.value,
+  () => list.filter(),
+);
+let searchTimer: ReturnType<typeof setTimeout>;
+watch(list.search, () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => list.filter(), 300);
+});
+onUnmounted(() => clearTimeout(searchTimer));
 watch(
   () => selectedIds.value.length,
   (count, previous) => {
@@ -148,6 +329,137 @@ watch(
   },
 );
 const selectedRows = computed(() => list.items.value);
+const checkedRows = computed(() =>
+  list.items.value.filter((row) => selectedIds.value.includes(row.id)),
+);
+const allChecked = computed(
+  () =>
+    !!list.items.value.length &&
+    checkedRows.value.length === list.items.value.length,
+);
+function resetFilters() {
+  list.search.value = "";
+  list.status.value = "";
+  list.qualityStatus.value = "";
+  sampleScope.value = "REAL";
+  annotationFilter.value = tab.value === "annotation" ? "pending" : "";
+  filterTask.value = "";
+  list.filter();
+}
+async function requestDelete(
+  kind: "samples" | "datasets" | "tasks",
+  rows: Named[],
+) {
+  sample.value = null;
+  dataset.value = null;
+  await nextTick();
+  deleteRequest.value = { kind, rows: [...rows] };
+}
+async function deleteRows() {
+  if (!deleteRequest.value || busy.value) return;
+  busy.value = true;
+  const { kind, rows } = deleteRequest.value;
+  const failed: Named[] = [];
+  for (const row of rows) {
+    try {
+      await api(`/${kind}/${row.id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ confirm: true }),
+      });
+    } catch (e) {
+      failed.push(row);
+      notices.error(e);
+    }
+  }
+  selectedIds.value = failed.map((row) => row.id);
+  deleteRequest.value = failed.length ? { kind, rows: failed } : null;
+  if (rows.length > failed.length)
+    notices.add(
+      `已删除 ${rows.length - failed.length} ${kind === "samples" ? "张图片" : kind === "tasks" ? "个采样任务" : "个数据集"}`,
+    );
+  try {
+    if (kind === "tasks") {
+      await tasks.load();
+      taskOptions.value = (
+        await api<{ items: Task[] }>("/tasks?realOnly=true&pageSize=100")
+      ).items;
+      if (!taskOptions.value.some((task) => task.id === importTaskId.value))
+        importTaskId.value = "";
+      if (!taskOptions.value.some((task) => task.id === assignmentTaskId.value))
+        assignmentTaskId.value = "";
+    }
+    await reloadPage();
+  } catch (e) {
+    notices.error(e);
+  } finally {
+    busy.value = false;
+  }
+}
+async function reloadPage() {
+  await list.load();
+  if (!list.items.value.length && list.page.value > 1 && !list.error.value) {
+    list.page.value = Math.max(
+      1,
+      Math.ceil(list.total.value / list.pageSize.value),
+    );
+    await list.load();
+  }
+}
+async function reviewRows(rows: Named[], verdict: string, note = "") {
+  if (busy.value) return;
+  busy.value = true;
+  let saved = 0;
+  const failed: string[] = [];
+  for (const row of rows) {
+    try {
+      await post(`/samples/${row.id}/review`, {
+        verdict,
+        note,
+        hard: Boolean(row.hard),
+      });
+      saved++;
+    } catch (e) {
+      failed.push(row.id);
+      notices.error(e);
+    }
+  }
+  selectedIds.value = failed;
+  if (saved)
+    notices.add(
+      `已${reviewOptions.find(([value]) => value === verdict)?.[1]} ${saved} 张样本`,
+    );
+  await reloadPage();
+  busy.value = false;
+}
+async function openImport() {
+  const preferredTask = filterTask.value || tasks.selected;
+  importTaskId.value = annotationTasks.value.some((t) => t.id === preferredTask)
+    ? preferredTask
+    : "";
+  importOpen.value = true;
+}
+async function assignTask(rows: Array<{ id: string }>) {
+  if (!assignmentTaskId.value || busy.value) return;
+  busy.value = true;
+  let saved = 0;
+  for (const row of rows) {
+    try {
+      await post(`/samples/${row.id}/task`, { taskId: assignmentTaskId.value });
+      saved++;
+    } catch (e) {
+      notices.error(e);
+    }
+  }
+  if (saved) notices.add(`已为 ${saved} 张图片关联采样任务，可继续标注`);
+  try {
+    if (sample.value) sample.value = await api(`/samples/${sample.value.id}`);
+    await reloadPage();
+  } catch (e) {
+    notices.error(e);
+  } finally {
+    busy.value = false;
+  }
+}
 const missingAnnotation = computed(() =>
   list.items.value.find(
     (row) => selectedIds.value.includes(row.id) && !annotationReady(row),
@@ -162,11 +474,20 @@ const text = (row: Named, key: string) =>
 const counts = (r: Named, k: string) =>
   String((r._count as Record<string, number> | undefined)?.[k] ?? 0);
 async function create(startSampling = false) {
+  if (busy.value) return;
+  if (
+    !name.value.trim() ||
+    (!isDatasetCreation.value &&
+      (!Number.isInteger(target.value) || target.value < 1))
+  ) {
+    notices.add("请填写名称和有效的目标样本数", true);
+    return;
+  }
   busy.value = true;
   try {
     const isDataset = isDatasetCreation.value;
     const created = await post<Named>(isDataset ? "/datasets" : "/tasks", {
-      name: name.value,
+      name: name.value.trim(),
       ...(isDataset
         ? { version: version.value }
         : {
@@ -200,12 +521,44 @@ async function create(startSampling = false) {
     busy.value = false;
   }
 }
-async function open(row: Named, annotation = false) {
+async function saveTask() {
+  if (busy.value || !editingTask.value) return;
+  busy.value = true;
   try {
-    if (tab.value === "datasets") {
-      dataset.value = await api(`/datasets/${row.id}`);
+    const task = editingTask.value;
+    await api(`/tasks/${task.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: task.name.trim(),
+        target: task.target,
+        status: task.status,
+      }),
+    });
+    await tasks.load();
+    taskOptions.value = (
+      await api<{ items: Task[] }>("/tasks?realOnly=true&pageSize=100")
+    ).items;
+    await list.load();
+    editingTask.value = null;
+    notices.add("采样任务已更新");
+  } catch (e) {
+    notices.error(e);
+  } finally {
+    busy.value = false;
+  }
+}
+async function open(row: Named, annotation = false) {
+  const request = ++opening;
+  const currentTab = tab.value;
+  try {
+    if (currentTab === "datasets") {
+      const result = await api<Named>(`/datasets/${row.id}`);
+      if (request !== opening || tab.value !== currentTab) return;
+      dataset.value = result;
     } else {
-      sample.value = await api(`/samples/${row.id}`);
+      const result = await api<Sample>(`/samples/${row.id}`);
+      if (request !== opening || tab.value !== currentTab) return;
+      sample.value = result;
       annotating.value = annotation;
       reviewVerdict.value = "ACCEPT";
       reviewNote.value = "";
@@ -215,12 +568,17 @@ async function open(row: Named, annotation = false) {
   }
 }
 async function action(id: string, type: string) {
+  if (busy.value) return;
   busy.value = true;
   try {
     if (type === "export") await post(`/datasets/${id}/export-jobs`);
-    else await post(`/datasets/${id}/${type}`);
+    else {
+      const result = await post<Named>(`/datasets/${id}/${type}`);
+      if (type === "clone") dataset.value = await api(`/datasets/${result.id}`);
+    }
     await list.load();
-    if (dataset.value) dataset.value = await api(`/datasets/${id}`);
+    if (dataset.value && type !== "clone")
+      dataset.value = await api(`/datasets/${id}`);
     notices.add(
       type === "freeze"
         ? "数据集已冻结"
@@ -237,14 +595,46 @@ async function action(id: string, type: string) {
 async function selectDataset() {
   try {
     datasets.value = (
-      await api<{ items: Named[] }>("/datasets?status=DRAFT&pageSize=100")
+      await api<{ items: Named[] }>(
+        "/datasets?status=DRAFT&realOnly=true&pageSize=100",
+      )
     ).items;
   } catch (e) {
     notices.error(e);
   }
 }
+async function changeDatasetItem(
+  sampleId: string,
+  operation: "remove" | "refresh",
+) {
+  if (!dataset.value || busy.value) return;
+  const id = dataset.value.id;
+  busy.value = true;
+  try {
+    if (operation === "remove")
+      await api(`/datasets/${id}/items/${sampleId}`, { method: "DELETE" });
+    else await post(`/datasets/${id}/items`, { sampleIds: [sampleId] });
+    dataset.value = await api(`/datasets/${id}`);
+    await list.load();
+    notices.add(
+      operation === "remove"
+        ? "已从数据集移除，原始图片和标注保留"
+        : "已更新为最新完成的标注",
+    );
+  } catch (e) {
+    notices.error(e);
+  } finally {
+    busy.value = false;
+  }
+}
 async function addItems() {
-  if (!datasetId.value || missingAnnotation.value) return;
+  if (
+    busy.value ||
+    !datasetId.value ||
+    missingAnnotation.value ||
+    !selectedIds.value.length
+  )
+    return;
   busy.value = true;
   try {
     await post(`/datasets/${datasetId.value}/items`, {
@@ -265,7 +655,7 @@ async function upload(e: Event) {
   if (!files.length) return;
   busy.value = true;
   importProgress.value = { done: 0, total: files.length };
-  const failures: string[] = [];
+  const failures: Array<{ name: string; reason: string }> = [];
   try {
     for (const file of files) {
       try {
@@ -274,7 +664,7 @@ async function upload(e: Event) {
           "metadata",
           JSON.stringify({
             source: "IMPORT",
-            taskId: tasks.selected || undefined,
+            taskId: importTaskId.value || undefined,
             clientId: crypto.randomUUID(),
             idempotencyKey: crypto.randomUUID(),
             localSequence: 0,
@@ -283,17 +673,37 @@ async function upload(e: Event) {
         );
         form.append("file", file);
         await api("/samples/upload", { method: "POST", body: form });
-      } catch {
-        failures.push(file.name);
+      } catch (error) {
+        failures.push({ name: file.name, reason: errorText(error) });
       }
       importProgress.value.done++;
+    }
+    if (files.length > failures.length) {
+      sampleScope.value = "IMPORT";
+      filterTask.value = importTaskId.value;
+      annotationFilter.value = "";
+      list.status.value = "";
+      list.search.value = "";
+      list.source.value = "IMPORT";
+      list.realOnly.value = "true";
+      list.taskId.value = importTaskId.value;
+      list.annotation.value = "";
+      list.page.value = 1;
+      list.reviewed.value = tab.value === "review" ? "false" : "";
+      list.qualityStatus.value = "";
+      importOpen.value = false;
     }
     await list.load();
     const added = files.length - failures.length;
     if (added) notices.add(`已导入 ${added} 张图片，可继续标注`);
     if (failures.length)
       notices.add(
-        `${failures.length} 张导入失败：${failures.slice(0, 3).join("、")}${failures.length > 3 ? "…" : ""}`,
+        `${failures.length} 张导入失败：${failures
+          .slice(0, 3)
+          .map((f) => f.name)
+          .join(
+            "、",
+          )}${failures.length > 3 ? "…" : ""}。${failures[0]!.reason}`,
         true,
       );
   } finally {
@@ -303,7 +713,7 @@ async function upload(e: Event) {
   }
 }
 async function review(next = false) {
-  if (!sample.value) return;
+  if (!sample.value || busy.value) return;
   busy.value = true;
   try {
     await post(`/samples/${sample.value.id}/review`, {
@@ -312,8 +722,7 @@ async function review(next = false) {
       hard: sample.value.hard,
     });
     sample.value = await api(`/samples/${sample.value.id}`);
-    if (next) list.page.value = 1;
-    await list.load();
+    await reloadPage();
     notices.add("样本审核已保存");
     if (next) {
       const item = list.items.value.find((r) => r.id !== sample.value?.id);
@@ -329,30 +738,52 @@ async function review(next = false) {
     busy.value = false;
   }
 }
-async function saveAnnotation(next = false) {
-  const nextId =
-    list.items.value[
-      list.items.value.findIndex((row) => row.id === sample.value?.id) + 1
-    ]?.id;
-  if (sample.value) sample.value = await api(`/samples/${sample.value.id}`);
-  await list.load();
-  if (next) {
-    const nextRow =
-      list.items.value.find((row) => row.id === nextId) ??
-      list.items.value.find((row) => row.id !== sample.value?.id);
+async function nextAnnotation(saved = false) {
+  if (!sample.value || advancing.value) return;
+  advancing.value = true;
+  const id = sample.value.id;
+  const index = list.items.value.findIndex((row) => row.id === id);
+  const nextId = list.items.value[index + 1]?.id;
+  try {
+    if (saved) await list.load();
+    if (list.error.value) return;
+    let nextRow = list.items.value.find((row) => row.id === nextId);
+    // 待标注列表保存后会收缩，最后一张后面的数据会补进当前页。
+    if (!nextRow && saved && annotationFilter.value === "pending")
+      nextRow =
+        list.items.value[Math.max(0, index)] ??
+        list.items.value.find((row) => row.id !== id);
+    if (!nextRow && list.page.value * list.pageSize.value < list.total.value) {
+      list.page.value++;
+      await list.load();
+      if (list.error.value) return;
+      nextRow = list.items.value[0];
+    }
     if (nextRow) await open(nextRow, true);
+    else if (!saved) notices.add("已到当前筛选的最后一张");
     else {
       sample.value = null;
-      notices.add("当前列表已全部处理，可切换筛选或整理数据集");
+      if (!list.items.value.length && list.page.value > 1) await reloadPage();
+      notices.add(
+        list.total.value
+          ? "已到当前筛选末尾，可返回列表继续选择"
+          : "当前列表已全部处理，可切换筛选或整理数据集",
+      );
     }
+  } catch (e) {
+    notices.error(e);
+  } finally {
+    advancing.value = false;
   }
 }
-async function adjacent(delta: number) {
-  if (!sample.value) return;
-  const index =
-    list.items.value.findIndex((r) => r.id === sample.value!.id) + delta;
-  const item = list.items.value[index];
-  if (item) await open(item, true);
+async function saveAnnotation(next = false) {
+  if (next) return nextAnnotation(true);
+  try {
+    if (sample.value) sample.value = await api(`/samples/${sample.value.id}`);
+    await list.load();
+  } catch (e) {
+    notices.error(e);
+  }
 }
 </script>
 <template>
@@ -380,29 +811,17 @@ async function adjacent(delta: number) {
       </p>
     </div>
     <div class="heading-actions">
-      <label
+      <button
         v-if="tab !== 'tasks' && tab !== 'datasets'"
-        class="button"
-        style="
-          margin: 0;
-          cursor: pointer;
-          border: 1px solid var(--line);
-          padding: 9px 12px;
-          border-radius: 4px;
-        "
-        >{{
-          importProgress.total
-            ? `正在导入 ${importProgress.done}/${importProgress.total}`
-            : "导入图片（可多选）"
-        }}<input
-          type="file"
-          multiple
-          accept="image/jpeg,image/png,image/webp"
-          style="display: none"
-          @change="upload"
-          :disabled="busy" /></label
+        :disabled="busy"
+        @click="openImport"
+      >
+        导入图片</button
       ><button
-        v-if="auth.engineer && ['tasks', 'datasets'].includes(tab)"
+        v-if="
+          auth.engineer &&
+          (tab === 'datasets' || (tab === 'tasks' && auth.admin))
+        "
         class="primary"
         @click="
           creatingDataset = tab === 'datasets';
@@ -452,30 +871,90 @@ async function adjacent(delta: number) {
       </button>
     </div>
   </div>
+  <section
+    v-if="sampleTabs.includes(tab)"
+    class="data-filters"
+    aria-label="数据筛选"
+  >
+    <div class="filter-line">
+      <span>数据来源</span>
+      <div class="filter-options" role="group" aria-label="数据来源">
+        <button
+          v-for="[value, label] in sourceOptions"
+          :key="value"
+          :class="{ active: sampleScope === value }"
+          :aria-pressed="sampleScope === value"
+          @click="sampleScope = value!"
+        >
+          {{ label }}
+        </button>
+      </div>
+    </div>
+    <div class="filter-line">
+      <span>标注进度</span>
+      <div class="filter-options" role="group" aria-label="标注进度">
+        <button
+          v-for="[value, label] in [
+            ['', '全部'],
+            ['pending', '待标注'],
+            ['complete', '已标注'],
+          ]"
+          :key="value"
+          :class="{ active: annotationFilter === value }"
+          :aria-pressed="annotationFilter === value"
+          @click="annotationFilter = value!"
+        >
+          {{ label }}
+        </button>
+      </div>
+      <button
+        v-if="auth.engineer && ['samples', 'annotation'].includes(tab)"
+        class="primary right"
+        :disabled="!selectedRows.length || list.loading.value"
+        @click="open(selectedRows[0]!, true)"
+      >
+        开始连续标注 →
+      </button>
+    </div>
+  </section>
   <form class="toolbar" @submit.prevent="list.filter">
-    <input v-model="list.search.value" placeholder="搜索名称…" /><select
-      v-model="sampleScope"
-      v-if="!['tasks', 'datasets'].includes(tab)"
+    <input
+      v-model="list.search.value"
+      type="search"
+      aria-label="搜索名称"
+      placeholder="搜索名称或编号…"
+    />
+    <select
+      v-if="sampleTabs.includes(tab)"
+      v-model="filterTask"
+      aria-label="采样任务"
     >
-      <option value="REAL">真实样本</option>
-      <option value="ALL">全部来源（含模拟）</option>
-      <option value="BOARD">{{ chinese("BOARD") }}</option>
-      <option value="MOBILE">{{ chinese("MOBILE") }}</option>
-      <option value="IMPORT">{{ chinese("IMPORT") }}</option>
-      <option value="SIMULATION">{{ chinese("SIMULATION") }}</option></select
-    ><select
-      v-if="['samples', 'annotation'].includes(tab)"
-      v-model="annotationFilter"
-      aria-label="标注进度"
+      <option value="">全部采样任务</option>
+      <option v-for="t in taskOptions" :key="t.id" :value="t.id">
+        {{ t.name
+        }}{{ t.plan ? ` · ${t.plan.rules.product}` : " · 未关联方案" }}
+      </option>
+    </select>
+    <select
+      v-if="tab === 'quality'"
+      v-model="list.qualityStatus.value"
+      aria-label="质量状态"
+      @change="list.filter"
     >
-      <option value="">全部标注进度</option>
-      <option value="pending">待标注</option>
-      <option value="complete">已完成标注</option>
+      <option value="">全部质量</option>
+      <option value="PASS">正常</option>
+      <option value="WARNING">需关注</option>
     </select>
     <select
       v-model="list.status.value"
-      v-if="tab !== 'annotation'"
-      aria-label="审核状态"
+      v-if="tab !== 'annotation' && tab !== 'quality'"
+      :aria-label="
+        tab === 'tasks'
+          ? '任务状态'
+          : tab === 'datasets'
+            ? '数据集状态'
+            : '审核状态'
+      "
     >
       <option value="">全部状态</option>
       <option
@@ -495,7 +974,7 @@ async function adjacent(delta: number) {
       :class="{ busy: list.loading.value }"
       :disabled="list.loading.value"
     >
-      筛选</button
+      查询</button
     ><button
       type="button"
       :class="{ busy: list.loading.value }"
@@ -503,6 +982,12 @@ async function adjacent(delta: number) {
       @click="list.load"
     >
       刷新</button
+    ><button
+      v-if="sampleTabs.includes(tab)"
+      type="button"
+      @click="resetFilters"
+    >
+      重置筛选</button
     ><template
       v-if="gallery && ['samples', 'review', 'annotation'].includes(tab)"
       ><select
@@ -529,45 +1014,97 @@ async function adjacent(delta: number) {
       >整理已标注样本 →</RouterLink
     >
   </div>
-  <div v-if="tab === 'samples' && auth.engineer" class="data-next-action">
+  <div
+    v-if="sampleTabs.includes(tab) && auth.engineer"
+    class="data-next-action"
+  >
+    <label class="check-row"
+      ><input
+        type="checkbox"
+        :checked="allChecked"
+        :disabled="busy || list.loading.value"
+        :indeterminate="checkedRows.length > 0 && !allChecked"
+        @change="
+          selectedIds = allChecked ? [] : selectedRows.map((row) => row.id)
+        "
+      />选择本页</label
+    >
     <span>{{
       datasetId
         ? "正在为选定的数据集添加样本"
         : "选中已标注的图片，即可加入或新建数据集"
     }}</span
     ><button
+      v-if="tab === 'samples'"
       :disabled="!completedOnPage.length || busy"
       @click="selectedIds = completedOnPage.map((row) => row.id)"
     >
       选择本页已标注样本
     </button>
   </div>
-  <div v-if="selectedIds.length && auth.engineer" class="toolbar">
+  <div v-if="selectedIds.length && auth.engineer" class="toolbar batch-actions">
     <span>已选 {{ selectedIds.length }} 个样本</span
     ><button @click="selectedIds = []" :disabled="busy">取消选择</button
-    ><template v-if="missingAnnotation"
-      ><span class="tone-warn">所选样本尚未完成标注</span
-      ><button @click="open(missingAnnotation, true)">
-        先完成标注
-      </button></template
-    ><select v-model="datasetId" aria-label="目标数据集">
-      <option value="">选择草稿数据集</option>
-      <option v-for="d in datasets" :key="d.id" :value="d.id">
-        {{ displayName(d.name) }} / V{{ d.version }}
-      </option></select
     ><button
-      class="primary"
-      @click="addItems"
-      :disabled="busy || !datasetId || !!missingAnnotation"
+      v-if="auth.admin"
+      class="danger"
+      :disabled="busy"
+      @click="requestDelete('samples', checkedRows)"
     >
-      加入数据集
+      删除所选图片
     </button>
+    <select v-model="assignmentTaskId" aria-label="关联到采样任务">
+      <option value="">选择标注方案对应的任务</option>
+      <option v-for="t in annotationTasks" :key="t.id" :value="t.id">
+        {{ t.name }} · {{ t.plan?.rules.product }}
+      </option>
+    </select>
     <button
-      @click="openDatasetCreation"
-      :disabled="busy || !!missingAnnotation"
+      :disabled="busy || !assignmentTaskId"
+      @click="assignTask(checkedRows)"
     >
-      新建数据集并加入
+      关联采样任务
     </button>
+    <template v-if="auth.admin"
+      ><input
+        v-model="batchNote"
+        aria-label="批量审核备注"
+        placeholder="审核备注（可选）"
+        maxlength="2000"
+      /><button
+        v-for="[value, label] in reviewOptions"
+        :key="value"
+        :disabled="busy"
+        @click="reviewRows(checkedRows, value!, batchNote)"
+      >
+        批量{{ label }}
+      </button></template
+    >
+    <template v-if="tab === 'samples'"
+      ><template v-if="missingAnnotation"
+        ><span class="tone-warn">所选样本尚未完成标注</span
+        ><button @click="open(missingAnnotation, true)">
+          先完成标注
+        </button></template
+      ><select v-model="datasetId" aria-label="目标数据集">
+        <option value="">选择草稿数据集</option>
+        <option v-for="d in datasets" :key="d.id" :value="d.id">
+          {{ displayName(d.name) }} / V{{ d.version }}
+        </option></select
+      ><button
+        class="primary"
+        @click="addItems"
+        :disabled="busy || !datasetId || !!missingAnnotation"
+      >
+        加入数据集
+      </button>
+      <button
+        @click="openDatasetCreation"
+        :disabled="busy || !!missingAnnotation"
+      >
+        新建数据集并加入
+      </button></template
+    >
   </div>
   <AsyncState
     :loading="list.loading.value"
@@ -602,7 +1139,7 @@ async function adjacent(delta: number) {
               (list.page.value - 1) * list.pageSize.value + i + 1,
             ).padStart(3, "0")
           }}</span
-          ><label v-if="tab === 'samples' && auth.engineer"
+          ><label v-if="auth.engineer"
             ><input
               type="checkbox"
               v-model="selectedIds"
@@ -613,7 +1150,7 @@ async function adjacent(delta: number) {
             v-if="tab === 'annotation'"
             class="tag"
             :class="{ ok: annotationReady(r) }"
-            >{{ annotationReady(r) ? "已完成标注" : "待标注" }}</span
+            >{{ annotationLabel(r) }}</span
           ><Status v-else :value="r.status" />
         </div>
         <button
@@ -635,16 +1172,16 @@ async function adjacent(delta: number) {
         <div class="sample-caption">
           <strong>{{ displayName(r.name) }}</strong>
           <span
-            v-if="tab === 'samples'"
+            v-if="tab !== 'annotation'"
             class="sample-annotation-state"
             :class="{ complete: annotationReady(r) }"
-            >{{ annotationReady(r) ? "✓ 已完成标注" : "待标注"
+            >{{ annotationLabel(r)
             }}<button
-              v-if="auth.engineer && !annotationReady(r)"
+              v-if="auth.engineer"
               class="text-button"
               @click="open(r, true)"
             >
-              去标注 →
+              {{ annotationReady(r) ? "编辑标注 →" : "去标注 →" }}
             </button></span
           >
           <div>
@@ -652,12 +1189,34 @@ async function adjacent(delta: number) {
               class="tag"
               :class="{ simulated: r.source === 'SIMULATION' }"
               >{{ chinese(r.source) }}</span
-            ><small class="mono">{{ r.id.slice(-8) }}</small>
+            >
           </div>
-          <small
-            >{{ new Date(r.createdAt).toLocaleString()
-            }}{{ r.hard ? " · 困难样本" : "" }}</small
-          >
+          <p v-if="lastReview(r)" class="sample-review-note">
+            <b>{{ chinese(lastReview(r)!.verdict) }}</b>
+            {{ lastReview(r)!.note || "无备注" }}
+          </p>
+          <small>{{ new Date(r.createdAt).toLocaleString() }}</small>
+          <div class="sample-quick-actions row-actions">
+            <template v-if="auth.admin && tab === 'review'"
+              ><button
+                v-for="[value, label] in reviewOptions"
+                :key="value"
+                class="table-action"
+                :disabled="busy"
+                @click="reviewRows([r], value!)"
+              >
+                {{ label }}
+              </button></template
+            >
+            <button
+              v-if="auth.admin"
+              class="table-action danger"
+              :disabled="busy"
+              @click="requestDelete('samples', [r])"
+            >
+              删除图片
+            </button>
+          </div>
         </div>
       </article>
     </div>
@@ -665,7 +1224,7 @@ async function adjacent(delta: number) {
       <table>
         <thead>
           <tr>
-            <th v-if="tab === 'samples' && auth.engineer"></th>
+            <th v-if="sampleTabs.includes(tab) && auth.engineer"></th>
             <!-- 三个接口（/tasks、/samples、/datasets）的白名单都允许 name、status、createdAt -->
             <SortableTh
               field="name"
@@ -686,7 +1245,7 @@ async function adjacent(delta: number) {
                   ? "目标 / 已采集"
                   : tab === "datasets"
                     ? "样本数"
-                    : "来源"
+                    : "类型"
               }}
             </th>
             <SortableTh
@@ -706,12 +1265,12 @@ async function adjacent(delta: number) {
               @sort="list.sortBy"
             />
             <th v-else>质量报告</th>
-            <th></th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="r in selectedRows" :key="r.id">
-            <td v-if="tab === 'samples' && auth.engineer">
+            <td v-if="sampleTabs.includes(tab) && auth.engineer">
               <input
                 type="checkbox"
                 v-model="selectedIds"
@@ -727,9 +1286,8 @@ async function adjacent(delta: number) {
                   (r.plan as InspectionPlan).name
                 }}
                 · V{{ (r.plan as InspectionPlan).version }}</small
-              ><small class="mono"
-                >{{ r.id.slice(-10) }} {{ r.version ? `/ V${r.version}` : "" }}
-                {{ r.hard ? "· 困难样本" : "" }}</small
+              ><small v-if="tab === 'datasets'" class="mono"
+                >V{{ r.version }}</small
               >
             </td>
             <td v-if="tab === 'tasks'" class="mono">
@@ -747,52 +1305,117 @@ async function adjacent(delta: number) {
             </td>
             <td>
               <span v-if="tab === 'annotation'" class="tag">{{
-                annotationReady(r) ? "已完成标注" : "待标注"
+                annotationLabel(r)
               }}</span
               ><Status v-else :value="r.status" />
+              <small v-if="lastReview(r)"
+                >{{ chinese(lastReview(r)!.verdict) }} ·
+                {{ lastReview(r)!.note || "无备注" }}</small
+              >
             </td>
             <td v-if="tab === 'quality'">
               <InfoFields :value="r.quality" :fields="['status']" />
             </td>
             <td v-else>{{ new Date(r.createdAt).toLocaleString() }}</td>
-            <td v-if="tab === 'datasets'">
-              <button @click="open(r)" class="table-action">详情</button
-              ><button
-                v-if="r.status !== 'FROZEN' && auth.admin"
-                @click="action(r.id, 'freeze')"
-                class="table-action"
-                :disabled="busy"
-              >
-                冻结</button
-              ><button
-                v-else
-                @click="action(r.id, 'clone')"
-                class="table-action"
-                :disabled="busy"
-              >
-                创建新版本
-              </button>
+            <td v-if="tab === 'datasets'" class="action-cell">
+              <div class="row-actions">
+                <button @click="open(r)" class="table-action">详情</button
+                ><button
+                  v-if="r.status === 'FROZEN'"
+                  @click="action(r.id, 'clone')"
+                  class="table-action"
+                  :disabled="busy"
+                >
+                  创建新版本
+                </button>
+                <button
+                  v-if="auth.admin"
+                  class="table-action danger"
+                  :disabled="busy"
+                  @click="requestDelete('datasets', [r])"
+                >
+                  删除数据集
+                </button>
+              </div>
             </td>
-            <td v-else-if="tab === 'tasks'">
-              <RouterLink
-                :to="{ name: 'workbench' }"
-                @click="tasks.selected = r.id"
-                >开始采样</RouterLink
-              >
+            <td v-else-if="tab === 'tasks'" class="action-cell">
+              <div class="row-actions">
+                <button
+                  v-if="auth.admin"
+                  class="table-action"
+                  :disabled="busy"
+                  @click="editingTask = { ...r } as unknown as Task"
+                >
+                  编辑任务
+                </button>
+                <RouterLink
+                  v-if="r.status === 'OPEN'"
+                  class="table-action"
+                  :to="{ name: 'workbench' }"
+                  @click="tasks.selected = r.id"
+                  >开始采样</RouterLink
+                >
+                <span v-else class="muted">已完成，重新开放后可采样</span>
+                <RouterLink
+                  :to="{
+                    name: 'data',
+                    params: { tab: 'samples' },
+                    query: { taskId: r.id },
+                  }"
+                  class="table-action"
+                  >查看样本</RouterLink
+                >
+                <button
+                  v-if="auth.admin"
+                  class="table-action danger"
+                  :disabled="busy"
+                  @click="requestDelete('tasks', [r])"
+                >
+                  删除任务
+                </button>
+              </div>
             </td>
-            <td v-else>
-              <button
-                @click="open(r, tab === 'annotation')"
-                class="table-action"
-              >
-                {{
-                  tab === "annotation"
-                    ? "开始标注"
-                    : tab === "review"
-                      ? "审核"
-                      : "查看"
-                }}
-              </button>
+            <td v-else class="action-cell">
+              <div class="row-actions">
+                <button
+                  @click="open(r, tab === 'annotation')"
+                  class="table-action"
+                >
+                  {{
+                    tab === "annotation"
+                      ? "开始标注"
+                      : tab === "review"
+                        ? "审核"
+                        : "查看"
+                  }}
+                </button>
+                <button
+                  v-if="auth.engineer && tab !== 'annotation'"
+                  class="table-action"
+                  @click="open(r, true)"
+                >
+                  标注
+                </button>
+                <template v-if="auth.admin && tab === 'review'"
+                  ><button
+                    v-for="[value, label] in reviewOptions"
+                    :key="value"
+                    class="table-action"
+                    :disabled="busy"
+                    @click="reviewRows([r], value!)"
+                  >
+                    {{ label }}
+                  </button></template
+                >
+                <button
+                  v-if="auth.admin"
+                  class="table-action danger"
+                  :disabled="busy"
+                  @click="requestDelete('samples', [r])"
+                >
+                  删除图片
+                </button>
+              </div>
             </td>
           </tr>
         </tbody>
@@ -812,19 +1435,90 @@ async function adjacent(delta: number) {
     @update:page-size="list.setPageSize"
   />
   <Drawer
+    v-if="editingTask"
+    title="编辑采样任务"
+    @close="!busy && (editingTask = null)"
+  >
+    <form @submit.prevent="saveTask">
+      <label
+        >名称<input v-model="editingTask.name" required maxlength="120"
+      /></label>
+      <label
+        >目标样本数<input
+          v-model.number="editingTask.target"
+          required
+          type="number"
+          min="1"
+          step="1"
+      /></label>
+      <label
+        >任务状态<select v-model="editingTask.status">
+          <option value="OPEN">进行中</option>
+          <option value="COMPLETED">已完成</option>
+        </select></label
+      >
+      <div class="form-actions">
+        <button class="primary" :disabled="busy">保存任务</button
+        ><button type="button" :disabled="busy" @click="editingTask = null">
+          取消
+        </button>
+      </div>
+    </form>
+  </Drawer>
+  <Drawer
     v-if="createOpen"
     :title="isDatasetCreation ? '创建数据集' : '创建采样任务'"
     @close="createOpen = false"
     ><form @submit.prevent="create(!isDatasetCreation)">
-      <label>名称<input v-model="name" required maxlength="120" /></label
-      ><label v-if="!isDatasetCreation"
-        >关联检查方案<select v-model="taskPlanId">
-          <option value="">暂不关联（独立采样）</option>
-          <option v-for="plan in plans" :key="plan.id" :value="plan.id">
-            {{ plan.rules.product }} · {{ plan.name }} / V{{ plan.version }}
-          </option>
-        </select></label
-      ><label v-if="isDatasetCreation"
+      <label>名称<input v-model="name" required maxlength="120" /></label>
+      <fieldset v-if="!isDatasetCreation" class="plan-picker">
+        <legend>选择产品与检查方案</legend>
+        <input
+          v-model="planSearch"
+          type="search"
+          aria-label="搜索检查方案"
+          placeholder="搜索产品、方案或类别…"
+        />
+        <div class="plan-options">
+          <label
+            v-for="plan in matchingPlans"
+            :key="plan.id"
+            :class="{ active: taskPlanId === plan.id }"
+            ><input
+              type="radio"
+              v-model="taskPlanId"
+              :value="plan.id"
+              name="task-plan"
+            /><span
+              ><b
+                >{{ plan.rules.product }} · {{ plan.name }} / V{{
+                  plan.version
+                }}</b
+              ><small
+                >标注类别：{{ plan.rules.classes.join("、") }}</small
+              ></span
+            ></label
+          >
+        </div>
+        <label class="check-row"
+          ><input
+            type="radio"
+            v-model="taskPlanId"
+            value=""
+            name="task-plan"
+          />独立采样（不关联方案）</label
+        >
+        <p v-if="!taskPlanId" class="note">
+          独立采样的图片暂不能框选标注；需要标注和训练时，请选择检查方案。
+        </p>
+        <p v-else-if="selectedPlan" class="note">
+          {{ selectedPlan.rules.instructions }}
+        </p>
+        <RouterLink v-if="!plans.length" to="/plans" @click="createOpen = false"
+          >先创建检查方案 →</RouterLink
+        >
+      </fieldset>
+      <label v-if="isDatasetCreation"
         >版本<input type="number" min="1" v-model.number="version" /></label
       ><label v-else
         >目标样本数<input type="number" min="1" v-model.number="target"
@@ -852,36 +1546,63 @@ async function adjacent(delta: number) {
     v-if="sample"
     :wide="true"
     :class="{ 'annotation-dialog': annotating }"
+    :escape-closes="!annotating"
     :title="displayName(sample.name)"
     @close="sample = null"
     ><div class="toolbar">
-      <span
-        class="tag"
-        :class="{ simulated: sample.source === 'SIMULATION' }"
-        >{{ chinese(sample.source) }}</span
+      <span v-if="sample.source === 'SIMULATION'" class="tag simulated"
+        >模拟</span
       ><button v-if="auth.engineer" @click="annotating = !annotating">
-        {{ annotating ? "图像详情" : "进入标注" }}</button
-      ><template v-if="annotating"
-        ><button
-          :disabled="list.items.value[0]?.id === sample.id"
-          @click="adjacent(-1)"
-        >
-          上一张</button
-        ><button
-          :disabled="list.items.value.at(-1)?.id === sample.id"
-          @click="adjacent(1)"
-        >
-          下一张
-        </button></template
+        {{ annotating ? "图像详情" : "进入标注" }}
+      </button>
+      <button
+        v-if="auth.admin"
+        class="danger right"
+        :disabled="busy"
+        @click="requestDelete('samples', [sample as unknown as Named])"
       >
+        删除图片
+      </button>
+    </div>
+    <div v-if="auth.engineer && !sample.task?.plan" class="toolbar">
+      <span>先关联任务即可标注：</span
+      ><select v-model="assignmentTaskId" aria-label="当前图片的采样任务">
+        <option value="">选择任务与产品方案</option>
+        <option v-for="t in annotationTasks" :key="t.id" :value="t.id">
+          {{ t.name }} · {{ t.plan?.rules.product }}
+        </option></select
+      ><button
+        :disabled="busy || !assignmentTaskId"
+        @click="assignTask([sample])"
+      >
+        关联并启用标注
+      </button>
     </div>
     <AnnotationEditor
       v-if="annotating"
       :sample="sample"
+      :position="annotationPosition"
+      :total="annotationTotal"
+      :advancing="advancing"
       @saved="saveAnnotation"
+      @skip="nextAnnotation()"
     />
     <div v-else class="sample-review-workspace">
       <div>
+        <section
+          v-if="sample.quality && tab === 'quality'"
+          class="section-space"
+          aria-label="图片质量指标"
+        >
+          <h3>图片质量 <Status :value="sample.quality.status" /></h3>
+          <dl class="key-values detail-fields">
+            <template v-for="[key, label] in qualityFields" :key="key"
+              ><dt>{{ label }}</dt>
+              <dd>{{ qualityValue(sample.quality.metrics[key]) }}</dd></template
+            >
+          </dl>
+          <p class="note">亮度与清晰度仅供图片质量检查，不代表产品检查结论。</p>
+        </section>
         <ImageViewer
           compact
           :assets="sample.assets"
@@ -892,7 +1613,7 @@ async function adjacent(delta: number) {
           {{ sample.annotations[0]?.version ?? "暂无" }}
         </p>
         <details class="section-space">
-          <summary>样本原始信息</summary>
+          <summary>技术信息</summary>
           <pre>{{
             JSON.stringify(
               { metadata: sample.metadata, quality: sample.quality },
@@ -904,15 +1625,36 @@ async function adjacent(delta: number) {
       </div>
       <section v-if="auth.admin" class="review-panel">
         <h3>样本审核</h3>
-        <label
-          >结论<select v-model="reviewVerdict">
-            <option value="ACCEPT">接纳样本</option>
-            <option value="REJECT">拒绝样本</option>
-            <option value="NEEDS_WORK">待补充</option>
-          </select></label
-        ><label class="check-row"
+        <div class="review-choices" role="group" aria-label="审核结论">
+          <button
+            v-for="[value, label] in reviewOptions"
+            :key="value"
+            :aria-pressed="reviewVerdict === value"
+            :class="{ active: reviewVerdict === value }"
+            @click="reviewVerdict = value!"
+          >
+            {{ label }}
+          </button>
+        </div>
+        <label class="check-row"
           ><input type="checkbox" v-model="sample.hard" />困难样本</label
-        ><label>备注<textarea v-model="reviewNote" rows="2" /></label>
+        ><label
+          >审核备注<textarea
+            v-model="reviewNote"
+            rows="3"
+            maxlength="2000"
+            placeholder="填写退回原因或补充说明…"
+          />
+        </label>
+        <p
+          v-if="lastReview(sample as unknown as Named)"
+          class="sample-review-note"
+        >
+          上次审核：{{
+            chinese(lastReview(sample as unknown as Named)!.verdict)
+          }}
+          · {{ lastReview(sample as unknown as Named)!.note || "无备注" }}
+        </p>
         <div class="form-actions">
           <button
             v-if="tab === 'review'"
@@ -938,7 +1680,7 @@ async function adjacent(delta: number) {
             </div>
             <button
               @click="
-                download(`/assets/${a.id}/content`, `${a.id}.raw`).catch(
+                download(`/assets/${a.id}/content`, assetFilename(a)).catch(
                   notices.error,
                 )
               "
@@ -982,8 +1724,15 @@ async function adjacent(delta: number) {
       {{
         dataset.status === "FROZEN"
           ? "当前版本已锁定，训练将使用这批样本与标注。"
-          : "先加入至少两张已标注样本，再锁定版本用于训练。"
+          : "先加入样本并等全部样本审核通过后再锁定版本；训练至少需要 2 张已审核样本。"
       }}
+    </p>
+    <p v-if="dataset.status !== 'FROZEN' && !datasetReady" class="note">
+      还有 {{ datasetPending }} 张样本需要审核、更新标注或移除已删除图片。
+    </p>
+    <p v-if="dataset.status !== 'FROZEN' && datasetItems < 2" class="note">
+      当前有 {{ datasetItems }} 张样本，至少加入 2
+      张已审核样本后才能锁定用于训练。
     </p>
     <div class="form-actions">
       <RouterLink
@@ -999,12 +1748,12 @@ async function adjacent(delta: number) {
       ><button
         v-if="dataset.status !== 'FROZEN' && auth.admin"
         class="primary"
-        :disabled="busy || datasetItems < 2"
+        :disabled="busy || !datasetReady || datasetItems < 2"
         @click="action(dataset.id, 'freeze')"
       >
         锁定版本用于训练</button
       ><RouterLink
-        v-else-if="datasetItems >= 2"
+        v-else-if="dataset.status === 'FROZEN' && datasetItems >= 2"
         class="button-link primary"
         :to="{
           name: 'models',
@@ -1020,6 +1769,50 @@ async function adjacent(delta: number) {
       >
     </div>
 
+    <section
+      v-if="datasetRows.length"
+      class="section-space"
+      aria-label="数据集样本"
+    >
+      <h3>样本与标注版本</h3>
+      <p v-if="dataset.status === 'DRAFT'" class="note">
+        可移除误加的图片；重新标注后，点击“更新标注”同步此草稿的快照。
+      </p>
+      <div v-for="item in datasetRows" :key="item.sampleId" class="list-line">
+        <div>
+          <b>{{ displayName(item.sample.name) }}</b>
+          <small
+            >标注 V{{ item.annotationSet.version }} ·
+            {{
+              item.sample.deletedAt
+                ? "图片已删除"
+                : chinese(item.sample.status)
+            }}{{
+              dataset.status !== "FROZEN" && item.needsUpdate
+                ? " · 标注待更新"
+                : ""
+            }}</small
+          >
+        </div>
+        <div v-if="dataset.status === 'DRAFT'" class="row-actions">
+          <button
+            v-if="!item.sample.deletedAt"
+            class="table-action"
+            :disabled="busy"
+            @click="changeDatasetItem(item.sampleId, 'refresh')"
+          >
+            更新标注
+          </button>
+          <button
+            class="table-action danger"
+            :disabled="busy"
+            @click="changeDatasetItem(item.sampleId, 'remove')"
+          >
+            移出数据集
+          </button>
+        </div>
+      </div>
+    </section>
     <div class="toolbar">
       <button
         :disabled="dataset.status !== 'FROZEN' || busy"
@@ -1029,18 +1822,215 @@ async function adjacent(delta: number) {
       ><button @click="action(dataset.id, 'clone')" :disabled="busy">
         创建新版本
       </button>
+      <button
+        v-if="auth.admin"
+        class="danger"
+        :disabled="busy"
+        @click="requestDelete('datasets', [dataset])"
+      >
+        删除数据集
+      </button>
     </div>
     <InfoFields
       :value="dataset"
       :fields="['name', 'version', 'status', 'createdAt']"
     />
     <details>
-      <summary>版本与样本数据</summary>
+      <summary>技术信息</summary>
       <pre>{{ JSON.stringify(dataset, null, 2) }}</pre>
     </details>
   </Drawer>
+  <Drawer
+    v-if="importOpen"
+    title="导入图片"
+    @close="!busy && (importOpen = false)"
+  >
+    <label
+      >图片所属采样任务<select v-model="importTaskId" :disabled="busy">
+        <option value="">不关联任务（仅入库，暂不能标注）</option>
+        <option v-for="t in annotationTasks" :key="t.id" :value="t.id">
+          {{ t.name
+          }}{{ t.plan ? ` · ${t.plan.rules.product}` : " · 未关联方案" }}
+        </option>
+      </select></label
+    >
+    <p v-if="importTaskClasses.length" class="note">
+      标注类别：{{ importTaskClasses.join("、") }}
+    </p>
+    <p v-else class="note">要继续框选标注，请选择已关联检查方案的采样任务。</p>
+    <button class="primary" :disabled="busy" @click="importInput?.click()">
+      {{
+        importProgress.total
+          ? `正在导入 ${importProgress.done}/${importProgress.total}`
+          : "选择图片并导入（可多选）"
+      }}</button
+    ><input
+      ref="importInput"
+      type="file"
+      hidden
+      multiple
+      accept="image/jpeg,image/png,image/webp"
+      :disabled="busy"
+      @change="upload"
+    />
+  </Drawer>
+  <Drawer
+    v-if="deleteRequest"
+    :title="
+      deleteRequest.kind === 'samples'
+        ? '删除图片'
+        : deleteRequest.kind === 'tasks'
+          ? '删除采样任务'
+          : '删除数据集'
+    "
+    @close="!busy && (deleteRequest = null)"
+  >
+    <p>
+      确认删除{{
+        deleteRequest.rows.length > 1
+          ? `所选 ${deleteRequest.rows.length} 张图片`
+          : `“${displayName(deleteRequest.rows[0]!.name)}”`
+      }}？
+    </p>
+    <p class="note">
+      {{
+        deleteRequest.kind === "samples"
+          ? "图片将从样本库移除；数据集已记录的样本快照会保留。"
+          : deleteRequest.kind === "tasks"
+            ? "任务将从任务列表和采样选项中移除，不能继续向其采样或导入图片。已有图片、标注、数据集及检测记录保留。"
+            : "删除此数据集及其样本关联，原始图片保留。已用于训练、评估或正在导出的数据集不能删除。此操作不能撤销。"
+      }}
+    </p>
+    <div class="form-actions">
+      <button class="danger" :disabled="busy" @click="deleteRows">
+        {{ busy ? "正在删除…" : "确认删除" }}</button
+      ><button :disabled="busy" @click="deleteRequest = null">取消</button>
+    </div>
+  </Drawer>
 </template>
 <style scoped>
+.plan-picker {
+  border: 0;
+  padding: 0;
+  margin: 18px 0;
+  min-width: 0;
+}
+.plan-picker legend {
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.plan-options {
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 10px 0;
+  display: grid;
+  gap: 8px;
+}
+.plan-options label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid var(--line);
+  padding: 12px;
+  margin: 0;
+  cursor: pointer;
+}
+.plan-options label.active {
+  border-color: var(--forest);
+  background: var(--surface-2);
+}
+.plan-options input {
+  width: auto;
+  margin: 3px 0 0;
+  flex-shrink: 0;
+}
+.plan-options small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+}
+.data-filters {
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  margin-bottom: 12px;
+}
+.filter-line {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.filter-line + .filter-line {
+  margin-top: 12px;
+}
+.filter-line > span {
+  color: var(--muted);
+  font-size: 12px;
+  min-width: 52px;
+}
+.filter-options,
+.review-choices {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.filter-options button,
+.review-choices button {
+  padding: 7px 12px;
+}
+.filter-options button.active,
+.review-choices button.active {
+  background: var(--forest);
+  border-color: var(--forest);
+  color: var(--surface);
+}
+.review-choices {
+  margin-bottom: 16px;
+}
+.sample-review-note {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  margin: 10px 0;
+}
+.sample-quick-actions {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.sample-quick-actions .danger {
+  margin-left: auto;
+}
+.batch-actions {
+  position: sticky;
+  top: 8px;
+  z-index: 4;
+  background: var(--surface);
+  box-shadow: 0 4px 16px #0001;
+}
+.toolbar select {
+  max-width: 320px;
+}
+@media (max-width: 760px) {
+  .filter-line {
+    gap: 8px;
+  }
+  .filter-options {
+    flex: 1;
+  }
+  .filter-line > .primary {
+    margin-left: 0;
+  }
+  .batch-actions {
+    position: static;
+  }
+  .toolbar select {
+    max-width: 100%;
+  }
+}
 .data-next-action {
   display: flex;
   align-items: center;

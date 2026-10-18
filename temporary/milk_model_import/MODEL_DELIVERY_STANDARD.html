@@ -1,0 +1,639 @@
+<title>模型交付验收标准</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #eef2f5;
+    --fg: #1a232e;
+    --muted: #5d6a79;
+    --line: #dce2e8;
+    --line-strong: #b9c3cd;
+    --accent: #0e5a70;
+    --accent-soft: #e3f0f4;
+    --ok: #1d6b45;
+    --ok-soft: #e6f4ec;
+    --warn: #8a5a00;
+    --warn-soft: #fdf3df;
+    --danger: #9c2a25;
+    --danger-soft: #fbecea;
+    --code-bg: #eef2f5;
+    --shadow: 0 1px 2px rgba(16, 32, 48, .06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #10161c;
+      --surface: #161e26;
+      --surface-2: #1c2630;
+      --fg: #e4eaf0;
+      --muted: #98a5b4;
+      --line: #28333f;
+      --line-strong: #3a4856;
+      --accent: #63b6cb;
+      --accent-soft: #123039;
+      --ok: #63c08d;
+      --ok-soft: #12291e;
+      --warn: #dfa84f;
+      --warn-soft: #2b2110;
+      --danger: #e8857c;
+      --danger-soft: #2c1715;
+      --code-bg: #1c2630;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #10161c;
+    --surface: #161e26;
+    --surface-2: #1c2630;
+    --fg: #e4eaf0;
+    --muted: #98a5b4;
+    --line: #28333f;
+    --line-strong: #3a4856;
+    --accent: #63b6cb;
+    --accent-soft: #123039;
+    --ok: #63c08d;
+    --ok-soft: #12291e;
+    --warn: #dfa84f;
+    --warn-soft: #2b2110;
+    --danger: #e8857c;
+    --danger-soft: #2c1715;
+    --code-bg: #1c2630;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 15.5px;
+    line-height: 1.75;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 0 72px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; }
+
+  header.doc {
+    padding-block: 56px 28px;
+    border-bottom: 1px solid var(--line-strong);
+  }
+  .kicker {
+    font-family: "JetBrains Mono", ui-monospace, Consolas, monospace;
+    font-size: 12px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 14px;
+  }
+  h1 {
+    font-family: "Noto Serif SC", "Songti SC", serif;
+    font-size: clamp(30px, 4.6vw, 44px);
+    line-height: 1.25;
+    font-weight: 700;
+    letter-spacing: .01em;
+    margin: 0 0 16px;
+    text-wrap: balance;
+  }
+  .standfirst {
+    max-width: 68ch;
+    color: var(--muted);
+    margin: 0;
+    font-size: 16.5px;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 26px;
+    margin-top: 24px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .meta b { color: var(--fg); font-weight: 600; }
+
+  .verdict {
+    margin: 26px 0 0;
+    padding: 18px 20px;
+    background: var(--danger-soft);
+    border-left: 4px solid var(--danger);
+    border-radius: 4px;
+    box-shadow: var(--shadow);
+  }
+  .verdict .tag {
+    display: inline-block;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 12px;
+    letter-spacing: .06em;
+    color: var(--danger);
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    padding: 1px 8px;
+    margin-bottom: 8px;
+  }
+  .verdict p { margin: 0; max-width: 74ch; }
+
+  main { padding-top: 12px; }
+  section { padding-block: 38px 8px; border-bottom: 1px solid var(--line); }
+  section:last-of-type { border-bottom: 0; }
+  h2 {
+    font-family: "Noto Serif SC", "Songti SC", serif;
+    font-size: 23px;
+    line-height: 1.4;
+    font-weight: 600;
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+  .sec-note { color: var(--muted); margin: 0 0 22px; max-width: 70ch; }
+  h3 {
+    font-size: 16.5px;
+    font-weight: 600;
+    margin: 30px 0 10px;
+    letter-spacing: .01em;
+  }
+  p { max-width: 72ch; }
+  .muted { color: var(--muted); }
+
+  code, .mono {
+    font-family: "JetBrains Mono", ui-monospace, Consolas, monospace;
+    font-size: .88em;
+    font-variant-numeric: tabular-nums;
+  }
+  code {
+    background: var(--code-bg);
+    border-radius: 3px;
+    padding: 1px 5px;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.7;
+    margin: 14px 0;
+  }
+  pre code { background: none; padding: 0; }
+
+  .table-scroll { overflow-x: auto; margin: 14px 0 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; min-width: 620px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th {
+    font-size: 12px;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+    background: var(--surface-2);
+    white-space: nowrap;
+  }
+  tr:last-child td { border-bottom: 0; }
+  td.num, th.num { font-variant-numeric: tabular-nums; font-family: "JetBrains Mono", ui-monospace, monospace; white-space: nowrap; }
+
+  .callout {
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--accent);
+    background: var(--surface);
+    border-radius: 4px;
+    padding: 16px 18px;
+    margin: 18px 0;
+    box-shadow: var(--shadow);
+  }
+  .callout.warn { border-left-color: var(--warn); background: var(--warn-soft); }
+  .callout.ok { border-left-color: var(--ok); background: var(--ok-soft); }
+  .callout p { margin: 0; }
+  .callout p + p { margin-top: 8px; }
+  .callout .label {
+    font-size: 12px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  ul.checks { list-style: none; padding: 0; margin: 12px 0; }
+  ul.checks li {
+    display: flex;
+    gap: 12px;
+    padding: 9px 0;
+    border-bottom: 1px dashed var(--line);
+    max-width: 80ch;
+  }
+  ul.checks li:last-child { border-bottom: 0; }
+  ul.checks .mark {
+    flex: 0 0 22px;
+    height: 22px;
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    margin-top: 2px;
+  }
+  ul.checks .mark.no { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); display: grid; place-items: center; font-weight: 700; }
+  ul.checks .mark.yes { border-color: var(--ok); background: var(--ok-soft); color: var(--ok); display: grid; place-items: center; font-weight: 700; }
+
+  ol.steps { counter-reset: step; list-style: none; padding: 0; margin: 18px 0 0; }
+  ol.steps > li {
+    counter-increment: step;
+    position: relative;
+    padding: 0 0 22px 54px;
+  }
+  ol.steps > li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 1px;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    display: grid;
+    place-items: center;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  ol.steps h3 { margin: 2px 0 6px; font-size: 16px; }
+  ol.steps p { margin: 0; max-width: 72ch; }
+  ol.steps .pass {
+    display: block;
+    margin-top: 7px;
+    font-size: 13.5px;
+    color: var(--ok);
+  }
+  ol.steps .pass::before { content: "通过标准  "; font-family: "JetBrains Mono", monospace; font-size: 11px; letter-spacing: .06em; color: var(--muted); }
+
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 18px; margin: 18px 0; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 16px 18px;
+    box-shadow: var(--shadow);
+    min-width: 0;
+  }
+  .card h3 { margin: 0 0 8px; font-size: 15px; }
+  .card p { margin: 0; font-size: 14px; }
+  .card ul { margin: 8px 0 0; padding-left: 18px; font-size: 14px; }
+  .card li { margin: 4px 0; }
+
+  footer.doc {
+    padding-top: 34px;
+    color: var(--muted);
+    font-size: 13px;
+    max-width: 74ch;
+  }
+  a { color: var(--accent); }
+  @media (max-width: 520px) {
+    body { font-size: 15px; }
+    header.doc { padding-block: 36px 22px; }
+    section { padding-block: 30px 6px; }
+    th, td { padding: 9px 11px; }
+  }
+</style>
+
+<div class="wrap">
+  <header class="doc">
+    <p class="kicker">Zynq-7020 · INT8 W8A8 · 固定计算图</p>
+    <h1>模型交付验收标准</h1>
+    <p class="standfirst">用于「训练侧交付 → 板端集成」的模型包验收。凡是不能通过本文件 P0 项的包，不允许进入上板、换型或现场演示流程。</p>
+    <div class="meta">
+      <span>版本 <b>v1.0</b></span>
+      <span>日期 <b>2026-10-17</b></span>
+      <span>目标固件 <b>CNC2-SD-25</b></span>
+      <span>板端接口 <b>W8A8 / INT32 累加</b></span>
+    </div>
+    <div class="verdict">
+      <span class="tag">判定：不通过</span>
+      <p>当前牛奶盒 INT8 交付包未满足 P0 强制项。按包内参数直接转换上板会得到错误数值；需要集成方自行重定标、重算下游 bias 和输出尺度后才能运行。这部分适配应由交付方完成并提供验证证据。</p>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>1. 交付包必须包含的物项</h2>
+      <p class="sec-note">缺任意一项即视为不完整交付。所有文件放在同一个版本目录下，版本号写在目录名和包头里。</p>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>文件 / 目录</th><th>内容</th><th>验收要求</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>README.md</code></td><td>目标硬件、量化方案、预处理、判定规则</td><td>必须写明适配的固件接口版本；不得引用已废弃的 Q6.9/int16 口径</td></tr>
+            <tr><td><code>quantization.json</code></td><td>逐层 ABI：shape、dtype、input/output scale、weight scale、multiplier/shift、negative 参数</td><td>唯一权威；与权重/bias 文件逐项一致</td></tr>
+            <tr><td><code>weights/*.weight_i8.bin</code></td><td>逐层 int8 权重，<code>[co][ci][k][k]</code></td><td>文件名与层名一一对应；字节数 = co×ci×k×k</td></tr>
+            <tr><td><code>weights/*.bias_i32.bin</code></td><td>逐通道 int32 bias，小端</td><td>字节数 = co×4；量化尺度 = input_scale×weight_scale</td></tr>
+            <tr><td><code>concat_contract.json</code></td><td>每个 concat 的分支角色与目标尺度</td><td><b>强制新增</b>：见 P0-04，缺失则无法直接映射到固定图</td></tr>
+            <tr><td><code>golden/</code></td><td>至少两组输入 int8 与 out0/out1 int8</td><td>一组有检出、一组无检出；输入必须由板端同一套预处理产生</td></tr>
+            <tr><td><code>accuracy.json</code></td><td>留出集逐图分数、混淆矩阵、界距</td><td>留出集不参与训练和校准；给出图片清单</td></tr>
+            <tr><td><code>delivery_manifest.json</code></td><td>文件清单 + SHA256 + 字节数</td><td>与包内实际文件一致</td></tr>
+            <tr><td><code>board_model/</code></td><td><code>weights.bin</code>、<code>metadata.bin</code>、<code>model.bin</code></td><td>板端布局产物；或提供可复现的转换脚本与整数参考实现</td></tr>
+            <tr><td><code>verify_golden.py</code></td><td>软件自检</td><td>输出与 golden 逐字节一致，不得只报“通过”</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>2. 板端运行契约</h2>
+      <p class="sec-note">交付模型必须运行在这套固定结构上。拓扑、形状、内存布局、量化 ABI 任一不符，都不是“换权重”能解决的。</p>
+
+      <h3>2.1 固定计算图</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>项</th><th class="num">数值</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>命令数</td><td class="num">33</td><td>21 个卷积、8 个重定标（kernel=5）、3 个池化（kernel=2）、1 个上采样（kernel=0）</td></tr>
+            <tr><td>层顺序</td><td class="mono">BasicConv1 → BasicConv2 → RB1–RB3 → BasicConv3 → conv_forP5 → headP5 → out0 / upsample → headP4 → out1</td><td>必须与 <code>camera/training/graph.json</code> 完全一致</td></tr>
+            <tr><td>输入</td><td class="mono">1×224×224 int8, CHW</td><td>input_scale = 1/127，zero point = 0</td></tr>
+            <tr><td>输出</td><td class="mono">out0: 33×7×7 · out1: 33×14×14</td><td>int8，通道顺序 anchor×11 + channel</td></tr>
+            <tr><td>特征内存</td><td class="mono">plane = size × (size×8//7)</td><td>行对齐：7→8、14→16、28→32、56→64、112→128、224→256 字节</td></tr>
+            <tr><td>权重包大小</td><td class="num">6,350,208 B</td><td>按 <code>[ci/8][co/48]</code> 分块转置打包</td></tr>
+            <tr><td>metadata</td><td class="num">16,506 × int32</td><td>前 330 字为命令表，其余为逐层参数</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>2.2 量化 ABI</h3>
+      <ul class="checks">
+        <li><span class="mark"></span><span>权重 int8、激活 int8、bias int32；INT32 完整累加，不允许 16 位截断。</span></li>
+        <li><span class="mark"></span><span>逐输出通道重定标：<code>out = (|acc × multiplier| + 2^(shift−1)) >> shift</code>，符号跟随 acc，结果夹到 ±127。</span></li>
+        <li><span class="mark"></span><span><code>multiplier ∈ (0, 2^31)</code>；<code>shift ∈ [1, 62]</code>；负半轴 multiplier = 正半轴 × 0.1（leaky ReLU 已融合）。</span></li>
+        <li><span class="mark"></span><span>bias 的量化尺度必须严格等于 <code>input_scale × weight_scale[c]</code>；改输出尺度时 bias 不变，改输入尺度时必须同步重算 bias。</span></li>
+        <li><span class="mark"></span><span>累加上界 <code>Σ|w|×127 + |bias| &lt; 2^31</code>，交付方需逐层给出 <code>accumulator_abs_bound</code>。</span></li>
+      </ul>
+
+      <h3>2.3 包格式</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>偏移</th><th>字段</th><th class="num">值 / 长度</th></tr></thead>
+          <tbody>
+            <tr><td class="num">0x00</td><td>magic</td><td class="num">0x314E4E43</td></tr>
+            <tr><td class="num">0x04</td><td>format</td><td class="num">1</td></tr>
+            <tr><td class="num">0x08 / 0x0C</td><td>weight_size / metadata_size</td><td class="num">6350208 / 66024</td></tr>
+            <tr><td class="num">0x10 / 0x14</td><td>generation / committed</td><td class="num">上传时为 0 / 0</td></tr>
+            <tr><td class="num">0x18</td><td>version</td><td class="num">ASCII 1–63 字节，不足补零</td></tr>
+            <tr><td class="num">0x58</td><td>payload SHA256</td><td class="num">32 字节</td></tr>
+            <tr><td class="num">0x78</td><td>header CRC32</td><td class="num">覆盖前 120 字节</td></tr>
+            <tr><td class="num">0x80</td><td>weights + metadata</td><td class="num">6,416,360 B 总包长</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>3. 强制验收项</h2>
+      <p class="sec-note">P0 全部通过才允许上板；P1 允许带整改计划有条件通过；P2 为文档与可维护性要求。</p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>编号</th><th>要求</th><th>判定方式</th><th>级别</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="mono">P0-01</td>
+              <td>拓扑与每层 <code>(ci, co, k, stride, size, act)</code> 与固定图完全一致；权重文件形状逐一匹配。</td>
+              <td>脚本比对 33 条命令 × 21 层形状，0 差异</td><td>P0</td>
+            </tr>
+            <tr>
+              <td class="mono">P0-02</td>
+              <td>输入契约：1×224×224 int8、CHW、zero point 0、<code>input_scale = 1/127</code>。</td>
+              <td>读取 quantization.json 首层 input_scale</td><td>P0</td>
+            </tr>
+            <tr>
+              <td class="mono">P0-03</td>
+              <td>预处理必须与板端一致：相机 416×416 RGB565 → 灰度 → 224×224 → int8。交付方须提供与板端同一实现的预处理，或提供在板端预处理下生成的 golden 与精度复测。</td>
+              <td>golden 输入由板端管线产生；逐像素差异为 0</td><td>P0</td>
+            </tr>
+            <tr>
+              <td class="mono">P0-04</td>
+              <td><b>Concat 尺度契约</b>：每个 concat 明确写出目标尺度、两个分支各自是“原地保留”还是“需重定标”。原地分支的输出尺度必须等于目标尺度；否则交付方须提供尺度调整表（含下游 bias 重算与乘移重算），且调整后不得引入饱和。</td>
+              <td><code>concat_contract.json</code> 校验 + 板端整数参考逐层比对</td><td>P0</td>
+            </tr>
+            <tr>
+              <td class="mono">P0-05</td>
+              <td>输出尺度与上位机解码器一致：<code>out0 = 0.11581249687615341</code>，<code>out1 = 0.15977688286248154</code>。若不同，必须同时交付上位机解码改动。</td>
+              <td>manifest 与 Postprocess 常量比对</td><td>P0</td>
+            </tr>
+            <tr>
+              <td class="mono">P0-06</td>
+              <td>板端布局产物与整数参考：<code>weights.bin</code>/<code>metadata.bin</code>/<code>model.bin</code> 可按脚本复现，输出 SHA256；整数参考与 golden <b>逐字节一致</b>。</td>
+              <td>重跑转换脚本，哈希一致；对拍 mismatch = 0</td><td>P0</td>
+            </tr>
+            <tr>
+              <td class="mono">P0-07</td>
+              <td>包完整性：6,416,360 字节、header 字段、CRC32、payload SHA256 全部正确；版本号 ASCII。</td>
+              <td>板端 op3 校验通过</td><td>P0</td>
+            </tr>
+            <tr>
+              <td class="mono">P0-08</td>
+              <td>平台清单符合 <code>manifestSchema</code>：formatVersion=1、input/output、classCount=6、classes 6 个唯一非空、quantization、weights（<b>整个 model.bin 文件</b>的 SHA256 与字节数）。</td>
+              <td>服务端导入校验通过</td><td>P0</td>
+            </tr>
+            <tr>
+              <td class="mono">P1-01</td>
+              <td>精度：留出集 ≥18 张（次品/好品均含），阈值 0.5 下召回与误报，最小次品分、最大好品分、界距。</td>
+              <td>accuracy.json 可复现；界距建议 ≥0.3</td><td>P1</td>
+            </tr>
+            <tr>
+              <td class="mono">P1-02</td>
+              <td>板端实测：自检通过；推理耗时不超过 60 ms/帧；连续运行 10 分钟无 error 状态包。</td>
+              <td>板端状态包统计</td><td>P1</td>
+            </tr>
+            <tr>
+              <td class="mono">P1-03</td>
+              <td>类别语义：6 个类别槽位中实际训练了哪些、未训练槽位的显示方式、二值判定（好品/次品）如何由 objectness 得出，必须写明。</td>
+              <td>README 与上位机标签一致</td><td>P1</td>
+            </tr>
+            <tr>
+              <td class="mono">P2-01</td>
+              <td>锚框参数与上位机 <code>Postprocess.cs</code> 一致，或随包提供锚框表并标明替换方式。</td>
+              <td>逐值比对</td><td>P2</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>4. 交付目录示例</h2>
+      <pre><code>milk_int8_w8a8_20261017/
+├── README.md
+├── delivery_manifest.json
+├── quantization.json          # 逐层 ABI（唯一权威）
+├── concat_contract.json       # P0-04，每个 concat 的分支角色与目标尺度
+├── accuracy.json
+├── weights/
+│   ├── BasicConv1.weight_i8.bin
+│   ├── BasicConv1.bias_i32.bin
+│   └── ...
+├── golden/
+│   ├── input_quantized.bin    # 板端同款预处理产生
+│   ├── out0_quantized.bin
+│   └── out1_quantized.bin
+├── board_model/
+│   ├── weights.bin
+│   ├── metadata.bin
+│   └── model.bin
+└── tools/
+    ├── pack_board_model.py    # 包 → 板端布局，输出哈希
+    └── verify_board_model.py  # 整数参考 vs golden</code></pre>
+      <p class="muted">目录名、版本字符串和包头 version 必须一致；版本号只允许 ASCII 可打印字符。</p>
+    </section>
+
+    <section>
+      <h2>5. 验收流程</h2>
+      <p class="sec-note">集成方按以下顺序执行。任何一步失败即退回，不进入下一步。</p>
+      <ol class="steps">
+        <li>
+          <h3>包完整性</h3>
+          <p>校验文件清单、SHA256、字节数、版本号格式；确认 <code>quantization.json</code> 与权重/bias 文件一一对应。</p>
+          <span class="pass">所有文件存在，哈希一致，无缺层/多层</span>
+        </li>
+        <li>
+          <h3>结构与 ABI 检查</h3>
+          <p>比对 33 条命令、21 层形状；检查 multiplier &gt; 0、shift ∈ [1,62]、bias 缩放关系、累加上界；检查 concat 契约完整。</p>
+          <span class="pass">0 差异；契约覆盖全部 8 个重定标点</span>
+        </li>
+        <li>
+          <h3>板端布局转换</h3>
+          <p>用交付方脚本生成 <code>weights.bin</code>/<code>metadata.bin</code>，核对与交付产物哈希一致；确认未改动命令表。</p>
+          <span class="pass">哈希一致；metadata 前 330 字与固件模板逐字相同</span>
+        </li>
+        <li>
+          <h3>整数参考对拍</h3>
+          <p>用板端内存布局的整数参考（含 concat、池化、上采样、重定标）跑 golden 输入，与 golden 的 out0/out1 逐字节比较。</p>
+          <span class="pass">mismatch = 0（不允许“平均误差”口径）</span>
+        </li>
+        <li>
+          <h3>打包与上板安装</h3>
+          <p>生成 <code>model.bin</code>，通过 UDP 安装到 SD 模型库；板端自检通过后提交槽位；记录 payload SHA256。</p>
+          <span class="pass">版本身份一致；自检通过；槽位 committed</span>
+        </li>
+        <li>
+          <h3>板端实测</h3>
+          <p>用同一张 golden 实物图在相机前复现；记录分数、框、FPS、连续 10 分钟错误计数。</p>
+          <span class="pass">分数与软件参考偏差 ≤0.02；无饱和/超时/丢帧错误</span>
+        </li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>6. 当前牛奶包不符合项</h2>
+      <p class="sec-note">依据本标准的逐项结论。“影响”一栏是可复现的后果，不是推测。</p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>编号</th><th>不符合项</th><th>现状</th><th>影响</th><th>需补内容</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="mono">C1</td>
+              <td>P0-04 concat 原地分支尺度不满足</td>
+              <td>RB1.inner_cat：conv2 0.148659 ≠ 目标 0.161723<br>RB2.inner_cat：conv2 0.104392 ≠ 目标 0.108808<br>RB2.join：conv1 0.097260 ≠ 目标 0.117833</td>
+              <td>按包参数直接上板，concat 输入按错误尺度解读，输出最大偏差约 ±13 LSB</td>
+              <td>统一隐层尺度；或交付尺度调整表（含下游 bias 与乘移重算）及调整后的板端产物</td>
+            </tr>
+            <tr>
+              <td class="mono">C2</td>
+              <td>P0-05 输出尺度与上位机不一致</td>
+              <td>out0 0.121649（上位机 0.115812）<br>out1 0.131642（上位机 0.159777）</td>
+              <td>上位机解码分数偏低约 5% / 17%，out1 框尺寸偏差约 21%</td>
+              <td>交付时把两头输出尺度对齐上位机常量，或同时给出上位机改动</td>
+            </tr>
+            <tr>
+              <td class="mono">C3</td>
+              <td>P0-03 预处理口径不一致</td>
+              <td>包要求中心裁方 + Pillow bicubic；板端是 416→224 固定系数缩放</td>
+              <td>包内 golden 不代表板端真实输入；现场精度无法由包内数据证明</td>
+              <td>按板端预处理生成 golden；或提供可移植的预处理实现并在板上复测</td>
+            </tr>
+            <tr>
+              <td class="mono">C4</td>
+              <td>目标硬件口径错误</td>
+              <td>README 面向 Q6.9/int16 核，未声明 CNC2-SD-25 / W8A8</td>
+              <td>集成方需自行判断适配方式，交付说明不可作为依据</td>
+              <td>按当前固件接口重写使用约定</td>
+            </tr>
+            <tr>
+              <td class="mono">C5</td>
+              <td>P0-06 缺少板端产物与参考实现</td>
+              <td>只提供逐层权重文件；无 weights.bin/metadata.bin、无整数参考</td>
+              <td>无法在交付侧证明“板端布局下结果正确”；适配成本转嫁给集成方</td>
+              <td>附转换脚本、板端产物与对拍结果</td>
+            </tr>
+            <tr>
+              <td class="mono">C6</td>
+              <td>P0-08 平台清单不符合 schema</td>
+              <td>旧 source-manifest 字段不匹配；weights.sha256 口径不是整个 model.bin</td>
+              <td>模型无法通过平台导入校验</td>
+              <td>按 manifestSchema 重新生成清单</td>
+            </tr>
+            <tr>
+              <td class="mono">C7</td>
+              <td>P1-03 类别语义未声明</td>
+              <td>33 通道按 6 类组织，仅 class 0 训练；其余为占位</td>
+              <td>上位机仍显示钢模型 6 类名称，现场无法解释结果</td>
+              <td>明确二值判定与展示映射</td>
+            </tr>
+            <tr>
+              <td class="mono">C8</td>
+              <td>P1-02 无 FPGA 实测</td>
+              <td>包自述“未在 FPGA 上执行过”</td>
+              <td>自检、时延、长期稳定性均无证据</td>
+              <td>补板端自检与 10 分钟连续运行记录</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout ok">
+        <span class="label">已通过的部分</span>
+        <p>拓扑与 21 层形状完全匹配；权重 dtype/形状正确；锚框与上位机 <code>Postprocess.cs</code> 逐值一致；软件逻辑参考（无内存布局）与包内 golden 逐字节一致。问题集中在“包 → 板端固定图”的尺度契约、输出契约和可验证性上。</p>
+      </div>
+
+      <div class="callout warn">
+        <span class="label">集成方为让本包运行所做的临时适配（不应由集成方承担）</span>
+        <p>提高 RB1.conv2、RB2.conv2、RB2.conv1 的输出尺度到各自 concat 目标；重算 RB1.conv3、RB2.conv2、RB2.conv3 的 int32 bias 与乘移；把 out0/out1 输出尺度改成上位机常量。适配后软件对拍：分数最大差 0.0023，框差 1–4 px。上述改动必须由交付方固化进交付产物并附验证。</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>7. 判定规则</h2>
+      <div class="grid-2">
+        <div class="card">
+          <h3>通过</h3>
+          <p>P0 全部满足，P1 无未整改项。允许进入上板、换型和现场演示。</p>
+        </div>
+        <div class="card">
+          <h3>有条件通过</h3>
+          <p>P0 全部满足，P1 存在有明确整改日期的缺项。只允许在实验室验证，不允许现场演示。</p>
+        </div>
+        <div class="card">
+          <h3>不通过</h3>
+          <p>任一 P0 不满足，或整数参考与 golden 非逐字节一致。退回到交付方，不安排上板。</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>附录：metadata 逐层参数布局</h2>
+      <p class="sec-note">每条命令 10 个 int32：<code>[输入偏移, 输出偏移, 权重偏移, 参数偏移, ch_in, ch_out, fsize, stride, kernel, act]</code>。参数区按 <code>kernel</code> 解释：</p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>kernel</th><th>含义</th><th>参数区</th></tr></thead>
+          <tbody>
+            <tr><td class="num">1 / 3</td><td>卷积</td><td>bias[co] · 正 multiplier[co] · 正 shift[co] · 负 multiplier[co] · 负 shift[co]</td></tr>
+            <tr><td class="num">5</td><td>concat 前重定标</td><td>multiplier（1 字）· shift（1 字）</td></tr>
+            <tr><td class="num">2</td><td>2×2 maxpool</td><td>无</td></tr>
+            <tr><td class="num">0</td><td>2× 最近邻上采样</td><td>无</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="muted">重定标公式与卷积输出一致：四舍五入远离零、结果夹到 ±127。concat 目标尺度取两分支中的较大者。</p>
+    </section>
+  </main>
+
+  <footer class="doc">
+    本标准以当前仓库的 <code>camera/training/graph.json</code>、<code>camera/int8/model.h</code>、<code>apps/server/src/models/zynq-profile.ts</code> 和 <code>camera/winui/Postprocess.cs</code> 为准。固件接口变更时，本标准需同步更新版本。
+  </footer>
+</div>

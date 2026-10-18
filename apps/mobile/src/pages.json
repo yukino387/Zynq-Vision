@@ -1,16 +1,18 @@
 {
   "pages": [
     {
-      "path": "pages/capture/index",
-      "style": {
-        "navigationBarTitleText": "现场采样",
-        "navigationStyle": "custom"
-      }
-    },
-    {
       "path": "pages/home/index",
       "style": {
         "navigationBarTitleText": "现场工作台"
+      }
+    },
+    {
+      "path": "pages/capture/index",
+      "style": {
+        "navigationBarTitleText": "现场采样",
+        "navigationStyle": "custom",
+        "navigationBarTextStyle": "white",
+        "navigationBarBackgroundColor": "#102b36"
       }
     },
     {
@@ -18,31 +20,36 @@
       "style": {
         "navigationBarTitleText": "实时画面",
         "navigationStyle": "custom",
-        "disableScroll": false
+        "disableScroll": false,
+        "navigationBarTextStyle": "white",
+        "navigationBarBackgroundColor": "#102b36"
       }
     },
     {
       "path": "pages/tasks/index",
       "style": {
-        "navigationBarTitleText": "采样任务"
+        "navigationBarTitleText": "任务"
       }
     },
     {
       "path": "pages/records/index",
       "style": {
-        "navigationBarTitleText": "检测记录"
+        "navigationBarTitleText": "记录"
       }
     },
     {
       "path": "pages/login/index",
       "style": {
-        "navigationBarTitleText": "账号登录"
+        "navigationBarTitleText": "登录",
+        "navigationStyle": "custom",
+        "navigationBarTextStyle": "white",
+        "navigationBarBackgroundColor": "#102b36"
       }
     },
     {
       "path": "pages/pair/index",
       "style": {
-        "navigationBarTitleText": "服务器与工位配对"
+        "navigationBarTitleText": "配对"
       }
     },
     {
@@ -54,43 +61,55 @@
     {
       "path": "pages/sync/index",
       "style": {
-        "navigationBarTitleText": "本地采样队列"
+        "navigationBarTitleText": "同步"
       }
     },
     {
       "path": "pages/sample/index",
       "style": {
-        "navigationBarTitleText": "样本与审核"
+        "navigationBarTitleText": "样本"
       }
     }
   ],
   "globalStyle": {
     "navigationBarTextStyle": "black",
-    "navigationBarBackgroundColor": "#f1f0e8",
-    "backgroundColor": "#e9e9df"
+    "navigationBarBackgroundColor": "#f3f6f7",
+    "backgroundColor": "#f3f6f7"
   },
   "tabBar": {
-    "color": "#738066",
-    "selectedColor": "#c64b1e",
-    "backgroundColor": "#f1f0e8",
+    "color": "#7a9098",
+    "selectedColor": "#087f82",
+    "backgroundColor": "#ffffff",
     "borderStyle": "white",
     "list": [
       {
         "pagePath": "pages/home/index",
-        "text": "首页"
+        "text": "首页",
+        "iconPath": "static/tab-home.png",
+        "selectedIconPath": "static/tab-home-on.png"
       },
       {
         "pagePath": "pages/tasks/index",
-        "text": "任务"
+        "text": "任务",
+        "iconPath": "static/tab-tasks.png",
+        "selectedIconPath": "static/tab-tasks-on.png"
       },
       {
         "pagePath": "pages/capture/index",
-        "text": "采样"
+        "text": "采样",
+        "iconPath": "static/tab-camera.png",
+        "selectedIconPath": "static/tab-camera-on.png"
       },
       {
         "pagePath": "pages/records/index",
-        "text": "记录"
+        "text": "记录",
+        "iconPath": "static/tab-records.png",
+        "selectedIconPath": "static/tab-records-on.png"
       }
-    ]
+    ],
+    "height": "62px",
+    "fontSize": "11px",
+    "iconWidth": "25px",
+    "spacing": "4px"
   }
 }

@@ -23,7 +23,8 @@ const detections = computed(() => shown.value?.detections ?? null);
 const device = computed(() => liveDevice.value);
 const captureHint = computed(() => {
   if (!device.value) return "先选择一台设备";
-  if (device.value.connectionState !== "ONLINE") return "设备离线，请工程师连接";
+  if (device.value.connectionState !== "ONLINE")
+    return "设备离线，请工程师连接";
   if (!shown.value) return "等待设备画面";
   if (!held.value && !frameUsable()) return "画面已暂停，等待新帧";
   if (held.value) return "回看中；采样仍保存设备当前实时帧";
@@ -163,9 +164,7 @@ onHide(() => {
             />
             <text class="mono">#{{ frame.frameId }}</text>
           </view>
-          <view v-if="!live.frames.length" class="thumb empty"
-            >等待画面</view
-          >
+          <view v-if="!live.frames.length" class="thumb empty">等待画面</view>
         </scroll-view>
       </view>
 
@@ -202,7 +201,9 @@ onHide(() => {
             :key="index"
             class="detection"
           >
-            <text class="index mono">{{ String(index + 1).padStart(2, "0") }}</text>
+            <text class="index mono">{{
+              String(index + 1).padStart(2, "0")
+            }}</text>
             <view class="det-copy">
               <text class="det-name">{{ displayName(box.label) }}</text>
               <text class="det-pos mono"
@@ -228,9 +229,7 @@ onHide(() => {
           <text class="metric-label">设备帧率</text>
           <text class="metric-value mono"
             >{{
-              live.telemetry?.fps == null
-                ? "—"
-                : live.telemetry.fps.toFixed(1)
+              live.telemetry?.fps == null ? "—" : live.telemetry.fps.toFixed(1)
             }}<text class="unit">FPS</text></text
           >
         </view>
@@ -270,7 +269,7 @@ onHide(() => {
         <text class="mono">{{
           device?.reportedState.modelVersion ?? "未上报"
         }}</text>
-        <text v-if="device?.source === 'SIMULATION'" class="tag">模拟设备</text>
+        <text class="mono">{{ device?.type ?? "" }}</text>
       </view>
 
       <view
@@ -282,7 +281,9 @@ onHide(() => {
       >
         <view>
           <text class="result-kicker">已采样当前帧</text>
-          <text class="result-title">检测结果 {{ chinese(lastInspection.result) }}</text>
+          <text class="result-title"
+            >检测结果 {{ chinese(lastInspection.result) }}</text
+          >
         </view>
         <text class="result-link">查看记录 →</text>
       </view>
@@ -297,7 +298,9 @@ onHide(() => {
           {{ busy ? "正在采样…" : "采样当前帧" }}
         </button>
       </view>
-      <text class="action-hint">{{ captureHint || "保存设备当前帧与检测记录" }}</text>
+      <text class="action-hint">{{
+        captureHint || "保存设备当前帧与检测记录"
+      }}</text>
     </template>
   </view>
 </template>
@@ -305,8 +308,8 @@ onHide(() => {
 <style scoped>
 .live-page {
   min-height: 100vh;
-  background: #141810;
-  color: #eef1e6;
+  background: #102b36;
+  color: #f0f8fa;
   padding: 0 0 30px;
 }
 .live-header {
@@ -320,12 +323,12 @@ onHide(() => {
   height: 36px;
   min-height: 36px;
   padding: 0;
-  border: 1px solid #46503e;
+  border: 1px solid #315460;
   background: transparent;
-  color: #eef1e6;
+  color: #f0f8fa;
   font-size: 22px;
   line-height: 1;
-  border-radius: 2px;
+  border-radius: 12px;
 }
 .heading {
   display: flex;
@@ -334,9 +337,9 @@ onHide(() => {
   flex: 1;
 }
 .kicker {
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 2px;
-  color: #93a08a;
+  color: #8db0bd;
   font-family: Consolas, monospace;
 }
 .heading-title {
@@ -345,26 +348,26 @@ onHide(() => {
   letter-spacing: -0.5px;
 }
 .heading-title span {
-  color: #ee743d;
+  color: #f28b61;
 }
 .device-switch {
   max-width: 46%;
   min-height: 40px;
   padding: 6px 10px;
-  border: 1px solid #46503e;
+  border: 1px solid #315460;
   background: #1d231a;
-  color: #eef1e6;
+  color: #f0f8fa;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
-  border-radius: 2px;
+  border-radius: 12px;
 }
 .device-state {
-  font-size: 9px;
+  font-size: 11px;
 }
 .device-name {
-  font-size: 10px;
+  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -406,10 +409,10 @@ onHide(() => {
   min-height: 30px;
   padding: 4px 9px;
   border: 1px solid #ffffff40;
-  background: #10140fcc;
-  color: #dfe7d5;
-  font-size: 9px;
-  border-radius: 2px;
+  background: #102b36cc;
+  color: #d9e9ed;
+  font-size: 11px;
+  border-radius: 12px;
 }
 .immersive-back {
   position: absolute;
@@ -421,10 +424,10 @@ onHide(() => {
   min-height: 32px;
   padding: 5px 10px;
   border: 1px solid #ffffff40;
-  background: #10140fcc;
-  color: #dfe7d5;
-  font-size: 10px;
-  border-radius: 2px;
+  background: #102b36cc;
+  color: #d9e9ed;
+  font-size: 11px;
+  border-radius: 12px;
 }
 .filmstrip {
   padding: 12px 16px 4px;
@@ -433,16 +436,16 @@ onHide(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 10px;
-  color: #aab6a0;
+  font-size: 11px;
+  color: #aac6d0;
   margin-bottom: 7px;
 }
 .strip-live {
   color: #ee9a6e;
 }
 .strip-note {
-  color: #7d8a74;
-  font-size: 9px;
+  color: #8db0bd;
+  font-size: 11px;
 }
 .strip-track {
   display: flex;
@@ -453,8 +456,8 @@ onHide(() => {
   display: inline-flex;
   flex-direction: column;
   width: 64px;
-  border: 1px solid #3d4736;
-  background: #10140f;
+  border: 1px solid #315460;
+  background: #102b36;
   position: relative;
 }
 .thumb image {
@@ -463,35 +466,35 @@ onHide(() => {
   display: block;
 }
 .thumb text {
-  font-size: 8px;
-  color: #aab6a0;
+  font-size: 11px;
+  color: #aac6d0;
   padding: 3px 4px;
 }
 .thumb.selected {
-  border-color: #ee743d;
+  border-color: #f28b61;
 }
 .thumb.empty {
   width: 128px;
   height: 64px;
   align-items: center;
   justify-content: center;
-  color: #7d8a74;
-  font-size: 9px;
+  color: #8db0bd;
+  font-size: 11px;
 }
 .readout {
   margin: 12px 16px 0;
-  border-top: 1px solid #3d4736;
+  border-top: 1px solid #315460;
   padding-top: 12px;
 }
 .readout-head {
   display: flex;
   justify-content: space-between;
-  font-size: 10px;
-  color: #aab6a0;
+  font-size: 11px;
+  color: #aac6d0;
   margin-bottom: 9px;
 }
 .verdict {
-  border: 1px solid #3d4736;
+  border: 1px solid #315460;
   background: #1a2017;
   padding: 11px 13px;
   display: flex;
@@ -510,13 +513,13 @@ onHide(() => {
   color: #e8c27c;
 }
 .verdict-note {
-  font-size: 10px;
-  color: #aab6a0;
+  font-size: 11px;
+  color: #aac6d0;
   line-height: 1.6;
 }
 .detections {
   margin-top: 9px;
-  border: 1px solid #3d4736;
+  border: 1px solid #315460;
 }
 .detection {
   display: flex;
@@ -529,8 +532,8 @@ onHide(() => {
   border-bottom: 0;
 }
 .index {
-  font-size: 10px;
-  color: #7d8a74;
+  font-size: 11px;
+  color: #8db0bd;
 }
 .det-copy {
   flex: 1;
@@ -543,8 +546,8 @@ onHide(() => {
   font-size: 12px;
 }
 .det-pos {
-  font-size: 9px;
-  color: #7d8a74;
+  font-size: 11px;
+  color: #8db0bd;
 }
 .det-score {
   font-size: 13px;
@@ -554,31 +557,31 @@ onHide(() => {
   margin: 14px 16px 0;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  border-top: 1px solid #3d4736;
-  border-left: 1px solid #3d4736;
+  border-top: 1px solid #315460;
+  border-left: 1px solid #315460;
 }
 .metric {
-  border-right: 1px solid #3d4736;
-  border-bottom: 1px solid #3d4736;
+  border-right: 1px solid #315460;
+  border-bottom: 1px solid #315460;
   padding: 9px 10px;
   display: flex;
   flex-direction: column;
   gap: 3px;
 }
 .metric-label {
-  font-size: 9px;
+  font-size: 11px;
   color: #8b9782;
 }
 .metric-value {
   font-size: 15px;
-  color: #eef1e6;
+  color: #f0f8fa;
 }
 .metric-value.crit {
   color: #ef9a80;
 }
 .unit {
-  font-size: 8px;
-  color: #7d8a74;
+  font-size: 11px;
+  color: #8db0bd;
   margin-left: 3px;
 }
 .model-line {
@@ -586,14 +589,14 @@ onHide(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 10px;
-  color: #aab6a0;
-  border-top: 1px solid #3d4736;
+  font-size: 11px;
+  color: #aac6d0;
+  border-top: 1px solid #315460;
   padding-top: 10px;
 }
 .model-line .mono {
-  color: #dfe7d5;
-  font-size: 10px;
+  color: #d9e9ed;
+  font-size: 11px;
 }
 .tag {
   margin-left: auto;
@@ -601,7 +604,7 @@ onHide(() => {
   background: #2a2416;
   color: #d5b475;
   padding: 2px 5px;
-  font-size: 8px;
+  font-size: 11px;
 }
 .capture-result {
   margin: 14px 16px 0;
@@ -615,7 +618,7 @@ onHide(() => {
 }
 .result-kicker {
   display: block;
-  font-size: 9px;
+  font-size: 11px;
   color: #8b9782;
   margin-bottom: 3px;
 }
@@ -624,7 +627,7 @@ onHide(() => {
   font-size: 13px;
 }
 .result-link {
-  font-size: 10px;
+  font-size: 11px;
   color: #ee9a6e;
   white-space: nowrap;
 }
@@ -634,20 +637,71 @@ onHide(() => {
 .shutter-action {
   width: 100%;
   min-height: 48px;
-  background: #dd5b2a;
+  background: #087f82;
   color: #fff8eb;
-  border-radius: 2px;
+  border-radius: 12px;
   font-size: 15px;
 }
 .shutter-action:active {
-  background: #c64b1e;
+  background: #076b6e;
 }
 .action-hint {
   display: block;
   margin: 8px 16px 0;
-  font-size: 10px;
+  font-size: 11px;
   color: #8b9782;
   text-align: center;
   line-height: 1.7;
+}
+
+.back {
+  width: 44px;
+  min-height: 44px;
+  height: 44px;
+  border-radius: 14px;
+}
+.heading-title {
+  font-weight: 650;
+}
+.stage {
+  overflow: hidden;
+  border-radius: 18px;
+  margin: 0 16px;
+  width: calc(100% - 32px);
+  padding-top: calc(100% - 32px);
+}
+.stage.full {
+  border-radius: 0;
+  margin: 0;
+}
+.stage.full {
+  width: 100%;
+  padding-top: 0;
+}
+.device-switch {
+  background: #193b48;
+}
+.live-header {
+  min-width: 0;
+}
+.heading {
+  min-width: 0;
+}
+.device-switch {
+  max-width: 48%;
+}
+.device-switch {
+  border-radius: 12px;
+}
+.readout,
+.metrics {
+  border-radius: 16px;
+  overflow: hidden;
+}
+.actions button {
+  border-radius: 14px;
+}
+.capture-result {
+  border-radius: 14px;
 }
 </style>

@@ -5,6 +5,7 @@ import type { InspectionPlan } from "@vision/contracts";
 import { api } from "../api";
 import { useAuthStore } from "../stores/auth";
 import AsyncState from "../components/AsyncState.vue";
+import Icon from "../components/Icon.vue";
 const auth = useAuthStore();
 interface Overview {
   samples: { pending: number };
@@ -129,7 +130,14 @@ const actions = computed(() => [
       <h1>{{ auth.admin ? "管理首页" : "技术维护" }}</h1>
       <p>围绕产品与检查方案，把现场采样、模型准备和正式发布连接起来。</p>
     </div>
-    <button @click="load" :disabled="loading">刷新</button>
+    <button
+      class="overview-refresh"
+      @click="load"
+      :disabled="loading"
+      :aria-busy="loading"
+    >
+      <Icon name="refresh" :size="16" />{{ loading ? "刷新中…" : "刷新概览" }}
+    </button>
   </div>
   <AsyncState :loading="loading" :error="error" @retry="load">
     <section class="management-next">
@@ -153,18 +161,20 @@ const actions = computed(() => [
     </section>
     <div v-if="ready" class="management-counts">
       <RouterLink to="/plans"
-        ><strong>{{ plans.length }}</strong
+        ><Icon name="clipboard" /><strong>{{ plans.length }}</strong
         ><span>已配置方案版本</span></RouterLink
       ><RouterLink to="/data/samples"
-        ><strong>{{ ready.realSamples }}</strong
+        ><Icon name="database" /><strong>{{ ready.realSamples }}</strong
         ><span>真实现场样本</span></RouterLink
       ><RouterLink :to="auth.admin ? '/data/review' : '/data/annotation'"
-        ><strong>{{ auth.admin ? pendingReal : ready.annotatedReal }}</strong
+        ><Icon name="audit" /><strong>{{
+          auth.admin ? pendingReal : ready.annotatedReal
+        }}</strong
         ><span>{{
           auth.admin ? "真实样本待管理员审核" : "已完成标注"
         }}</span></RouterLink
       ><RouterLink to="/models/registry"
-        ><strong>{{ ready.candidateModels }}</strong
+        ><Icon name="layers" /><strong>{{ ready.candidateModels }}</strong
         ><span>候选模型，尚需验证</span></RouterLink
       >
     </div>
@@ -203,11 +213,6 @@ const actions = computed(() => [
         <strong>工人</strong
         >按任务采样、查看结果和提交反馈。<strong>管理员</strong>定义方案、审核数据、决定训练与发布。<strong>技术维护人员</strong>维护设备和模板，协助标注、训练与验证。
       </p>
-      <p v-if="ready?.simulatedSamples" class="note">
-        当前另有
-        {{ ready.simulatedSamples }}
-        张模拟样本，用于演示流程。方案规则下发、按人员绑定工位等尚未完成的能力，不作为已实现功能展示。
-      </p>
       <RouterLink v-if="auth.admin" to="/access/users"
         >管理人员与权限 →</RouterLink
       >
@@ -215,6 +220,11 @@ const actions = computed(() => [
   </AsyncState>
 </template>
 <style scoped>
+.overview-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
 .management-next {
   display: grid;
   grid-template-columns: 1.6fr 1fr;
@@ -223,6 +233,8 @@ const actions = computed(() => [
   border: 1px solid var(--line);
   border-left: 4px solid var(--forest);
   background: var(--surface);
+  border-radius: 12px;
+  box-shadow: 0 3px 12px #17211504;
 }
 .management-next h2 {
   font-size: clamp(23px, 2.3vw, 32px);
@@ -239,6 +251,7 @@ const actions = computed(() => [
   border-left: 1px solid var(--line);
   padding-left: 28px;
   align-self: center;
+  color: var(--ink-2);
 }
 .management-next aside p {
   font-size: 13px;
@@ -259,6 +272,7 @@ const actions = computed(() => [
   margin-top: 20px;
 }
 .management-counts > a {
+  position: relative;
   display: grid;
   gap: 10px;
   background: var(--surface);
@@ -266,9 +280,18 @@ const actions = computed(() => [
   padding: 22px;
   text-decoration: none;
   color: var(--ink);
+  border-radius: 10px;
+}
+.management-counts .icon {
+  position: absolute;
+  right: 20px;
+  top: 23px;
+  color: var(--muted);
 }
 .management-counts strong {
-  font-size: 30px;
+  font-size: 32px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
 }
 .management-counts span {
   font-size: 12px;
@@ -304,6 +327,7 @@ const actions = computed(() => [
   border: 1px solid var(--line);
   color: var(--ink);
   text-decoration: none;
+  border-radius: 10px;
 }
 .management-actions small {
   font-size: 11px;
@@ -316,6 +340,10 @@ const actions = computed(() => [
 .management-actions h3 span {
   float: right;
   color: var(--forest);
+  transition: transform 180ms var(--ease-out);
+}
+.management-actions > a:hover h3 span {
+  transform: translateX(4px);
 }
 .management-actions p {
   font-size: 12px;
@@ -324,8 +352,19 @@ const actions = computed(() => [
   line-height: 1.8;
 }
 .management-actions > a:hover,
-.management-counts > a:hover {
-  border-color: var(--forest);
+.management-counts > a:hover,
+.management-plans > a:hover {
+  border-color: color-mix(in srgb, var(--forest) 50%, var(--line));
+  box-shadow: 0 5px 18px #17211508;
+  transform: translateY(-2px);
+}
+.management-actions > a,
+.management-counts > a,
+.management-plans > a {
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms var(--ease-out);
 }
 .management-plans {
   display: grid;
@@ -340,6 +379,7 @@ const actions = computed(() => [
   border: 1px solid var(--line);
   text-decoration: none;
   color: var(--ink);
+  border-radius: 10px;
 }
 .management-plans span,
 .management-plans small {
@@ -352,6 +392,7 @@ const actions = computed(() => [
   border-top: 1px solid var(--line);
   font-size: 13px;
   line-height: 1.9;
+  color: var(--ink-2);
 }
 .responsibility-note p {
   color: var(--muted);

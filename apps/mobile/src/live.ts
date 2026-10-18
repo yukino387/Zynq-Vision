@@ -5,7 +5,7 @@ import type {
   PlatformEvent,
   Telemetry,
 } from "@vision/contracts";
-import { request, session } from "./state";
+import { request, session, logout, requireLogin } from "./state";
 
 export interface LiveFrame {
   frameId: number;
@@ -51,13 +51,9 @@ export const liveDevice = computed<DeviceSnapshot | null>(
 );
 /** 服务器与设备都在线，才算真正能收到画面。 */
 export const liveOnline = computed(
-  () =>
-    live.ready &&
-    liveDevice.value?.connectionState === "ONLINE",
+  () => live.ready && liveDevice.value?.connectionState === "ONLINE",
 );
-export const liveDetections = computed(
-  () => live.frame?.detections ?? null,
-);
+export const liveDetections = computed(() => live.frame?.detections ?? null);
 export const frameAge = computed(() =>
   live.frame ? Math.max(0, live.now - live.lastFrameAt) : null,
 );
@@ -103,7 +99,9 @@ export async function refreshDevices() {
   if (!session.token || refreshing) return live.devices;
   refreshing = true;
   try {
-    const list = await request<DeviceSnapshot[]>("/devices/snapshot");
+    const list = (await request<DeviceSnapshot[]>("/devices/snapshot")).filter(
+      (d) => d.type !== "SIMULATOR",
+    );
     live.devices = list;
     if (!list.some((d) => d.id === live.deviceId)) {
       const preferred =
@@ -165,8 +163,11 @@ function handle(event: PlatformEvent) {
     const now = Date.now();
     arrivals = [...arrivals.filter((at) => now - at < 2000), now];
     const span =
-      arrivals.length > 1 ? (arrivals[arrivals.length - 1]! - arrivals[0]!) / 1000 : 0;
-    live.fps = span > 0 ? Math.round(((arrivals.length - 1) / span) * 10) / 10 : 0;
+      arrivals.length > 1
+        ? (arrivals[arrivals.length - 1]! - arrivals[0]!) / 1000
+        : 0;
+    live.fps =
+      span > 0 ? Math.round(((arrivals.length - 1) / span) * 10) / 10 : 0;
     return;
   }
   if (event.type === "device.telemetry") {
@@ -265,8 +266,8 @@ export function startLive() {
     // 鉴权失败重连也不会成功，直接回到登录态。
     if (result?.code === 1008) {
       stopLive();
-      session.token = "";
-      uni.removeStorageSync("vision.token");
+      logout();
+      requireLogin();
       return;
     }
     scheduleReconnect();
@@ -301,7 +302,7 @@ export function stopLive() {
 export function frameUsable(maxAge = 3000) {
   return Boolean(
     live.frame &&
-      liveDevice.value?.connectionState === "ONLINE" &&
-      Date.now() - live.lastFrameAt <= maxAge,
+    liveDevice.value?.connectionState === "ONLINE" &&
+      Math.max(live.now, Date.now()) - live.lastFrameAt <= maxAge,
   );
 }

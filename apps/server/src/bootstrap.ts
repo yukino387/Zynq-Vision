@@ -40,7 +40,7 @@ export async function createApp(logging = true) {
   );
   app.useGlobalFilters(new Errors());
   await app.register(multipart, {
-    limits: { fileSize: 20 * 1024 * 1024, files: 1, fields: 2, parts: 3 },
+    limits: { fileSize: 20 * 1024 * 1024, files: 1, fields: 4, parts: 5 },
   });
   const server = app.getHttpAdapter().getInstance();
   server.addHook("onResponse", async (req, reply) => {

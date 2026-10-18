@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from "vue";
+import { ref, watch } from "vue";
 import { session } from "../state";
 
 const props = defineProps<{
@@ -10,17 +10,14 @@ const props = defineProps<{
 const source = ref(""),
   failed = ref(false),
   loading = ref(false);
-/** 同一张证据在列表与详情间复用，避免重复下载。 */
-const cache = new Map<string, string>();
+let generation = 0;
 
 async function load() {
+  const current = ++generation;
+  source.value = "";
+  failed.value = false;
+  loading.value = false;
   if (!props.assetId || !session.token) return;
-  const hit = cache.get(props.assetId);
-  if (hit) {
-    source.value = hit;
-    failed.value = false;
-    return;
-  }
   loading.value = true;
   failed.value = false;
   try {
@@ -28,21 +25,22 @@ async function load() {
       url: `${session.server}/api/assets/${props.assetId}/content`,
       header: { authorization: `Bearer ${session.token}` },
     });
+    if (current !== generation) return;
     if (result.statusCode === 200 && result.tempFilePath) {
-      cache.set(props.assetId, result.tempFilePath);
       source.value = result.tempFilePath;
     } else {
       failed.value = true;
     }
   } catch {
-    failed.value = true;
+    if (current === generation) failed.value = true;
   } finally {
-    loading.value = false;
+    if (current === generation) loading.value = false;
   }
 }
 
-onMounted(load);
-watch(() => props.assetId, load);
+watch(() => [props.assetId, session.server, session.token], load, {
+  immediate: true,
+});
 </script>
 
 <template>
@@ -54,7 +52,11 @@ watch(() => props.assetId, load);
       :mode="mode ?? 'aspectFill'"
     />
     <view v-else class="placeholder">
-      <text>{{ failed ? (label ?? "图像不可用") : "图像加载中…" }}</text>
+      <text>{{
+        loading
+          ? "图像加载中…"
+          : (label ?? (failed ? "图像不可用" : "暂无图像"))
+      }}</text>
     </view>
   </view>
 </template>
@@ -64,7 +66,7 @@ watch(() => props.assetId, load);
   position: relative;
   width: 100%;
   height: 100%;
-  background: #dcded5;
+  background: #e8f0f2;
   overflow: hidden;
 }
 .image {
@@ -78,8 +80,8 @@ watch(() => props.assetId, load);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #6b775e;
-  font-size: 10px;
+  color: #637d87;
+  font-size: 11px;
   text-align: center;
   padding: 6px;
 }

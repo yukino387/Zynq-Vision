@@ -14,14 +14,50 @@ import {
 import type { FastifyReply } from "fastify";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
-import { manifestSchema, trainingOptionsSchema } from "@vision/contracts";
-import { validateZynqPackage } from "./zynq-profile.js";
+import {
+  manifestSchema,
+  trainingOptionsSchema,
+  type ModelManifest,
+} from "@vision/contracts";
+import {
+  DEFAULT_CLASSES,
+  inspectZynqPackage,
+  validateZynqPackage,
+  zynqManifest,
+} from "./zynq-profile.js";
 import { Db } from "../core/db.js";
 import { Roles, type Request } from "../core/auth.js";
 import { parse, DomainError } from "../core/errors.js";
 import { listing, page } from "../core/list.js";
 import { ModelsService } from "./models.service.js";
 import { AssetsService } from "../assets/assets.service.js";
+function normalizeClasses(raw: string): string[] {
+  if (!raw.trim()) return [...DEFAULT_CLASSES];
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    value = raw.split(",");
+  }
+  if (!Array.isArray(value))
+    throw new DomainError("VALIDATION_ERROR", "Classes must be a list", 400);
+  const names = value.map((item) => String(item).trim()).filter(Boolean);
+  if (names.length > 6)
+    throw new DomainError(
+      "VALIDATION_ERROR",
+      "At most six classes are supported",
+      400,
+    );
+  const classes = [...names];
+  for (let i = classes.length; i < 6; i++) classes.push(`_unused_${i}`);
+  if (new Set(classes).size !== 6 || classes.some((name) => name.length > 40))
+    throw new DomainError(
+      "VALIDATION_ERROR",
+      "Classes must be six unique names up to 40 characters",
+      400,
+    );
+  return classes;
+}
 @Roles("ADMIN", "ENGINEER")
 @Controller("api/models")
 export class ModelsController {
@@ -65,7 +101,9 @@ export class ModelsController {
   }
   @Post("import") async upload(@Req() req: Request) {
     let content: Buffer | null = null,
-      metadata: unknown = null;
+      metadata: unknown = null,
+      name = "",
+      classes = "";
     for await (const part of req.parts()) {
       if (part.type === "file") {
         content = await part.toBuffer();
@@ -75,32 +113,60 @@ export class ModelsController {
             "Artifact exceeds 20MB",
             413,
           );
-      } else if (part.fieldname === "metadata")
-        metadata = JSON.parse(String(part.value));
+      } else if (part.fieldname === "metadata") {
+        try {
+          metadata = JSON.parse(String(part.value));
+        } catch {
+          throw new DomainError(
+            "VALIDATION_ERROR",
+            "Invalid metadata JSON",
+            400,
+          );
+        }
+      } else if (part.fieldname === "name") name = String(part.value);
+      else if (part.fieldname === "classes") classes = String(part.value);
     }
     if (!content)
       throw new DomainError("VALIDATION_ERROR", "Weights required", 400);
-    const dto = parse(
-      z
-        .object({
-          name: z.string().min(1),
-          version: z.string().min(1),
-          manifest: manifestSchema,
-        })
-        .strict(),
-      metadata,
-    );
-    if (
-      createHash("sha256").update(content).digest("hex") !==
-        dto.manifest.weights.sha256 ||
-      content.length !== dto.manifest.weights.size
-    )
-      throw new DomainError(
-        "CHECKSUM_ERROR",
-        "Manifest checksum mismatch",
-        422,
+
+    let dto: { name: string; version: string; manifest: ModelManifest };
+    if (metadata != null) {
+      // 兼容旧客户端 / 测试：仍允许显式提交 manifest。
+      dto = parse(
+        z
+          .object({
+            name: z.string().min(1),
+            version: z.string().min(1),
+            manifest: manifestSchema,
+          })
+          .strict(),
+        metadata,
       );
-    validateZynqPackage(content, dto.version, dto.manifest);
+      if (
+        createHash("sha256").update(content).digest("hex") !==
+          dto.manifest.weights.sha256 ||
+        content.length !== dto.manifest.weights.size
+      )
+        throw new DomainError(
+          "CHECKSUM_ERROR",
+          "Manifest checksum mismatch",
+          422,
+        );
+      validateZynqPackage(content, dto.version, dto.manifest);
+    } else {
+      // 新路径：版本、通道从包内读取，清单由服务端生成。
+      const inspected = inspectZynqPackage(content);
+      const trimmed = name.trim();
+      if (!trimmed)
+        throw new DomainError("VALIDATION_ERROR", "Model name required", 400);
+      const manifest = zynqManifest(
+        content,
+        inspected.channels,
+        normalizeClasses(classes),
+      );
+      validateZynqPackage(content, inspected.version, manifest);
+      dto = { name: trimmed, version: inspected.version, manifest };
+    }
     const asset = await this.assets.store(
       content,
       "MODEL_ARTIFACT",
@@ -150,11 +216,6 @@ export class ModelsController {
         where: { id },
         include: { benchmarks: true },
       });
-      if (!model.benchmarks.length)
-        throw new DomainError(
-          "INVALID_STATE",
-          "请先完成模型验证，再由管理员记录现场验收意见",
-        );
       const metrics = model.metrics as Prisma.JsonObject;
       return tx.model.update({
         where: { id },
@@ -188,7 +249,13 @@ export class ModelsController {
 export class TrainingsController {
   constructor(@Inject(Db) private db: Db) {}
   @Get() async list(@Query() query: unknown) {
-    const { q, args } = listing(query);
+    const { q, args } = listing(query, [
+      "name",
+      "status",
+      "createdAt",
+      "updatedAt",
+      "source",
+    ]);
     const rows = await this.db.trainingJob.findMany({
       ...args,
       include: { dataset: true, models: true },
@@ -224,11 +291,41 @@ export class TrainingsController {
     return this.db.$transaction(async (tx) => {
       const dataset = await tx.dataset.findUniqueOrThrow({
         where: { id: dto.datasetId },
+        include: {
+          items: {
+            orderBy: { sampleId: "asc" },
+            include: { sample: { select: { source: true } } },
+          },
+        },
       });
       if (dataset.status !== "FROZEN")
         throw new DomainError(
           "INVALID_STATE",
-          "Training requires frozen dataset",
+          "请先审核样本并锁定数据集版本，再开始训练",
+        );
+      if (dataset.items.length < 2)
+        throw new DomainError("INVALID_STATE", "训练至少需要 2 张已标注样本");
+      if (dataset.items.some((item) => item.sample.source === "SIMULATION"))
+        throw new DomainError(
+          "INVALID_STATE",
+          "演示数据集不能用于现场训练，请选择真实样本数据集",
+        );
+      const checksum = createHash("sha256")
+        .update(
+          JSON.stringify(
+            dataset.items.map((item) => ({
+              sampleId: item.sampleId,
+              annotationSetId: item.annotationSetId,
+              split: item.split,
+              snapshot: item.snapshot,
+            })),
+          ),
+        )
+        .digest("hex");
+      if (checksum !== dataset.checksum)
+        throw new DomainError(
+          "INVALID_STATE",
+          "数据集快照校验失败，请创建新版本并重新锁定后训练",
         );
       const training = await tx.trainingJob.create({
         data: { name: dto.name, datasetId: dto.datasetId, source: "IMPORT" },

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
+import { chinese } from "@vision/shared";
+import type { Role } from "@vision/contracts";
 import { useAuthStore } from "../stores/auth";
 import { errorText, post } from "../api";
 import { landingFor } from "../navigation";
@@ -15,6 +17,7 @@ const mode = ref<"login" | "register">("login"),
   name = ref(""),
   code = ref(""),
   verified = ref(false),
+  grantedRole = ref<Role | null>(null),
   error = ref(""),
   busy = ref(false);
 const heading = computed(() =>
@@ -24,19 +27,26 @@ const heading = computed(() =>
       ? "创建账号"
       : "验证注册码",
 );
+const roleName = computed(() =>
+  grantedRole.value ? chinese(grantedRole.value) : "账号",
+);
 function switchMode(next: "login" | "register") {
   mode.value = next;
   error.value = "";
   password.value = "";
   confirm.value = "";
   verified.value = false;
+  grantedRole.value = null;
 }
 async function submit() {
   busy.value = true;
   error.value = "";
   try {
     if (mode.value === "register" && !verified.value) {
-      await post("/auth/registration/verify", { code: code.value });
+      const result = await post<{ role: Role }>("/auth/registration/verify", {
+        code: code.value,
+      });
+      grantedRole.value = result.role;
       verified.value = true;
       return;
     }
@@ -74,13 +84,14 @@ async function submit() {
       <div class="auth-product">视觉物联网平台</div>
       <form class="login-form" @submit.prevent="submit">
         <h1>{{ heading }}</h1>
+        <p v-if="auth.notice" class="banner" role="status">{{ auth.notice }}</p>
         <p class="muted auth-caption">
           {{
             mode === "login"
               ? "欢迎回来，请登录以继续工作"
               : verified
-                ? "注册码已验证，填写账号信息即可加入"
-                : "请输入管理员提供的一次性注册码"
+                ? `${roleName}注册码已验证，填写账号信息即可加入`
+                : "请输入管理员签发的一次性注册码"
           }}
         </p>
         <template v-if="mode === 'register' && !verified">
@@ -127,9 +138,9 @@ async function submit() {
               :autocomplete="
                 mode === 'register' ? 'new-password' : 'current-password'
               "
-              :minlength="mode === 'register' ? 12 : undefined"
+              :minlength="mode === 'register' ? 8 : undefined"
               maxlength="100"
-              :placeholder="mode === 'register' ? '至少 12 位' : '请输入密码'"
+              :placeholder="mode === 'register' ? '至少 8 位' : '请输入密码'"
           /></label>
           <label v-if="mode === 'register'"
             >确认密码<input
@@ -177,6 +188,7 @@ async function submit() {
           class="text-button"
           @click="
             verified = false;
+            grantedRole = null;
             error = '';
           "
         >

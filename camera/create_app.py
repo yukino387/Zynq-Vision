@@ -24,18 +24,28 @@ schema.chmod(0o666)
 schema.write_text(schema.read_text(encoding="utf-8-sig"), encoding="utf-8")
 client.set_embedded_sw_repo(level="LOCAL", path=["C:/AMDDesignTools/2026.1/Vitis/data/embeddedsw",
     (root / "camera/build/lwip_repo").as_posix()])
-if not (workspace / "camera_platform_live/vitis-comp.json").exists():
+platform_file = workspace / "camera_platform_live/vitis-comp.json"
+xsa = root / "hardware/camera/build/camera_cnn.xsa"
+if not platform_file.exists():
     platform_component = client.create_platform_component(name="camera_platform_live",
-        hw_design=(root / "hardware/camera/build/camera_cnn.xsa").as_posix(),
+        hw_design=xsa.as_posix(),
         os="standalone", cpu="ps7_cortexa9_0", domain_name="camera_domain")
 else:
     platform_component = client.get_component(name="camera_platform_live")
-    platform_component.update_hw(hw_design=(root / "hardware/camera/build/camera_cnn.xsa").as_posix())
+    # Re-importing an unchanged XSA forces a full BSP regen; only do it when the
+    # hardware actually changed.
+    if xsa.stat().st_mtime > platform_file.stat().st_mtime:
+        platform_component.update_hw(hw_design=xsa.as_posix())
 domain = platform_component.get_domain("camera_domain")
 domain.set_config(option="proc", param="proc_extra_compiler_flags",
     value=" -O2 -g -Wall -Wextra -fno-tree-loop-distribute-patterns -DFPU_HARD_FLOAT_ABI_ENABLED=1 -DLWIP_ALLOW_MEM_FREE_FROM_OTHER_CONTEXT=1")
-domain.set_lib(lib_name="lwip220")
-domain.set_lib(lib_name="xilffs")
+# Vitis 2026.1 fails to re-add an already configured library when the BSP uses
+# the local lwIP repo; only add what is actually missing.
+configured_libraries = {item["name"] for item in domain.get_libs()}
+if "lwip220" not in configured_libraries:
+    domain.set_lib(lib_name="lwip220")
+if "xilffs" not in configured_libraries:
+    domain.set_lib(lib_name="xilffs")
 domain.set_config(option="lib", lib_name="xilffs", param="XILFFS_enable_exfat", value="true")
 domain.set_config(option="lib", lib_name="lwip220", param="lwip220_api_mode", value="RAW_API")
 domain.set_config(option="lib", lib_name="lwip220", param="lwip220_dhcp", value="false")
@@ -71,12 +81,13 @@ app.import_files(from_loc=driver.as_posix(), files=["xconv.c", "xconv.h", "xconv
                  is_skip_copy_sources=True)
 text = config.read_text(encoding="utf-8")
 settings = {
-    "USER_INCLUDE_DIRECTORIES": f'"{root.as_posix()}" "{driver.as_posix()}"',
+    "USER_INCLUDE_DIRECTORIES": f'"{root.as_posix()}" "{root.as_posix()}/camera" "{root.as_posix()}/camera/build/firmware" "{driver.as_posix()}"',
     "USER_COMPILE_OPTIMIZATION_LEVEL": "-O2",
     "USER_COMPILE_OTHER_FLAGS": "-mfpu=neon",
     "USER_COMPILE_SOURCES": "\n" + "\n".join(f'"{path.as_posix()}"' for path in [
         driver / "xconv.c", root / "camera/int8/live_main.cpp", root / "camera/int8/gray.cpp",
-        root / "camera/int8/weights.S", root / "camera/int8/model_store.cpp", root / "camera/camera_input.cpp", root / "camera/udp_output.cpp"]),
+        root / "camera/int8/weights.S", root / "camera/int8/model_store.cpp", root / "camera/camera_input.cpp", root / "camera/udp_output.cpp",
+        root / "camera/firmware_ota.cpp", root / "camera/firmware_qspi.cpp"]),
     "USER_COMPILE_DEFINITIONS": "SDT",
     "USER_LINK_OTHER_FLAGS": '"-Wl,--defsym,_HEAP_SIZE=0x100000 -Wl,--defsym,_STACK_SIZE=0x10000"',
     "USER_LINKER_SCRIPT": '"${CMAKE_SOURCE_DIR}/lscript.ld"',

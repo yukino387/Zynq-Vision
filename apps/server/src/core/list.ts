@@ -19,6 +19,8 @@ export function listing(
     ];
   if (q.status && fields.includes("status")) where.status = q.status;
   if (q.source && fields.includes("source")) where.source = q.source;
+  if (q.realOnly === "true" && fields.includes("source"))
+    where.NOT = { source: "SIMULATION" };
   if (q.from || q.to)
     where.createdAt = {
       ...(q.from ? { gte: new Date(q.from) } : {}),

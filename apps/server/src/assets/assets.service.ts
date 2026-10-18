@@ -63,7 +63,13 @@ export class AssetsService {
     width?: number,
     height?: number,
   ) {
-    const key = `${kind === "MODEL_ARTIFACT" ? "models" : "samples"}/${randomUUID()}`;
+    const key = `${
+      kind === "MODEL_ARTIFACT"
+        ? "models"
+        : kind === "FIRMWARE_PACKAGE"
+          ? "firmware"
+          : "samples"
+    }/${randomUUID()}`;
     const path = this.path(key);
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, data, { flag: "wx" });

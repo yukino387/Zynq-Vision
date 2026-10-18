@@ -20,6 +20,17 @@ export class DatasetsService {
           "INVALID_STATE",
           "Only DRAFT datasets can be changed",
         );
+      const retained = await tx.datasetItem.findMany({
+        where: { datasetId: id, sampleId: { notIn: sampleIds } },
+        select: { snapshot: true },
+      });
+      const signatures = new Set(
+        retained.map((item) =>
+          JSON.stringify(
+            (item.snapshot as { classes?: string[] }).classes ?? [],
+          ),
+        ),
+      );
       for (const sampleId of sampleIds) {
         const sample = await tx.sample.findUniqueOrThrow({
           where: { id: sampleId, deletedAt: null },
@@ -27,7 +38,6 @@ export class DatasetsService {
             task: { include: { plan: true } },
             assets: true,
             annotations: {
-              where: { status: "COMPLETE" },
               orderBy: { version: "desc" },
               take: 1,
               include: { boxes: true },
@@ -35,10 +45,10 @@ export class DatasetsService {
           },
         });
         const annotation = sample.annotations[0];
-        if (!annotation)
+        if (!annotation || annotation.status !== "COMPLETE")
           throw new DomainError(
             "INVALID_STATE",
-            "Complete annotations before adding sample",
+            "请先完成最新标注，再将图片加入数据集",
           );
         const preview = sample.assets.find((a) => a.kind === "PREVIEW");
         if (!preview)
@@ -47,36 +57,45 @@ export class DatasetsService {
             "Sample preview missing",
             404,
           );
+        const snapshot = {
+          ...(sample.task?.plan
+            ? {
+                planId: sample.task.plan.id,
+                classes:
+                  (sample.task.plan.rules as { classes?: string[] }).classes ??
+                  [],
+              }
+            : {}),
+          source: sample.source,
+          hard: sample.hard,
+          previewId: preview.id,
+          width: preview.width,
+          height: preview.height,
+          sha256: preview.sha256,
+          assets: sample.assets.map((a) => ({
+            id: a.id,
+            kind: a.kind,
+            sha256: a.sha256,
+          })),
+          boxes: annotation.boxes,
+        } as unknown as Prisma.InputJsonValue;
+        signatures.add(
+          JSON.stringify((snapshot as { classes?: string[] }).classes ?? []),
+        );
+        if (signatures.size > 1)
+          throw new DomainError(
+            "INVALID_STATE",
+            "不能混入类别不同的方案样本或未关联方案的历史样本，请分别整理数据集",
+          );
         await tx.datasetItem.upsert({
           where: { datasetId_sampleId: { datasetId: id, sampleId } },
           create: {
             datasetId: id,
             sampleId,
             annotationSetId: annotation.id,
-            snapshot: {
-              ...(sample.task?.plan
-                ? {
-                    planId: sample.task.plan.id,
-                    classes:
-                      (sample.task.plan.rules as { classes?: string[] })
-                        .classes ?? [],
-                  }
-                : {}),
-              source: sample.source,
-              hard: sample.hard,
-              previewId: preview.id,
-              width: preview.width,
-              height: preview.height,
-              sha256: preview.sha256,
-              assets: sample.assets.map((a) => ({
-                id: a.id,
-                kind: a.kind,
-                sha256: a.sha256,
-              })),
-              boxes: annotation.boxes,
-            } as unknown as Prisma.InputJsonValue,
+            snapshot,
           },
-          update: {},
+          update: { annotationSetId: annotation.id, snapshot },
         });
       }
       return tx.dataset.findUniqueOrThrow({
@@ -90,12 +109,34 @@ export class DatasetsService {
       const dataset = await tx.dataset.findUniqueOrThrow({
         where: { id },
         include: {
-          items: { orderBy: { sampleId: "asc" }, include: { sample: true } },
+          items: {
+            orderBy: { sampleId: "asc" },
+            include: {
+              sample: {
+                include: {
+                  annotations: { orderBy: { version: "desc" }, take: 1 },
+                },
+              },
+            },
+          },
         },
       });
       if (dataset.status === "FROZEN") return dataset;
       if (!dataset.items.length)
         throw new DomainError("INVALID_STATE", "Cannot freeze empty dataset");
+      if (
+        new Set(
+          dataset.items.map((item) =>
+            JSON.stringify(
+              (item.snapshot as { classes?: string[] }).classes ?? [],
+            ),
+          ),
+        ).size > 1
+      )
+        throw new DomainError(
+          "INVALID_STATE",
+          "数据集混用了不同类别的方案，请移除不匹配的样本后再锁定版本",
+        );
       if (
         dataset.items.some(
           (item) => item.sample.status !== "REVIEWED" || item.sample.deletedAt,
@@ -104,6 +145,17 @@ export class DatasetsService {
         throw new DomainError(
           "INVALID_STATE",
           "请先由管理员审核通过全部样本，再冻结训练版本",
+        );
+      if (
+        dataset.items.some(
+          (item) =>
+            item.sample.annotations[0]?.id !== item.annotationSetId ||
+            item.sample.annotations[0]?.status !== "COMPLETE",
+        )
+      )
+        throw new DomainError(
+          "INVALID_STATE",
+          "部分图片的标注已更新，请先在数据集中更新标注快照，再锁定版本",
         );
       if (dataset.status === "DRAFT") {
         await tx.dataset.update({ where: { id }, data: { status: "READY" } });
@@ -153,6 +205,20 @@ export class DatasetsService {
       });
     });
   }
+  async removeItem(id: string, sampleId: string) {
+    return this.db.$transaction(async (tx) => {
+      const dataset = await tx.dataset.findUniqueOrThrow({ where: { id } });
+      if (dataset.status !== "DRAFT")
+        throw new DomainError(
+          "INVALID_STATE",
+          "已锁定的数据集不能修改，请先创建新版本",
+        );
+      await tx.datasetItem.delete({
+        where: { datasetId_sampleId: { datasetId: id, sampleId } },
+      });
+      return { id, sampleId };
+    });
+  }
   async export(id: string) {
     const dataset = await this.db.dataset.findUniqueOrThrow({
       where: { id },
@@ -198,11 +264,19 @@ export class DatasetsService {
               createHash("sha256").update(data).digest("hex") !== asset.sha256
             )
               throw new Error("Asset checksum mismatch");
+            const extension =
+              (
+                {
+                  "image/jpeg": ".jpg",
+                  "image/png": ".png",
+                  "image/webp": ".webp",
+                } as Record<string, string>
+              )[asset.mimeType] ?? ".raw";
             zip.append(data, {
               name:
                 asset.kind === "PREVIEW"
-                  ? `images/${item.sampleId}.jpg`
-                  : `originals/${item.sampleId}/${asset.id}${asset.mimeType === "image/jpeg" ? ".jpg" : ".raw"}`,
+                  ? `images/${item.sampleId}${extension}`
+                  : `originals/${item.sampleId}/${asset.id}${extension}`,
             });
           }
           zip.append(JSON.stringify(item.snapshot), {

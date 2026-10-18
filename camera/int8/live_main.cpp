@@ -1,5 +1,6 @@
 #include "model.h"
 #include "model_store.h"
+#include "firmware_ota.h"
 #include "gray.h"
 #include "camera/camera_input.h"
 #include "camera/udp_output.h"
@@ -55,6 +56,7 @@ static unsigned forward(XConv& engine,unsigned current,uint32_t frame,bool previ
         while(!XConv_IsDone(&engine)) {
             XTime_GetTime(&now);
             if(now-begin>2*(COUNTS_PER_SECOND)) return 4;
+            firmware_watchdog_kick();
             udp_poll();
             if(pending && camera_ready()) {
                 if(!camera_finish(pixels[1-current])) return 2;
@@ -82,16 +84,33 @@ static unsigned forward(XConv& engine,unsigned current,uint32_t frame,bool previ
 }
 
 int main() {
+    // Start the watchdog and load the OTA record before any init that can fail:
+    // a trial image that cannot reach the main loop must still reset and roll back.
+    firmware_init();
     XConv engine;
     if(XConv_Initialize(&engine,0x43c00000)!=0) return 1;
     Xil_DCacheFlush();
     if(!camera_udp_init()) return 1;
     model_store_init();
     CameraStatus status={0x31545343,0,0x7020,0,0,0,0,0,0,0,0,0};
-    while(!camera_init()) {
-        status.errors=1;udp_pause();udp_send_status(status);
-        while(!udp_running()){udp_poll();usleep(1000);}
+    XTime trial_deadline=0;
+    if(firmware_trial_pending()) {
+        XTime_GetTime(&trial_deadline);
+        trial_deadline+=20ULL*COUNTS_PER_SECOND;
     }
+    while(!camera_init()) {
+        firmware_watchdog_kick();
+        firmware_service();
+        if(firmware_trial_pending()) {
+            XTime now;XTime_GetTime(&now);
+            if(now>=trial_deadline) firmware_confirm_fail();
+        }
+        status.errors=1;udp_pause();udp_send_status(status);
+        while(!udp_running()){
+            firmware_watchdog_kick();firmware_service();udp_poll();usleep(1000);
+        }
+    }
+    if(firmware_trial_pending()) firmware_confirm_ok();
     unsigned current=0;
     bool pending=false;
     bool frame_captured=false,armed=false;
@@ -100,7 +119,10 @@ int main() {
     for(uint32_t frame=0;;++frame) {
         udp_poll();
         model_service();
+        firmware_watchdog_kick();
+        firmware_service();
         while((!udp_running() || !model_available()) && !model_test_pending()) {
+            firmware_watchdog_kick();firmware_service();
             udp_poll(); model_service();
             status.errors=model_available()?status.errors:5;
             static XTime heartbeat=0;XTime now;XTime_GetTime(&now);

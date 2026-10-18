@@ -6,6 +6,7 @@ import type { Asset } from "../types";
 import type { DetectionBox } from "@vision/contracts";
 const props = defineProps<{
   compact?: boolean;
+  operator?: boolean;
   jpeg?: string;
   assets?: Asset[];
   boxes?: DetectionBox[] | null;
@@ -113,7 +114,7 @@ onUnmounted(() => {
           @click="zoom = Math.max(0.25, zoom - 0.25)"
         >
           −</button
-        ><span class="mono"
+        ><span v-if="!operator" class="mono"
           >{{ Math.round(zoom * (actual ? 1 : fitWidth / size) * 100) }}%</span
         ><button
           aria-label="放大"
@@ -123,32 +124,34 @@ onUnmounted(() => {
         >
           +</button
         ><button @click="fit">适应窗口</button
-        ><button
-          v-if="compact"
-          :aria-expanded="toolsOpen"
-          @click="toolsOpen = !toolsOpen"
-        >
-          图像工具</button
-        ><template v-if="!compact || toolsOpen"
+        ><template v-if="!operator"
           ><button
-            @click="
-              actual = true;
-              zoom = 1;
-              offset = { x: 0, y: 0 };
-            "
+            v-if="compact"
+            :aria-expanded="toolsOpen"
+            @click="toolsOpen = !toolsOpen"
           >
-            1:1</button
-          ><button @click="showBoxes = !showBoxes">
-            {{ showBoxes ? "隐藏框" : "显示框" }}</button
-          ><select v-if="assets" v-model="mode" aria-label="图像类型">
-            <option value="PREVIEW">预览图</option>
-            <option
-              v-if="assets.some((a) => a.kind === 'MODEL_INPUT_PREVIEW')"
-              value="MODEL_INPUT_PREVIEW"
+            图像工具</button
+          ><template v-if="!compact || toolsOpen"
+            ><button
+              @click="
+                actual = true;
+                zoom = 1;
+                offset = { x: 0, y: 0 };
+              "
             >
-              重建输入
-            </option>
-          </select></template
+              1:1</button
+            ><button @click="showBoxes = !showBoxes">
+              {{ showBoxes ? "隐藏框" : "显示框" }}</button
+            ><select v-if="assets" v-model="mode" aria-label="图像类型">
+              <option value="PREVIEW">预览图</option>
+              <option
+                v-if="assets.some((a) => a.kind === 'MODEL_INPUT_PREVIEW')"
+                value="MODEL_INPUT_PREVIEW"
+              >
+                重建输入
+              </option>
+            </select></template
+          ></template
         >
       </div>
     </div>

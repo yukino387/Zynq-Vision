@@ -42,6 +42,7 @@ try {
       capabilities: {
         ...baseCapabilities,
         modelUpdate: true,
+        firmwareUpdate: true,
         modelVersion: true,
         planUpdate: true,
       },

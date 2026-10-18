@@ -91,7 +91,22 @@ export class SamplesService {
       if (this.locks.get(key) === next) this.locks.delete(key);
     }
   }
+  private async requireOpenTask(
+    taskId: string | undefined,
+    db: Prisma.TransactionClient = this.db,
+  ) {
+    if (!taskId) return;
+    const task = await db.task.findUniqueOrThrow({
+      where: { id: taskId, status: { not: "DELETED" } },
+    });
+    if (task.status !== "OPEN")
+      throw new DomainError(
+        "INVALID_STATE",
+        "采样任务已完成，请重新开放任务或选择其他任务",
+      );
+  }
   async capture(dto: CaptureDto, actor: string, requestId: string) {
+    await this.requireOpenTask(dto.taskId);
     return this.idempotent(
       dto.idempotencyKey,
       actor,
@@ -171,6 +186,7 @@ export class SamplesService {
             : [];
           const quality = await this.assets.quality(frame.preview);
           const sample = await this.db.$transaction(async (tx) => {
+            await this.requireOpenTask(dto.taskId, tx);
             const set = await tx.captureSet.upsert({
               where: { clientId: dto.captureSetClientId ?? dto.idempotencyKey },
               create: {
@@ -334,6 +350,7 @@ export class SamplesService {
     mime: string,
     actor: string,
   ) {
+    await this.requireOpenTask(dto.taskId);
     return this.idempotent(
       dto.idempotencyKey,
       actor,
@@ -375,6 +392,7 @@ export class SamplesService {
         );
         const quality = await this.assets.quality(preview);
         return this.db.$transaction(async (tx) => {
+          await this.requireOpenTask(dto.taskId, tx);
           const set = await tx.captureSet.upsert({
             where: { clientId: dto.captureSetClientId ?? dto.idempotencyKey },
             create: {

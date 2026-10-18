@@ -9,6 +9,12 @@ const pending = computed(
   failed = computed(
     () => queue.items.filter((i) => i.status === "FAILED").length,
   ),
+  eligible = computed(
+    () =>
+      queue.items.filter(
+        (i) => i.status !== "SYNCED" && i.server === session.server,
+      ).length,
+  ),
   editing = ref(""),
   note = ref("");
 function save() {
@@ -27,7 +33,7 @@ function save() {
       <text class="mono total">{{ queue.items.length }}</text>
     </view>
     <text class="subtitle"
-      >手机原图先保存在本机；网络恢复后在这里补传，不会丢失。</text
+      >手机原图先保存在本机，联网后自动补传。请在同步完成前保留应用数据。</text
     >
 
     <view class="status-card">
@@ -36,18 +42,29 @@ function save() {
           >● {{ session.online ? "网络可用" : "离线模式" }}</text
         >
         <text class="status-note"
-          >{{ pending }} 个待同步 · {{ failed }} 个失败 · 可安全退出</text
+          >{{ pending }} 个待同步 · {{ failed }} 个需重试</text
         >
       </view>
       <button
         class="primary sync-button"
         :loading="queue.syncing"
-        :disabled="queue.syncing || !session.token || !pending"
+        :disabled="
+          queue.syncing || !session.token || !session.online || !eligible
+        "
         @click="syncQueue(true)"
       >
         {{ queue.syncing ? "同步中…" : "同步全部" }}
       </button>
     </view>
+    <view
+      v-if="!session.token"
+      class="error"
+      @click="uni.navigateTo({ url: '/pages/login/index' })"
+      >登录后继续同步，点此登录 →</view
+    >
+    <text v-else-if="pending && !eligible" class="note"
+      >待同步样本属于其他服务器，请先切回对应服务器。</text
+    >
 
     <view v-if="!queue.items.length" class="empty">
       <text>暂无本地样本</text>
@@ -72,9 +89,11 @@ function save() {
         <text class="mono">重试 {{ item.attempts }}</text>
       </view>
       <text class="list-caption"
-        >{{ item.serverId ? `服务器记录 ${item.serverId.slice(-8)}` : "等待服务器确认" }}<text
-          v-if="item.captureSetClientId"
-        >
+        >{{
+          item.serverId
+            ? `服务器记录 ${item.serverId.slice(-8)}`
+            : "等待服务器确认"
+        }}<text v-if="item.captureSetClientId">
           · 采样组 {{ item.captureSetClientId.slice(-6) }}</text
         ></text
       >
@@ -82,7 +101,7 @@ function save() {
       <text class="note">{{ item.metadata.note || "无备注" }}</text>
       <view class="item-actions">
         <button
-          v-if="item.serverId"
+          v-if="item.serverId && item.server === session.server"
           @click="
             uni.navigateTo({ url: `/pages/sample/index?id=${item.serverId}` })
           "
@@ -90,7 +109,7 @@ function save() {
           查看样本
         </button>
         <button
-          v-if="item.status !== 'SYNCED'"
+          v-if="item.status === 'QUEUED' || item.status === 'FAILED'"
           @click="
             editing = item.id;
             note = String(item.metadata.note ?? '');
@@ -126,7 +145,7 @@ function save() {
 }
 .total {
   font-size: 26px;
-  color: #4d5b3f;
+  color: #486571;
   line-height: 1;
   padding-bottom: 4px;
 }
@@ -135,9 +154,9 @@ function save() {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  background: #f7f6ee;
-  border-top: 1px solid #b7bda9;
-  border-bottom: 1px solid #b7bda9;
+  background: #ffffff;
+  border-top: 1px solid #dce6e9;
+  border-bottom: 1px solid #dce6e9;
   padding: 14px;
   margin-bottom: 14px;
 }
@@ -157,30 +176,30 @@ function save() {
   color: #8f5f00;
 }
 .status-note {
-  font-size: 10px;
-  color: #6b775e;
+  font-size: 11px;
+  color: #637d87;
 }
 .sync-button {
   min-width: 96px;
   min-height: 42px;
   font-size: 12px;
-  border-radius: 2px;
+  border-radius: 12px;
   white-space: nowrap;
 }
 .queue-item {
   padding: 14px;
 }
 .time {
-  font-size: 10px;
-  color: #6b775e;
+  font-size: 11px;
+  color: #637d87;
 }
 .item-meta {
   display: flex;
   justify-content: space-between;
   gap: 8px;
   margin-top: 7px;
-  font-size: 10px;
-  color: #6b775e;
+  font-size: 11px;
+  color: #637d87;
 }
 .queue-item .note {
   margin: 6px 0 0;
@@ -203,5 +222,36 @@ function save() {
   display: block;
   margin-top: 6px;
   color: #8f5f00;
+}
+
+.status-card {
+  padding: 18px;
+  border: 1px solid #cbe4e1;
+  border-radius: 18px;
+  background: #eff8f6;
+  margin: 20px 0;
+  flex-wrap: wrap;
+}
+.status-note {
+  font-size: 12px;
+}
+.sync-button {
+  border-radius: 12px;
+  font-size: 13px;
+  min-height: 46px;
+}
+.queue-item {
+  padding: 18px;
+}
+.queue-item .note {
+  margin: 10px 0;
+}
+.item-meta,
+.time {
+  font-size: 11px;
+}
+.item-actions button {
+  font-size: 13px;
+  min-height: 44px;
 }
 </style>

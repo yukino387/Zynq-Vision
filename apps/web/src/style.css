@@ -269,20 +269,21 @@ main {
   min-width: 0;
   padding: 28px;
 }
-/* 路由过渡：只做很短的淡入上移，不炫技。子页切换走的也是这条路径。 */
-.page-enter-active,
-.page-leave-active {
+/* 统一元素根节点让多根视图和子页也能完成过渡。 */
+.page-enter-active {
   transition:
-    opacity 0.16s ease,
-    transform 0.16s ease;
+    opacity 0.22s ease,
+    transform 0.22s var(--ease-out);
+}
+.page-leave-active {
+  transition: opacity 0.1s ease;
 }
 .page-enter-from {
   opacity: 0;
-  transform: translateY(4px);
+  transform: translateY(8px);
 }
 .page-leave-to {
   opacity: 0;
-  transform: translateY(-2px);
 }
 @media (prefers-reduced-motion: reduce) {
   .page-enter-active,
@@ -852,16 +853,51 @@ td .mono {
   font-size: 12px;
 }
 .table-action {
-  color: var(--forest);
-  padding: 6px 10px;
-  margin: -6px -10px;
-  font-size: 13px;
-  border: 0;
-  background: none;
-  border-radius: var(--radius);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 7px 12px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 6px;
+  color: var(--ink-2);
+  text-decoration: none;
+  white-space: nowrap;
 }
-.table-action:hover {
+.table-action:hover:not(:disabled) {
   background: var(--surface-2);
+  border-color: var(--line-strong);
+}
+.table-action.danger {
+  color: var(--red);
+}
+.table-action.primary {
+  background: var(--forest);
+  border-color: var(--forest);
+  color: var(--forest-ink);
+}
+.table-action.primary:hover:not(:disabled) {
+  background: var(--forest-hover);
+  border-color: var(--forest-hover);
+}
+.row-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  white-space: normal;
+}
+td.action-cell {
+  width: 1%;
+}
+.action-cell > .row-actions {
+  width: max-content;
+  max-width: 360px;
 }
 .empty {
   padding: 55px 24px;
@@ -888,6 +924,32 @@ td .mono {
   z-index: 20;
   display: flex;
   justify-content: flex-end;
+}
+.drawer-enter-active,
+.drawer-leave-active {
+  transition: background-color 220ms ease;
+}
+.drawer-enter-active .drawer,
+.drawer-leave-active .drawer {
+  transition:
+    transform 260ms var(--ease-out),
+    opacity 220ms ease;
+}
+.drawer-enter-from,
+.drawer-leave-to {
+  background-color: transparent;
+}
+.drawer-enter-from .drawer,
+.drawer-leave-to .drawer {
+  transform: translateX(36px);
+  opacity: 0;
+}
+.drawer-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  min-width: 38px;
 }
 .drawer {
   width: min(760px, 95vw);

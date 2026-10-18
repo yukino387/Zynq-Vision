@@ -12,6 +12,7 @@ import { DevicesService } from "../devices/devices.service.js";
 import { CommandsService } from "../devices/commands.service.js";
 import { Prisma } from "@prisma/client";
 import { FileJobsService } from "../datasets/file-jobs.service.js";
+import { FirmwareService } from "../firmware/firmware.service.js";
 @Injectable()
 export class JobsService implements OnModuleInit, OnModuleDestroy {
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -25,6 +26,7 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
     @Inject(DevicesService) private devices: DevicesService,
     @Inject(CommandsService) private commands: CommandsService,
     @Inject(FileJobsService) private fileJobs: FileJobsService,
+    @Inject(FirmwareService) private firmware: FirmwareService,
   ) {}
   async onModuleInit() {
     const interrupted = await this.db.job.findMany({
@@ -89,6 +91,19 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
         where: { id: job.entityId },
         data: { status: "FAILED", error, completedAt: new Date() },
       });
+    if (job.type === "FIRMWARE_UPDATE") {
+      const updated = await this.db.firmwareDeployment.updateMany({
+        where: {
+          id: job.entityId,
+          status: {
+            notIn: ["ACTIVE", "FAILED", "ROLLED_BACK", "SUPERSEDED"],
+          },
+        },
+        data: { status: "FAILED", error },
+      });
+      if (updated.count)
+        this.events.emit("firmware.failed", job.entityId, { error });
+    }
     this.events.emit("job.failed", job.entityId, { error });
   }
   private async tick() {
@@ -111,6 +126,8 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
       if (job.type === "TRAINING")
         await this.training.run(job.entityId, job.payload, () => this.stopping);
       else if (job.type === "DEPLOYMENT") await this.deploy(job.entityId);
+      else if (job.type === "FIRMWARE_UPDATE")
+        await this.firmware.run(job.entityId);
       else
         output = await this.fileJobs.process(
           job.type,

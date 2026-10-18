@@ -78,6 +78,9 @@ README*
 # IoT Vision local dependencies, secrets and generated artifacts
 node_modules/
 **/dist/
+
+# Local Claude Code settings
+/.claude/settings.local.json
 **/.vite/
 /data/
 .env

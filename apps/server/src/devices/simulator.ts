@@ -5,6 +5,7 @@ import type {
   ModelManifest,
   DeviceState,
   ResidentModel,
+  FirmwareInfo,
 } from "@vision/contracts";
 import { DomainError } from "../core/errors.js";
 import {
@@ -14,11 +15,14 @@ import {
   type CapturedFrame,
   type Sink,
   type DeploymentReceipt,
+  type FirmwareStage,
+  type FirmwareReceipt,
 } from "./transport.js";
 export class SimulatorTransport implements DeviceTransport {
   readonly capabilities: Capabilities = {
     ...baseCapabilities,
     modelUpdate: true,
+    firmwareUpdate: true,
     modelVersion: true,
     planUpdate: true,
     offlineInference: true,
@@ -34,6 +38,25 @@ export class SimulatorTransport implements DeviceTransport {
   /** 假的 SD 模型库。模拟器没有制品包，sha256 直接用 manifest 的整包摘要。 */
   private library: ResidentModel[] = [];
   private slots = 0;
+  private firmware: FirmwareInfo = {
+    supported: true,
+    version: "SIM-GOLDEN",
+    sha256: "",
+    generation: 1,
+    flags: 64,
+    runningSlot: 2,
+    activeSlot: 2,
+    previousSlot: 0xffffffff,
+    pendingSlot: 0xffffffff,
+    attempts: 0,
+    maxAttempts: 3,
+    stage: 0,
+    slotImageSize: [0, 0],
+  };
+  private firmwareSlots = [
+    { version: "", sha256: "" },
+    { version: "", sha256: "" },
+  ];
   constructor(
     reported: DeviceState = {
       modelVersion: "SIM-V1",
@@ -51,6 +74,8 @@ export class SimulatorTransport implements DeviceTransport {
   }
   async connect() {
     this.state.runtimeState = "RUNNING";
+    this.state.reportedState.firmwareVersion = this.firmware.version;
+    this.state.reportedState.firmware = structuredClone(this.firmware);
     await this.tick();
     if (!this.timer)
       this.timer = setInterval(() => {
@@ -289,6 +314,159 @@ export class SimulatorTransport implements DeviceTransport {
   async restartInference() {
     await this.sendCommand("START_INSPECTION");
     return this.getStatus();
+  }
+  private publishFirmware() {
+    this.state.reportedState = {
+      ...this.state.reportedState,
+      firmwareVersion: this.firmware.version,
+      firmware: structuredClone(this.firmware),
+    };
+  }
+  async getFirmwareInfo(): Promise<FirmwareInfo> {
+    if (!this.timer || !this.state.lastSeen)
+      throw new DomainError(
+        "DEVICE_TIMEOUT",
+        "SIMULATED device is offline",
+        504,
+      );
+    return structuredClone(this.firmware);
+  }
+  async deployFirmware(
+    version: string,
+    sha256: string,
+    data: Buffer,
+    progress: (stage: FirmwareStage) => Promise<void>,
+  ): Promise<FirmwareReceipt> {
+    if (!this.timer || !this.state.lastSeen)
+      throw new DomainError(
+        "DEVICE_TIMEOUT",
+        "SIMULATED device is offline",
+        504,
+      );
+    if (this.firmware.pendingSlot !== 0xffffffff)
+      throw new DomainError(
+        "DEVICE_BUSY",
+        "SIMULATED firmware trial already pending",
+        409,
+      );
+    if (this.firmware.version === version && this.firmware.sha256 === sha256)
+      throw new DomainError(
+        "INVALID_STATE",
+        "SIMULATED device already runs this firmware",
+        409,
+      );
+    if (!data.length)
+      throw new DomainError("FIRMWARE_INVALID", "Empty firmware package", 422);
+    const previous = structuredClone(this.firmware),
+      target = this.firmware.activeSlot === 0 ? 1 : 0;
+    this.state.runtimeState = "UPDATING";
+    try {
+      for (const stage of [
+        "DOWNLOADING",
+        "VERIFYING",
+        "VERIFIED",
+        "WRITING",
+        "REBOOTING",
+        "SELF_TEST",
+      ] as FirmwareStage[]) {
+        await progress(stage);
+        if (["NETWORK_LOST", "DEVICE_TIMEOUT"].includes(this.fault))
+          throw new Error("SIMULATED device timeout");
+        if (this.fault === "FIRMWARE_FAILED")
+          throw new Error("SIMULATED firmware update failure");
+        if (stage === "VERIFYING" && this.fault === "CHECKSUM_ERROR")
+          throw new Error("SIMULATED firmware checksum mismatch");
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      this.firmware = {
+        ...this.firmware,
+        version,
+        sha256,
+        flags: 1,
+        runningSlot: target,
+        activeSlot: target,
+        previousSlot: previous.runningSlot,
+        pendingSlot: 0xffffffff,
+        attempts: 0,
+        stage: 9,
+        generation: this.firmware.generation + 1,
+        slotImageSize:
+          target === 0
+            ? [data.length, this.firmware.slotImageSize[1]]
+            : [this.firmware.slotImageSize[0], data.length],
+      };
+      this.firmwareSlots[target] = { version, sha256 };
+      this.publishFirmware();
+      this.state.runtimeState = "RUNNING";
+      await this.tick();
+      return {
+        version,
+        sha256,
+        runningSlot: target,
+        activeSlot: target,
+        previousSlot: previous.runningSlot,
+        confirmed: true,
+        golden: false,
+        attempts: 0,
+        simulated: true,
+      };
+    } catch (error) {
+      this.firmware = previous;
+      this.publishFirmware();
+      this.state.runtimeState = "RUNNING";
+      throw error;
+    }
+  }
+  async rollbackFirmware(target: "PREVIOUS" | "GOLDEN"): Promise<FirmwareReceipt> {
+    if (!this.timer || !this.state.lastSeen)
+      throw new DomainError(
+        "DEVICE_TIMEOUT",
+        "SIMULATED device is offline",
+        504,
+      );
+    const previous = structuredClone(this.firmware);
+    let slot: number;
+    if (target === "GOLDEN") slot = 2;
+    else if (
+      this.firmware.previousSlot === 0 ||
+      this.firmware.previousSlot === 1
+    )
+      slot = this.firmware.previousSlot;
+    else
+      throw new DomainError(
+        "NOT_FOUND",
+        "SIMULATED device has no previous application slot",
+        409,
+      );
+    this.firmware = {
+      ...this.firmware,
+      version:
+        slot === 2
+          ? "SIM-GOLDEN"
+          : this.firmwareSlots[slot]!.version || `SIM-FW-SLOT-${slot + 1}`,
+      sha256: slot === 2 ? "" : this.firmwareSlots[slot]!.sha256,
+      flags: slot === 2 ? 64 : 1,
+      runningSlot: slot,
+      activeSlot: slot,
+      previousSlot: previous.runningSlot,
+      pendingSlot: 0xffffffff,
+      attempts: 0,
+      stage: 9,
+      generation: this.firmware.generation + 1,
+    };
+    this.publishFirmware();
+    await this.tick();
+    return {
+      version: this.firmware.version,
+      sha256: this.firmware.sha256,
+      runningSlot: slot,
+      activeSlot: slot,
+      previousSlot: previous.runningSlot,
+      confirmed: true,
+      golden: slot === 2,
+      attempts: 0,
+      simulated: true,
+    };
   }
   private publishLibrary() {
     this.state.reportedState = {

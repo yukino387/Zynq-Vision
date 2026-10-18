@@ -85,3 +85,35 @@ export interface Deployment extends Named {
   receipt: { resident?: boolean } | null;
   model: Model;
 }
+export interface FirmwareSegment {
+  paddr: number;
+  offset: number;
+  size: number;
+}
+export interface Firmware extends Named {
+  version: string;
+  sha256: string;
+  size: number;
+  imageSize: number;
+  entry: number;
+  segments: FirmwareSegment[];
+  status: string;
+  notes: string | null;
+  asset?: Asset;
+}
+export interface FirmwareDeployment {
+  id: string;
+  deviceId: string;
+  firmwareId: string;
+  previousVersion: string | null;
+  previousSha256: string | null;
+  previousSlot: number | null;
+  status: string;
+  progress: number;
+  error: string | null;
+  receipt: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  firmware: Firmware;
+  device?: { id: string; name: string };
+}

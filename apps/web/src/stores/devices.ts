@@ -50,7 +50,9 @@ export const useDeviceStore = defineStore("devices", () => {
   });
   async function snapshot() {
     policy = await api("/devices/policy");
-    devices.value = await api("/devices/snapshot");
+    // 现场只展示真实板卡；模拟器仅保留给后端自动化验证，不再进入界面。
+    const all = await api<DeviceSnapshot[]>("/devices/snapshot");
+    devices.value = all.filter((d) => d.type !== "SIMULATOR");
     if (!devices.value.some((d) => d.id === selected.value))
       selected.value =
         devices.value.find((d) => d.type === "ZYNQ")?.id ??
@@ -132,7 +134,13 @@ export const useDeviceStore = defineStore("devices", () => {
       if (socket !== currentSocket) return;
       connected.value = false;
       if (event.code === 1008) {
-        useNotificationStore().add("登录状态已变更或过期，请重新登录。", true);
+        if (event.reason === "Password changed")
+          useAuthStore().notice = "密码已更新，请使用新密码重新登录。";
+        else
+          useNotificationStore().add(
+            "登录状态已变更或过期，请重新登录。",
+            true,
+          );
         useAuthStore().logout();
         return;
       }

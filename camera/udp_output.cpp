@@ -1,5 +1,6 @@
 #include "udp_output.h"
 #include "int8/model_store.h"
+#include "firmware_ota.h"
 extern "C" {
 #include "lwip/init.h"
 #include "lwip/udp.h"
@@ -40,7 +41,22 @@ static void receive(void*, udp_pcb*, pbuf* packet, const ip_addr_t* address, u16
         uint8_t bytes[1420];
         pbuf_copy_partial(packet,bytes,packet->tot_len,0);
         uint32_t header[5];std::memcpy(header,bytes,20);
-        if(header[0]==0x314c444d && header[4]==packet->tot_len-20) {
+        // BEGIN carries the total image size in the size field with no payload;
+        // every other operation's size field equals the payload length.
+        if(header[0]==FW_REQ_MAGIC && (header[4]==packet->tot_len-20 ||
+            (header[2]==FW_OP_BEGIN && packet->tot_len==20))) {
+            const bool owner=peer_port==port && ip_addr_cmp(&peer,address);
+            FirmwareReply reply={};
+            if(header[2]==FW_OP_INFO || header[2]==FW_OP_LIST || owner)
+                reply=firmware_request(header[1],header[2],header[3],bytes+20,header[4]);
+            else {
+                reply.magic=FW_REPLY_MAGIC;reply.request=header[1];
+                reply.result=FW_RESULT_BUSY;reply.max_attempts=FW_MAX_ATTEMPTS;
+                reply.crc32=fw_crc32(&reply,offsetof(FirmwareReply,crc32));
+            }
+            pbuf* response=pbuf_alloc(PBUF_TRANSPORT,sizeof(reply),PBUF_RAM);
+            if(response){std::memcpy(response->payload,&reply,sizeof(reply));udp_sendto(socket,response,address,port);pbuf_free(response);}
+        } else if(header[0]==0x314c444d && header[4]==packet->tot_len-20) {
             const bool owner=peer_port==port && ip_addr_cmp(&peer,address);
             ModelReply reply={};
             if(header[2]==0 || owner)reply=model_request(header[1],header[2],header[3],bytes+20,header[4]);
@@ -66,8 +82,8 @@ static void receive(void*, udp_pcb*, pbuf* packet, const ip_addr_t* address, u16
                 preview = true;
                 running = true;
             } else if (owner) {
-                if (command[2] == 2) running = command[3] != 0;
-                if (command[2] == 3) camera_only = command[3] != 0;
+                if (command[2] == 2 && !firmware_busy()) running = command[3] != 0;
+                if (command[2] == 3 && !firmware_busy()) camera_only = command[3] != 0;
                 if (command[2] == 4 && static_cast<int32_t>(command[3]) >= -4 &&
                     static_cast<int32_t>(command[3]) <= 4) brightness = static_cast<int32_t>(command[3]);
             }

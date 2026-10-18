@@ -37,6 +37,7 @@ const endpoint = computed(
       })[tab.value] ?? "/models",
   ),
   list = useList<Named>(endpoint);
+list.realOnly.value = "true";
 const form = ref(false),
   detail = ref<Named | null>(null),
   datasets = ref<Dataset[]>([]),
@@ -47,8 +48,7 @@ const form = ref(false),
   name = ref(""),
   busy = ref(false),
   importing = ref(false),
-  manifest = ref(""),
-  version = ref(""),
+  importClasses = ref(""),
   file = ref<File | null>(null);
 const trainingOptions = ref<TrainingOptions>({
   colorMode: "GRAY",
@@ -91,14 +91,66 @@ async function approveModel() {
 const chosenDataset = computed(() =>
   datasets.value.find((d) => d.id === datasetId.value),
 );
+const trainableDataset = (dataset: Dataset) =>
+  dataset.status === "FROZEN" && dataset._count.items >= 2;
+const trainingBlocker = computed(() => {
+  const dataset = chosenDataset.value;
+  if (!dataset) return "还没有真实数据集。先选择已标注图片并加入数据集。";
+  if (dataset._count.items < 2)
+    return `“${dataset.name}”当前有 ${dataset._count.items} 张样本，训练至少需要 2 张已标注样本。`;
+  if (dataset.status !== "FROZEN")
+    return `“${dataset.name}”尚未锁定。请由管理员审核样本，再锁定数据集版本。`;
+  return "";
+});
+function trainingError(value: unknown) {
+  const message = String(value ?? "");
+  return message.includes("Frozen dataset checksum mismatch")
+    ? "数据集快照校验失败，训练未开始。请用当前真实样本创建新版本并重新锁定。"
+    : message;
+}
 const datasetSources = (dataset: Dataset) =>
   dataset.sourceCounts as Record<string, number>;
 const datasetLabel = (dataset: Dataset) =>
   `${displayName(dataset.name)} / V${dataset.version} · ${dataset._count.items} 张${datasetSources(dataset)?.SIMULATION ? " · 含模拟样本" : "真实样本"}`;
 const createdModel = (row: Named) =>
   (row.models as { id: string; version: string }[] | undefined)?.[0];
+/** 表格与卡片里的模型引用：接口在评估、部署记录里都带了 model。 */
+const rowModel = (row: Named) => row.model as Model | undefined;
+/** 部署记录优先用接口带回的设备名，设备已删除时才回落到 ID。 */
+const deviceName = (row: Named) =>
+  (row.device as { name?: string } | undefined)?.name ??
+  devices.devices.find((d) => d.id === row.deviceId)?.name ??
+  text(row, "deviceId");
+/** 阶段值来自训练脚本与板端协议，个别取值没有公共词条，在这里收口成中文。 */
+const stageLabels: Record<string, string> = {
+  QUEUE: "排队",
+  TRAIN: "训练中",
+  VALIDATE: "验证中",
+  TRANSFER: "传输中",
+  UPLOAD: "上传中",
+  PACKAGE: "打包中",
+  DONE: "已完成",
+};
+const stageText = (row: Named) =>
+  stageLabels[text(row, "stage")] ?? chinese(text(row, "stage"));
 const detailOptions = computed(
   () => detail.value?.options as TrainingOptions | undefined,
+);
+/** 详情抽屉只展示已格式化的值：时间、阶段、进度不再以原始字段形式出现。 */
+const detailView = computed(() => {
+  const row = detail.value;
+  if (!row) return null;
+  return {
+    ...row,
+    error: tab.value === "training" ? trainingError(row.error) : row.error,
+    stage: stageText(row),
+    progress: row.progress === undefined ? "—" : `${row.progress}%`,
+  };
+});
+const detailFields = computed(() =>
+  tab.value === "registry"
+    ? ["name", "version", "error"]
+    : ["name", "stage", "progress", "error"],
 );
 const text = (r: Named, k: string) =>
   typeof r[k] === "object" ? JSON.stringify(r[k]) : String(r[k] ?? "—");
@@ -131,11 +183,19 @@ async function openForm() {
   try {
     if (tab.value !== "deployments")
       datasets.value = (
-        await api<{ items: Dataset[] }>("/datasets?status=FROZEN&pageSize=100")
+        await api<{ items: Dataset[] }>(
+          tab.value === "training"
+            ? "/datasets?realOnly=true&pageSize=100"
+            : "/datasets?status=FROZEN&realOnly=true&pageSize=100",
+        )
       ).items;
     if (tab.value !== "training")
       models.value = (
-        await api<{ items: Model[] }>("/models?pageSize=100")
+        await api<{ items: Model[] }>(
+          tab.value === "deployments"
+            ? "/models?status=APPROVED&realOnly=true&pageSize=100"
+            : "/models?realOnly=true&pageSize=100",
+        )
       ).items;
     const requested = String(route.query.datasetId ?? "");
     if (requested)
@@ -143,7 +203,12 @@ async function openForm() {
         ? requested
         : "";
     else if (!datasets.value.some((d) => d.id === datasetId.value))
-      datasetId.value = "";
+      datasetId.value =
+        tab.value === "training"
+          ? (datasets.value.find(trainableDataset)?.id ??
+            datasets.value[0]?.id ??
+            "")
+          : "";
     if (!name.value) name.value = `现场模型 ${new Date().toLocaleDateString()}`;
     deviceId.value = devices.current?.id ?? "";
     form.value = true;
@@ -160,6 +225,10 @@ function closeForm() {
   }
 }
 async function create() {
+  if (tab.value === "training" && trainingBlocker.value) {
+    notices.add(trainingBlocker.value, true);
+    return;
+  }
   busy.value = true;
   try {
     const body =
@@ -212,14 +281,12 @@ async function importModel() {
   busy.value = true;
   try {
     const data = new FormData();
-    data.append(
-      "metadata",
-      JSON.stringify({
-        name: name.value,
-        version: version.value,
-        manifest: JSON.parse(manifest.value),
-      }),
-    );
+    data.append("name", name.value);
+    const classes = importClasses.value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (classes.length) data.append("classes", JSON.stringify(classes));
     data.append("file", file.value);
     await api("/models/import", { method: "POST", body: data });
     importing.value = false;
@@ -263,11 +330,11 @@ watch(
       <p>
         {{
           tab === "training"
-            ? "选择已准备好的数据集，开始 GPU 训练；完成后可查看模型并评估。"
+            ? "选择已准备好的数据集，开始 GPU 训练；完成后可查看并下载模型。"
             : tab === "registry"
-              ? "查看模型效果、下载模型包，并继续评估或部署。"
+              ? "查看模型效果、下载模型包，并由管理员批准发布。"
               : tab === "deployments"
-                ? "将评估通过的模型发布到设备，部署后检查实际检测结果。"
+                ? "将管理员批准的模型发布到设备，部署后检查实际检测结果。"
                 : "评估候选模型，确认效果后再发布到设备。"
         }}
       </p>
@@ -286,20 +353,15 @@ watch(
       </button>
     </div>
   </div>
-  <div v-if="tab === 'training'" class="panel" style="margin-bottom: 20px">
-    <div class="panel-body">
-      <span class="tag">GPU 训练</span>
-      <p class="note" style="margin: 8px 0 0; padding: 0">
-        先完成样本标注，再将数据集锁定为训练版本。训练完成后会自动生成模型包。
-        <RouterLink to="/data/annotation">去标注</RouterLink> ·
-        <RouterLink to="/data/datasets">查看数据集</RouterLink>
-      </p>
-    </div>
-  </div>
   <section v-if="tab === 'training'" class="lab-banner experiment-banner">
     <div>
       <span class="workspace-index">06 / 实验工作区</span>
       <h2>训练实验</h2>
+      <p class="banner-note">
+        先完成样本标注，再将数据集锁定为训练版本；训练完成后自动生成模型包。
+        <RouterLink to="/data/annotation">去标注</RouterLink> ·
+        <RouterLink to="/data/datasets">查看数据集</RouterLink>
+      </p>
     </div>
     <div class="experiment-register">
       <span
@@ -433,8 +495,8 @@ watch(
       tab === 'training'
         ? '还没有训练任务。先在数据管理里冻结一个数据集，再回到这里发起训练。'
         : tab === 'deployments'
-          ? '还没有部署记录。模型通过评估后，用「创建部署」下发到设备。'
-          : '这里还是空的。训练完成并评估通过的模型会出现在这里。'
+          ? '还没有部署记录。管理员批准模型后，用「创建部署」下发到设备。'
+          : '这里还是空的。训练完成后可在模型仓库查看并下载模型。'
     "
     @retry="list.load"
     ><section
@@ -469,8 +531,13 @@ watch(
               :class="{ simulated: r.source === 'SIMULATION' }"
               >{{ r.options ? "本地训练" : chinese(r.source) }}</span
             ><span class="mono">{{ r.id.slice(-10) }}</span
-            ><span>{{ chinese(text(r, "stage")) }}</span>
+            ><span>{{ stageText(r) }}</span>
             <span v-if="r.options">{{ trainingSummary(r) }}</span>
+            <span v-if="r.dataset"
+              >数据集：{{ displayName((r.dataset as Dataset).name) }} / V{{
+                (r.dataset as Dataset).version
+              }}</span
+            >
           </div>
           <div class="experiment-progress">
             <div class="bar">
@@ -480,7 +547,7 @@ watch(
               r.progress === undefined ? "—" : `${r.progress}%`
             }}</span>
           </div>
-          <p v-if="r.error" class="tone-crit">{{ r.error }}</p>
+          <p v-if="r.error" class="tone-crit">{{ trainingError(r.error) }}</p>
         </div>
         <div class="experiment-actions">
           <RouterLink
@@ -491,14 +558,14 @@ watch(
               params: { tab: 'registry' },
               query: { modelId: createdModel(r)!.id },
             }"
-            >查看生成模型 →</RouterLink
+            >查看模型 →</RouterLink
           >
-          <button @click="open(r)">实验详情</button
+          <button class="table-action" @click="open(r)">实验详情</button
           ><button
             v-if="['QUEUED', 'RUNNING'].includes(r.status ?? '')"
             @click="action(r.id, 'cancel')"
             :disabled="busy"
-            class="danger"
+            class="table-action danger"
           >
             取消任务
           </button>
@@ -525,33 +592,19 @@ watch(
         <div class="deployment-route">
           <div>
             <small>当前目标</small
-            ><b>{{
-              displayName(
-                (r.model as Model | undefined)?.name ?? text(r, "modelId"),
-              )
-            }}</b
-            ><span class="mono">{{
-              (r.model as Model | undefined)?.version ?? "—"
-            }}</span>
+            ><b>{{ displayName(rowModel(r)?.name ?? text(r, "modelId")) }}</b
+            ><span class="mono">{{ rowModel(r)?.version ?? "—" }}</span>
           </div>
           <span class="deployment-arrow">→</span>
           <div>
-            <small>接收设备</small
-            ><b>{{
-              displayName(
-                devices.devices.find((d) => d.id === r.deviceId)?.name ??
-                  text(r, "deviceId"),
-              )
-            }}</b
+            <small>接收设备</small><b>{{ displayName(deviceName(r)) }}</b
             ><span class="mono">{{
               r.previousVersion ? `前序版本 ${r.previousVersion}` : "无前序版本"
             }}</span>
           </div>
         </div>
         <div class="deployment-progress">
-          <Status :value="r.status" /><span>{{
-            chinese(text(r, "stage"))
-          }}</span>
+          <Status :value="r.status" /><span>{{ stageText(r) }}</span>
           <div class="bar">
             <span :style="{ width: `${r.progress ?? 0}%` }" />
           </div>
@@ -565,18 +618,23 @@ watch(
             chinese(r.source)
           }}</span
           ><span v-if="switchedLocally(r)" class="tag">本地切换</span
-          ><time class="mono">{{ new Date(r.createdAt).toLocaleString() }}</time
-          ><button @click="open(r)">执行证据</button
-          ><button
-            v-if="
-              r.previousVersion && ['ACTIVE', 'FAILED'].includes(r.status ?? '')
-            "
-            :disabled="busy"
-            @click="action(r.id, 'rollback')"
-            class="danger"
-          >
-            回滚版本
-          </button>
+          ><time class="mono">{{
+            new Date(r.createdAt).toLocaleString()
+          }}</time>
+          <div class="deployment-actions">
+            <button @click="open(r)">执行证据</button
+            ><button
+              v-if="
+                r.previousVersion &&
+                ['ACTIVE', 'FAILED'].includes(r.status ?? '')
+              "
+              :disabled="busy"
+              @click="action(r.id, 'rollback')"
+              class="danger"
+            >
+              回滚版本
+            </button>
+          </div>
         </footer>
       </article>
     </section>
@@ -592,9 +650,9 @@ watch(
               :order="list.order.value"
               @sort="list.sortBy"
             />
-            <th>来源</th>
-            <th>{{ tab === "benchmarks" ? "指标" : "状态 / 阶段" }}</th>
-            <th>{{ tab === "registry" ? "架构" : "进度" }}</th>
+            <th>{{ tab === "benchmarks" ? "评估模型" : "生成方式" }}</th>
+            <th>{{ tab === "benchmarks" ? "指标" : "状态" }}</th>
+            <th>{{ tab === "registry" ? "指标" : "进度" }}</th>
             <SortableTh
               field="createdAt"
               label="时间"
@@ -602,45 +660,56 @@ watch(
               :order="list.order.value"
               @sort="list.sortBy"
             />
-            <th></th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="r in list.items.value" :key="r.id">
             <td>
               <strong>{{ displayName(r.name) }}</strong
-              ><small class="mono">{{ r.version ?? r.id.slice(-10) }}</small>
+              ><small class="mono">{{ r.version ?? "—" }}</small>
             </td>
-            <td>
+            <td v-if="tab === 'benchmarks'">
+              <strong>{{ displayName(rowModel(r)?.name ?? "—") }}</strong
+              ><small class="mono">{{ rowModel(r)?.version ?? "—" }}</small>
+            </td>
+            <td v-else>
               <span
                 class="tag"
                 :class="{ simulated: r.source === 'SIMULATION' }"
-                >{{ r.trainingId ? "本地训练" : chinese(r.source) }}</span
+                >{{
+                  r.trainingId
+                    ? "训练生成"
+                    : r.source === "SIMULATION"
+                      ? "模拟"
+                      : "导入"
+                }}</span
               >
             </td>
             <td v-if="tab === 'benchmarks'">
-              <InfoFields
-                :value="r.metrics"
-                :fields="['fps', 'inferenceUs', 'accuracy']"
-              />
+              <div class="cell-metrics">
+                <InfoFields
+                  :value="r.metrics"
+                  :fields="['fps', 'inferenceUs']"
+                />
+              </div>
             </td>
             <td v-else>
-              <Status :value="r.status" /><small>{{
-                chinese(text(r, "stage")) === "—"
-                  ? ""
-                  : chinese(text(r, "stage"))
+              <Status :value="r.status" /><small v-if="tab !== 'registry'">{{
+                stageText(r) === "—" ? "" : stageText(r)
               }}</small
               ><small style="color: var(--red)">{{
                 text(r, "error") === "—" ? "" : text(r, "error")
               }}</small>
             </td>
-            <td v-if="tab === 'registry'" class="mono">
-              {{ text(r, "architecture") }}
-              <InfoFields
-                v-if="r.trainingId"
-                :value="r.metrics"
-                :fields="['mAP50', 'precision', 'recall']"
-              />
+            <td v-if="tab === 'registry'">
+              <div v-if="r.trainingId" class="cell-metrics">
+                <InfoFields
+                  :value="r.metrics"
+                  :fields="['mAP50', 'precision', 'recall']"
+                />
+              </div>
+              <span v-else class="muted">—</span>
             </td>
             <td v-else>
               <span class="mono">{{
@@ -655,42 +724,44 @@ watch(
               </div>
             </td>
             <td>{{ new Date(r.createdAt).toLocaleString() }}</td>
-            <td>
-              <button @click="open(r)" class="table-action">详情</button
-              ><button
-                v-if="
-                  tab === 'training' &&
-                  ['QUEUED', 'RUNNING'].includes(r.status ?? '')
-                "
-                @click="action(r.id, 'cancel')"
-                class="table-action"
-                :disabled="busy"
-              >
-                取消</button
-              ><button
-                v-if="
-                  tab === 'deployments' &&
-                  r.previousVersion &&
-                  ['ACTIVE', 'FAILED'].includes(r.status ?? '')
-                "
-                @click="action(r.id, 'rollback')"
-                class="table-action"
-                :disabled="busy"
-              >
-                回滚</button
-              ><button
-                v-if="tab === 'registry'"
-                @click="
-                  download(
-                    `/models/${r.id}/export`,
-                    `model-${r.id}.zip`,
-                    'POST',
-                  ).catch(notices.error)
-                "
-                class="table-action"
-              >
-                导出
-              </button>
+            <td class="action-cell">
+              <div class="row-actions">
+                <button @click="open(r)" class="table-action">详情</button
+                ><button
+                  v-if="
+                    tab === 'training' &&
+                    ['QUEUED', 'RUNNING'].includes(r.status ?? '')
+                  "
+                  @click="action(r.id, 'cancel')"
+                  class="table-action danger"
+                  :disabled="busy"
+                >
+                  取消</button
+                ><button
+                  v-if="
+                    tab === 'deployments' &&
+                    r.previousVersion &&
+                    ['ACTIVE', 'FAILED'].includes(r.status ?? '')
+                  "
+                  @click="action(r.id, 'rollback')"
+                  class="table-action danger"
+                  :disabled="busy"
+                >
+                  回滚</button
+                ><button
+                  v-if="tab === 'registry'"
+                  @click="
+                    download(
+                      `/models/${r.id}/export`,
+                      `model-${r.id}.zip`,
+                      'POST',
+                    ).catch(notices.error)
+                  "
+                  class="table-action"
+                >
+                  导出
+                </button>
+              </div>
             </td>
           </tr>
         </tbody>
@@ -726,28 +797,65 @@ watch(
         >{{ tab === "training" ? "训练数据集" : "评估数据集"
         }}<select v-model="datasetId" required>
           <option value="">选择数据集</option>
-          <option
-            v-for="d in datasets"
-            :key="d.id"
-            :value="d.id"
-            :disabled="tab === 'training' && d._count.items < 2"
-          >
+          <option v-for="d in datasets" :key="d.id" :value="d.id">
             {{ datasetLabel(d)
             }}{{
-              tab === "training" && d._count.items < 2 ? " · 至少需要 2 张" : ""
+              tab === "training"
+                ? trainableDataset(d)
+                  ? " · 可训练"
+                  : d._count.items < 2
+                    ? " · 样本不足"
+                    : " · 待审核并锁定"
+                : ""
             }}
           </option>
         </select></label
       >
-      <div
-        v-if="tab === 'training' && !datasets.some((d) => d._count.items >= 2)"
-        class="training-empty"
-      >
-        <b>还没有可训练的数据集</b>
-        <p>选入至少两张已标注样本，并锁定数据集版本。</p>
-        <RouterLink to="/data/samples?annotation=complete" @click="form = false"
-          >整理已标注样本 →</RouterLink
-        >
+      <div v-if="tab === 'training' && trainingBlocker" class="training-empty">
+        <b>需要先准备训练数据</b>
+        <p>{{ trainingBlocker }}</p>
+        <div class="row-actions">
+          <RouterLink
+            class="table-action"
+            :to="{
+              name: 'data',
+              params: { tab: 'samples' },
+              query: {
+                annotation: 'complete',
+                ...(chosenDataset?.status === 'DRAFT'
+                  ? { datasetId: chosenDataset.id }
+                  : {}),
+              },
+            }"
+            @click="form = false"
+            >添加已标注样本</RouterLink
+          >
+          <RouterLink
+            v-if="auth.admin"
+            class="table-action"
+            to="/data/review"
+            @click="form = false"
+            >审核样本</RouterLink
+          >
+          <RouterLink
+            v-if="chosenDataset"
+            class="table-action"
+            :to="{
+              name: 'data',
+              params: { tab: 'datasets' },
+              query: { open: chosenDataset.id },
+            }"
+            @click="form = false"
+            >检查并锁定数据集</RouterLink
+          >
+          <RouterLink
+            v-else
+            class="table-action"
+            to="/data/datasets?create=1"
+            @click="form = false"
+            >创建数据集</RouterLink
+          >
+        </div>
       </div>
       <p
         v-if="
@@ -866,7 +974,11 @@ watch(
             {{ chinese(m.status) }}
           </option>
         </select></label
-      ><label v-if="tab !== 'training'"
+      >
+      <p v-if="tab === 'deployments' && !models.length" class="note">
+        还没有已批准的模型。请先由管理员在“模型仓库”批准发布。
+      </p>
+      <label v-if="tab !== 'training'"
         >设备<select v-model="deviceId" required>
           <option value="">选择设备</option>
           <option
@@ -888,11 +1000,7 @@ watch(
       </p>
       <button
         class="primary"
-        :disabled="
-          busy ||
-          (tab === 'training' &&
-            (!chosenDataset || chosenDataset._count.items < 2))
-        "
+        :disabled="busy || (tab === 'training' && !!trainingBlocker)"
       >
         {{
           busy
@@ -916,33 +1024,43 @@ watch(
     "
     @close="detail = null"
   >
+    <div class="detail-head">
+      <Status chip :value="detail.status" />
+      <span class="mono">{{ detail.id.slice(-10) }}</span>
+      <time class="mono">{{
+        new Date(detail.createdAt).toLocaleString()
+      }}</time>
+    </div>
+    <div v-if="tab === 'registry' && detail.trainingId" class="detail-metrics">
+      <InfoFields
+        :value="detail.metrics"
+        :fields="['mAP50', 'precision', 'recall', 'fps']"
+      />
+    </div>
     <section
       v-if="tab === 'registry' && detail.status !== 'APPROVED'"
-      class="training-empty"
+      class="approval-gate"
     >
-      <h3>验证与发布是两步</h3>
-      <p>
-        模型评估记录不等于业务验收，也不会自动批准发布。请核查模型验证记录与现场样本效果后，再由管理员批准。
-      </p>
-      <p v-if="!(detail.benchmarks as unknown[])?.length">
-        还没有验证记录，请先进行模型评估。
-      </p>
-      <form v-else-if="auth.admin" @submit.prevent="approveModel">
+      <h3>发布批准</h3>
+      <p>请由管理员核查训练结果与现场样本效果，填写验收意见后批准发布。</p>
+      <form v-if="auth.admin" @submit.prevent="approveModel">
         <label
           >现场验收意见<textarea
             v-model="approvalNote"
             required
             maxlength="1000"
-            rows="2"
+            rows="3"
             placeholder="记录已验证的产品、工位条件、效果及适用限制"
-          /></label
-        ><label class="check-row"
+          />
+        </label>
+        <label class="check-row"
           ><input
             v-model="approvalConfirmed"
             type="checkbox"
             required
-          />我已核查验证记录及现场效果，同意此版本进入发布流程</label
-        ><button
+          />我已核查训练结果及现场效果，同意此版本进入发布流程</label
+        >
+        <button
           class="primary"
           :disabled="busy || !approvalConfirmed || !approvalNote.trim()"
         >
@@ -976,59 +1094,50 @@ watch(
       }"
       >查看生成模型 →</RouterLink
     >
-    <InfoFields
-      :value="detail"
-      :fields="[
-        'name',
-        'version',
-        'source',
-        'status',
-        'architecture',
-        'stage',
-        'progress',
-        'datasetId',
-        'modelId',
-        'deviceId',
-        'previousVersion',
-        'createdAt',
-        'error',
-      ]"
-    />
+    <InfoFields :value="detailView" :fields="detailFields" />
     <details>
-      <summary>原始数据</summary>
+      <summary>技术详情</summary>
       <pre>{{ JSON.stringify(detail, null, 2) }}</pre>
     </details></Drawer
   ><Drawer v-if="importing" title="导入模型包" @close="importing = false"
     ><form @submit.prevent="importModel">
       <label>模型名称<input v-model="name" required /></label
-      ><label>版本<input v-model="version" required /></label
       ><label
-        >模型清单（JSON）<textarea
-          v-model="manifest"
-          required
-          rows="14"
-          class="mono"
-        /></label
+        >类别（最多 6 个，按训练时的顺序，逗号分隔；留空使用默认六类）<input
+          v-model="importClasses"
+          placeholder="例如：defect, unused_1, unused_2" /></label
       ><label
         >模型包（model.bin）<input
           type="file"
           @change="
             file = ($event.target as HTMLInputElement).files?.[0] ?? null
           "
-          required /></label
-      ><button class="primary" :disabled="busy">验证并导入</button>
+          required
+      /></label>
+      <p class="note">
+        系统会从 model.bin
+        自动读取版本、输入通道、量化参数和整包哈希，并继续用固定图校验；不需要再填
+        manifest。
+      </p>
+      <button class="primary" :disabled="busy">验证并导入</button>
     </form></Drawer
   >
 </template>
 <style scoped>
 .training-empty {
-  padding: 18px;
+  padding: 16px 18px;
   margin: 16px 0;
   border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
   background: var(--surface-2);
   font-size: 13px;
 }
+.training-empty b {
+  display: block;
+  margin-bottom: 6px;
+}
 .training-empty p {
+  margin: 0 0 8px;
   color: var(--muted);
   line-height: 1.7;
 }
@@ -1116,5 +1225,87 @@ watch(
   font-size: 16px;
   color: var(--ink);
   margin-top: 8px;
+}
+/* 表格里的指标：三行带分隔线的字段列表会把行高撑到 100px 以上，
+   收成「标签 + 数值」的紧凑两列，行高回到与其他单元格一致。 */
+.cell-metrics .detail-fields,
+.detail-metrics .detail-fields {
+  grid-template-columns: auto auto;
+  justify-content: start;
+  column-gap: 14px;
+  row-gap: 3px;
+}
+.cell-metrics .detail-fields :deep(dt),
+.cell-metrics .detail-fields :deep(dd),
+.detail-metrics .detail-fields :deep(dt),
+.detail-metrics .detail-fields :deep(dd) {
+  border: 0;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.cell-metrics .detail-fields :deep(dd),
+.detail-metrics .detail-fields :deep(dd) {
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.detail-metrics {
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: 10px 14px;
+  margin-bottom: 20px;
+}
+.detail-metrics .detail-fields :deep(dt),
+.detail-metrics .detail-fields :deep(dd) {
+  font-size: 12px;
+  line-height: 1.9;
+}
+/* 详情抽屉的字段列表：值跟标签就近成对，不再被右对齐甩到对面边缘。 */
+.detail-fields {
+  grid-template-columns: minmax(96px, 0.34fr) minmax(0, 1fr);
+  column-gap: 16px;
+}
+.detail-fields :deep(dd) {
+  text-align: left;
+}
+.detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-bottom: 14px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+  font-size: 10px;
+  color: var(--muted);
+}
+.detail-head time {
+  margin-left: auto;
+}
+.approval-gate {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--forest);
+  background: var(--surface-2);
+  padding: 16px 18px;
+  margin-bottom: 20px;
+}
+.approval-gate h3 {
+  margin: 0 0 8px;
+}
+.approval-gate p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--ink-2);
+}
+.approval-gate .approval-missing {
+  margin-top: 6px;
+  color: var(--muted);
+}
+.approval-gate form {
+  margin-top: 14px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
 }
 </style>

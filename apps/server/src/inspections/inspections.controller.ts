@@ -28,6 +28,7 @@ export class InspectionsController {
     ]);
     if (q.reviewed)
       args.where.reviews = q.reviewed === "false" ? { none: {} } : { some: {} };
+    if (q.realOnly === "true") args.where.NOT = { source: "SIMULATION" };
     return page(
       await this.db.inspection.findMany({
         ...args,

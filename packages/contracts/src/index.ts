@@ -14,12 +14,30 @@ export interface Capabilities {
   preview: boolean;
   inference: boolean;
   modelUpdate: boolean;
+  firmwareUpdate: boolean;
   localStorage: boolean;
   offlineInference: boolean;
   offlineSync: boolean;
   modelVersion: boolean;
   planUpdate: boolean;
   restartInference: boolean;
+}
+/** 板端 running_slot/active_slot 等槽位：0=A、1=B、2=golden、0xFFFFFFFF=无。 */
+export interface FirmwareInfo {
+  supported: boolean;
+  version: string;
+  sha256: string;
+  generation: number;
+  flags: number;
+  runningSlot: number;
+  activeSlot: number;
+  previousSlot: number;
+  pendingSlot: number;
+  attempts: number;
+  maxAttempts: number;
+  stage: number;
+  /** [slot A, slot B] 包长度；未使用的槽为 0。 */
+  slotImageSize: [number, number];
 }
 /** 板端 SD 模型库里的一个条目。板子自己维护这份清单，平台只读。 */
 export interface ResidentModel {
@@ -40,6 +58,9 @@ export interface DeviceState {
   modelPayloadSha256?: string | null;
   /** SD 模型库；capabilities.localStorage 为真时才有意义。 */
   models?: ResidentModel[] | null;
+  firmwareVersion?: string | null;
+  /** PS 应用 OTA 现场状态；老固件不上报。 */
+  firmware?: FirmwareInfo | null;
 }
 export interface Telemetry {
   frameId: number;
@@ -187,6 +208,7 @@ export const listSchema = z.object({
   reviewed: z.enum(["true", "false"]).optional(),
   realOnly: z.enum(["true", "false"]).optional(),
   annotation: z.enum(["pending", "complete"]).optional(),
+  qualityStatus: z.enum(["PASS", "WARNING"]).optional(),
 });
 
 export type {
@@ -199,4 +221,7 @@ export type {
   Dataset,
   Model,
   Deployment,
+  Firmware,
+  FirmwareDeployment,
+  FirmwareSegment,
 } from "./entities.js";

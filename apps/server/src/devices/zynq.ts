@@ -10,13 +10,18 @@ import {
   MODEL,
   modelPacket,
   readModelReply,
+  FIRMWARE,
+  firmwarePacket,
+  readFirmwareReply,
   type WireModelReply,
+  type WireFirmwareReply,
 } from "@vision/device-protocol";
 import type {
   Capabilities,
   ModelManifest,
   DeviceState,
   ResidentModel,
+  FirmwareInfo,
 } from "@vision/contracts";
 import { DomainError } from "../core/errors.js";
 import { validateZynqPackage } from "../models/zynq-profile.js";
@@ -27,6 +32,8 @@ import {
   type Sink,
   type TransportStatus,
   type DeploymentReceipt,
+  type FirmwareStage,
+  type FirmwareReceipt,
 } from "./transport.js";
 export class ZynqUdpTransport implements DeviceTransport {
   readonly capabilities: Capabilities = { ...baseCapabilities };
@@ -38,6 +45,14 @@ export class ZynqUdpTransport implements DeviceTransport {
     number,
     {
       resolve: (reply: WireModelReply) => void;
+      reject: (error: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
+  private firmwarePending = new Map<
+    number,
+    {
+      resolve: (reply: WireFirmwareReply) => void;
       reject: (error: Error) => void;
       timer: ReturnType<typeof setTimeout>;
     }
@@ -81,6 +96,10 @@ export class ZynqUdpTransport implements DeviceTransport {
     await this.request(1);
     this.owned = true;
     await this.refreshModelState(true).catch(() => undefined);
+    // 老固件不认 FMR1：一次短超时探测即可，之后按能力决定是否轮询。
+    await this.refreshFirmwareInfo().catch(() => {
+      this.capabilities.firmwareUpdate = false;
+    });
     if (!this.timer)
       this.timer = setInterval(() => {
         if (this.polling) return;
@@ -96,6 +115,8 @@ export class ZynqUdpTransport implements DeviceTransport {
             await this.refreshModelState(
               Date.now() - this.libraryPolledAt > 15000,
             ).catch(() => undefined);
+            if (this.capabilities.firmwareUpdate)
+              await this.refreshFirmwareInfo().catch(() => undefined);
           })
           .catch((e) => {
             this.state.error = String(e);
@@ -111,6 +132,19 @@ export class ZynqUdpTransport implements DeviceTransport {
     this.socket = socket;
     socket.on("message", (packet, remote) => {
       if (remote.address !== this.host || remote.port !== this.port) return;
+      if (
+        packet.length === FIRMWARE.replySize &&
+        packet.readUInt32LE(0) === FIRMWARE.replyMagic
+      ) {
+        const reply = readFirmwareReply(packet)!;
+        const pending = this.firmwarePending.get(reply.request);
+        if (pending) {
+          clearTimeout(pending.timer);
+          this.firmwarePending.delete(reply.request);
+          pending.resolve(reply);
+        }
+        return;
+      }
       if (
         packet.length === MODEL.replySize &&
         packet.readUInt32LE(0) === MODEL.replyMagic
@@ -256,6 +290,11 @@ export class ZynqUdpTransport implements DeviceTransport {
       pending.reject(new Error("Disconnected"));
     }
     this.modelPending.clear();
+    for (const pending of this.firmwarePending.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("Disconnected"));
+    }
+    this.firmwarePending.clear();
     this.socket?.close();
     this.socket = null;
     this.owned = false;
@@ -394,6 +433,355 @@ export class ZynqUdpTransport implements DeviceTransport {
       }
     }
     throw new Error("Model request failed");
+  }
+  private firmwareErrorCode(result: number): string {
+    switch (result) {
+      case FIRMWARE.result.INVALID:
+        return "FIRMWARE_INVALID";
+      case FIRMWARE.result.BUSY:
+        return "DEVICE_BUSY";
+      case FIRMWARE.result.STORAGE:
+        return "FIRMWARE_STORAGE";
+      case FIRMWARE.result.REJECTED:
+        return "FIRMWARE_REJECTED";
+      case FIRMWARE.result.FULL:
+        return "FIRMWARE_FULL";
+      case FIRMWARE.result.NOT_FOUND:
+        return "NOT_FOUND";
+      case FIRMWARE.result.UNUSABLE:
+        return "NO_CAPABILITY";
+      case FIRMWARE.result.PROTECTED:
+        return "FIRMWARE_PROTECTED";
+      case FIRMWARE.result.NOT_ARMED:
+        return "FIRMWARE_NOT_ARMED";
+      case FIRMWARE.result.ROLLED_BACK:
+        return "FIRMWARE_ROLLED_BACK";
+      default:
+        return "COMMAND_REJECTED";
+    }
+  }
+  private async firmwareRpc(
+    operation: number,
+    offset = 0,
+    size = 0,
+    data: Buffer = Buffer.alloc(0),
+    timeout = operation === FIRMWARE.ops.INFO ? 1500 : 5000,
+  ): Promise<WireFirmwareReply> {
+    if (!this.socket)
+      throw new DomainError("DEVICE_OFFLINE", "Connect device first", 409);
+    const attempts =
+      operation === FIRMWARE.ops.DATA || operation === FIRMWARE.ops.FINISH
+        ? 3
+        : 1;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const id = ++this.sequence,
+        packet = firmwarePacket(id, operation, offset, size, data);
+      try {
+        const reply = await new Promise<WireFirmwareReply>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            this.firmwarePending.delete(id);
+            reject(
+              new DomainError(
+                "DEVICE_TIMEOUT",
+                "Firmware protocol response timed out",
+                504,
+              ),
+            );
+          }, timeout);
+          this.firmwarePending.set(id, { resolve, reject, timer });
+          this.socket!.send(packet, this.port, this.host, (error) => {
+            if (error) {
+              clearTimeout(timer);
+              this.firmwarePending.delete(id);
+              reject(error);
+            }
+          });
+        });
+        if (reply.result)
+          throw new DomainError(
+            this.firmwareErrorCode(reply.result),
+            `Board firmware operation ${operation} rejected: ${reply.result}`,
+            409,
+          );
+        return reply;
+      } catch (error) {
+        if (
+          !(error instanceof DomainError) ||
+          error.getStatus() !== 504 ||
+          attempt === attempts - 1
+        )
+          throw error;
+      }
+    }
+    throw new Error("Firmware request failed");
+  }
+  private toFirmwareInfo(reply: WireFirmwareReply): FirmwareInfo {
+    return {
+      supported: Boolean(reply.flags & FIRMWARE.flags.SUPPORTED),
+      version: reply.version,
+      sha256: reply.sha256,
+      generation: reply.generation,
+      flags: reply.flags,
+      runningSlot: reply.runningSlot,
+      activeSlot: reply.activeSlot,
+      previousSlot: reply.previousSlot,
+      pendingSlot: reply.pendingSlot,
+      attempts: reply.attempts,
+      maxAttempts: reply.maxAttempts,
+      stage: reply.stage,
+      slotImageSize: [reply.slotAImageSize, reply.slotBImageSize],
+    };
+  }
+  private applyFirmwareInfo(reply: WireFirmwareReply): FirmwareInfo {
+    const info = this.toFirmwareInfo(reply);
+    this.capabilities.firmwareUpdate = info.supported;
+    this.state.reportedState = {
+      ...this.state.reportedState,
+      firmwareVersion: info.version,
+      firmware: info,
+    };
+    return info;
+  }
+  private async refreshFirmwareInfo(): Promise<FirmwareInfo> {
+    return this.applyFirmwareInfo(
+      await this.firmwareRpc(FIRMWARE.ops.INFO, 0, 0, Buffer.alloc(0), 1500),
+    );
+  }
+  async getFirmwareInfo(): Promise<FirmwareInfo> {
+    if (!this.owned)
+      throw new DomainError(
+        "DEVICE_OFFLINE",
+        "Connect the device before reading firmware state",
+        409,
+      );
+    return this.refreshFirmwareInfo();
+  }
+  /** 等 FINISH 后的板端校验完成。 */
+  private async awaitVerified(timeout: number): Promise<FirmwareInfo> {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      try {
+        const info = await this.refreshFirmwareInfo();
+        if (info.flags & FIRMWARE.flags.VERIFIED) return info;
+      } catch {
+        // 校验期间主循环可能暂时无法响应，继续等。
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    throw new DomainError(
+      "FIRMWARE_VERIFY_TIMEOUT",
+      "Board did not verify the firmware package",
+      504,
+    );
+  }
+  private async awaitActivation(
+    version: string,
+    sha256: string,
+    slot: number,
+    timeout: number,
+    progress?: (stage: FirmwareStage) => Promise<void>,
+  ): Promise<FirmwareReceipt> {
+    const deadline = Date.now() + timeout;
+    let sawTarget = false;
+    while (Date.now() < deadline) {
+      try {
+        const info = await this.refreshFirmwareInfo();
+        if (info.version === version && info.sha256 === sha256) {
+          if (!sawTarget && progress) {
+            sawTarget = true;
+            await progress("SELF_TEST");
+          } else sawTarget = true;
+          if (
+            info.pendingSlot === FIRMWARE.noneSlot &&
+            info.runningSlot === slot &&
+            info.activeSlot === slot &&
+            !(info.flags & (FIRMWARE.flags.BUSY | FIRMWARE.flags.TRIAL))
+          )
+            return {
+              version: info.version,
+              sha256: info.sha256,
+              runningSlot: info.runningSlot,
+              activeSlot: info.activeSlot,
+              previousSlot: info.previousSlot,
+              confirmed: true,
+              golden: slot === FIRMWARE.goldenSlot,
+              attempts: info.attempts,
+              simulated: false,
+            };
+        } else if (sawTarget) {
+          throw new DomainError(
+            "FIRMWARE_ROLLED_BACK",
+            "Board booted a different firmware after the trial",
+            409,
+          );
+        }
+      } catch (error) {
+        if (error instanceof DomainError && error.getStatus() !== 504) throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    throw new DomainError(
+      "FIRMWARE_TIMEOUT",
+      "Board did not confirm the new firmware after reboot",
+      504,
+    );
+  }
+  async deployFirmware(
+    version: string,
+    sha256: string,
+    data: Buffer,
+    progress: (stage: FirmwareStage) => Promise<void>,
+  ): Promise<FirmwareReceipt> {
+    if (!this.owned)
+      throw new DomainError(
+        "DEVICE_OFFLINE",
+        "Connect the device before updating firmware",
+        409,
+      );
+    const info = await this.refreshFirmwareInfo();
+    if (!info.supported)
+      throw new DomainError(
+        "NO_CAPABILITY",
+        "Device firmware has no PS application OTA support",
+        422,
+      );
+    if (
+      info.pendingSlot !== FIRMWARE.noneSlot ||
+      info.flags & (FIRMWARE.flags.BUSY | FIRMWARE.flags.TRIAL)
+    )
+      throw new DomainError(
+        "DEVICE_BUSY",
+        "Device has a pending firmware trial or update",
+        409,
+      );
+    if (info.version === version && info.sha256 === sha256)
+      throw new DomainError(
+        "INVALID_STATE",
+        "The device is already running this firmware version",
+        409,
+      );
+    const target = info.activeSlot === 0 ? 1 : 0;
+    this.updating = true;
+    try {
+      await progress("DOWNLOADING");
+      await this.firmwareRpc(
+        FIRMWARE.ops.BEGIN,
+        FIRMWARE.armToken,
+        data.length,
+      );
+      for (let offset = 0; offset < data.length; offset += FIRMWARE.packet) {
+        const chunk = data.subarray(offset, offset + FIRMWARE.packet),
+          reply = await this.firmwareRpc(
+            FIRMWARE.ops.DATA,
+            offset,
+            chunk.length,
+            chunk,
+          );
+        if (reply.received < offset + chunk.length)
+          throw new DomainError(
+            "COMMAND_REJECTED",
+            "Board did not acknowledge firmware bytes",
+            409,
+          );
+      }
+      await progress("VERIFYING");
+      await this.firmwareRpc(FIRMWARE.ops.FINISH);
+      await this.awaitVerified(30000);
+      await progress("VERIFIED");
+      await progress("WRITING");
+      await this.firmwareRpc(FIRMWARE.ops.COMMIT);
+      await progress("REBOOTING");
+      const receipt = await this.awaitActivation(
+        version,
+        sha256,
+        target,
+        90000,
+        progress,
+      );
+      this.latest = null;
+      this.assembler.clear();
+      return receipt;
+    } finally {
+      this.updating = false;
+    }
+  }
+  async rollbackFirmware(target: "PREVIOUS" | "GOLDEN"): Promise<FirmwareReceipt> {
+    if (!this.owned)
+      throw new DomainError(
+        "DEVICE_OFFLINE",
+        "Connect the device before rolling back firmware",
+        409,
+      );
+    const info = await this.refreshFirmwareInfo();
+    if (!info.supported)
+      throw new DomainError(
+        "NO_CAPABILITY",
+        "Device firmware has no PS application OTA support",
+        422,
+      );
+    if (info.flags & FIRMWARE.flags.BUSY)
+      throw new DomainError("DEVICE_BUSY", "Device is busy", 409);
+    let slot: number;
+    if (target === "GOLDEN") slot = FIRMWARE.goldenSlot;
+    else if (info.previousSlot === 0 || info.previousSlot === 1)
+      slot = info.previousSlot;
+    else if (info.previousSlot === FIRMWARE.goldenSlot)
+      // The previous image can itself be the golden application.
+      slot = FIRMWARE.goldenSlot;
+    else
+      throw new DomainError(
+        "NOT_FOUND",
+        "No previous application slot; roll back to golden instead",
+        409,
+      );
+    if (info.runningSlot === slot && info.pendingSlot === FIRMWARE.noneSlot)
+      throw new DomainError(
+        "INVALID_STATE",
+        "Device is already running that firmware slot",
+        409,
+      );
+    this.updating = true;
+    try {
+      await this.firmwareRpc(
+        FIRMWARE.ops.ROLLBACK,
+        slot === FIRMWARE.goldenSlot
+          ? FIRMWARE.rollbackTarget.GOLDEN
+          : FIRMWARE.rollbackTarget.PREVIOUS,
+      );
+      const deadline = Date.now() + 90000;
+      while (Date.now() < deadline) {
+        try {
+          const next = await this.refreshFirmwareInfo();
+          if (
+            next.runningSlot === slot &&
+            next.pendingSlot === FIRMWARE.noneSlot &&
+            !(next.flags & FIRMWARE.flags.BUSY)
+          )
+            return {
+              version: next.version,
+              sha256: next.sha256,
+              runningSlot: next.runningSlot,
+              activeSlot: next.activeSlot,
+              previousSlot: next.previousSlot,
+              confirmed: true,
+              golden: slot === FIRMWARE.goldenSlot,
+              attempts: next.attempts,
+              simulated: false,
+            };
+        } catch (error) {
+          if (error instanceof DomainError && error.getStatus() !== 504)
+            throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+      throw new DomainError(
+        "FIRMWARE_TIMEOUT",
+        "Board did not confirm the rollback after reboot",
+        504,
+      );
+    } finally {
+      this.updating = false;
+    }
   }
   /** op0 永远可用；顺带按需刷新模型库（op7 逐槽拉，一次十几包）。 */
   private async refreshModelState(includeLibrary: boolean) {

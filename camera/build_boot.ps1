@@ -37,7 +37,7 @@ zynq_sd_model:
 & "$env:XILINX_VITIS/bin/unwrapped/win64.o/bootgen.exe" -arch zynq -image $bif -o $boot -w on
 if ($LASTEXITCODE) { throw 'Bootgen failed' }
 $bootSize = (Get-Item -LiteralPath $boot).Length
-if ($bootSize -ge 16MB) { throw 'Boot image must fit in the first 16 MiB QSPI window' }
+if ($bootSize -ge 0x007FE000) { throw 'Boot image must stay below the firmware records (0x007FE000)' }
 $hash = (Get-FileHash -LiteralPath $boot -Algorithm SHA256).Hash
 Write-Output "BOOT.bin bytes=$bootSize SHA256=$hash"
 if ($Flash) {

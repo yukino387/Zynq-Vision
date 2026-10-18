@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
 import { chinese, displayName } from "@vision/shared";
-import { request, notify } from "../../state";
+import { request, notify, session } from "../../state";
 import RemoteImage from "../../components/RemoteImage.vue";
 
 interface Sample {
@@ -21,6 +21,7 @@ const sample = ref<Sample | null>(null),
   note = ref(""),
   hard = ref(false),
   busy = ref(false);
+const saved = ref(false);
 const previewAsset = computed(() =>
   sample.value?.assets.find((a) => a.kind === "PREVIEW"),
 );
@@ -36,7 +37,9 @@ function setHard(e: unknown) {
   hard.value = (e as { detail: { value: boolean } }).detail.value;
 }
 async function review() {
-  if (!sample.value) return;
+  if (!sample.value || busy.value) return;
+  error.value = "";
+  saved.value = false;
   busy.value = true;
   try {
     await request(`/samples/${sample.value.id}/review`, "POST", {
@@ -46,6 +49,7 @@ async function review() {
     });
     sample.value = await request(`/samples/${sample.value.id}`);
     uni.showToast({ title: "审核已保存", icon: "success" });
+    saved.value = true;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
     notify(e);
@@ -63,7 +67,11 @@ async function review() {
       <text class="title">样本与审核</text>
       <text class="subtitle">{{ displayName(sample.name) }}</text>
       <view class="image-wrap">
-        <RemoteImage :asset-id="previewAsset?.id" mode="aspectFit" label="无预览图" />
+        <RemoteImage
+          :asset-id="previewAsset?.id"
+          mode="aspectFit"
+          label="无预览图"
+        />
       </view>
       <view class="card" style="margin-top: 18px">
         <view class="row">
@@ -74,33 +82,39 @@ async function review() {
           >质量提示：{{ chinese(sample.quality?.status ?? "不可用") }}</text
         >
       </view>
-      <view class="review-options">
-        <text
-          v-for="v in [
-            { key: 'ACCEPT', label: '接纳' },
-            { key: 'REJECT', label: '拒绝' },
-            { key: 'NEEDS_WORK', label: '待补充' },
-          ]"
-          :key="v.key"
-          :class="{ selected: verdict === v.key }"
-          @click="verdict = v.key"
-          >{{ v.label }}</text
+      <template v-if="session.user?.role === 'ADMIN'">
+        <view class="review-options">
+          <text
+            v-for="v in [
+              { key: 'ACCEPT', label: '接纳' },
+              { key: 'REJECT', label: '拒绝' },
+              { key: 'NEEDS_WORK', label: '待补充' },
+            ]"
+            :key="v.key"
+            :class="{ selected: verdict === v.key }"
+            @click="verdict = v.key"
+            >{{ v.label }}</text
+          >
+        </view>
+        <view v-if="saved" class="success-note">样本审核已保存。</view>
+        <view class="field row">
+          <text>困难样本</text>
+          <switch :checked="hard" color="#087f82" @change="setHard" />
+        </view>
+        <textarea v-model="note" placeholder="采样审核备注" maxlength="2000" />
+        <button
+          class="primary"
+          style="margin-top: 18px"
+          @click="review"
+          :disabled="busy"
+          :loading="busy"
         >
-      </view>
-      <view class="field row">
-        <text>困难样本</text>
-        <switch :checked="hard" color="#dd5b2a" @change="setHard" />
-      </view>
-      <textarea v-model="note" placeholder="采样审核备注" maxlength="2000" />
-      <button
-        class="primary"
-        style="margin-top: 18px"
-        @click="review"
-        :disabled="busy"
-        :loading="busy"
+          保存样本审核
+        </button>
+      </template>
+      <text v-else class="note"
+        >样本审核由管理员完成，可在此查看原图与审核状态。</text
       >
-        保存样本审核
-      </button>
     </template>
     <view v-else-if="!error" class="empty">读取样本…</view>
   </view>
@@ -110,8 +124,12 @@ async function review() {
 .image-wrap {
   width: 100%;
   aspect-ratio: 1 / 1;
-  border: 1px solid #b7bda9;
-  background: #dcded5;
+  border: 1px solid #dce6e9;
+  background: #e8f0f2;
   overflow: hidden;
+}
+
+.image-wrap {
+  border-radius: 18px;
 }
 </style>

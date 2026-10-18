@@ -12,7 +12,7 @@ import {
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { randomBytes, createHash } from "node:crypto";
-import { networkInterfaces } from "node:os";
+import { serverAddresses, mobileServerUrl } from "./network.js";
 import { Db } from "../core/db.js";
 import { Events } from "../core/events.js";
 import { Roles, Public, type Request } from "../core/auth.js";
@@ -339,13 +339,7 @@ export class SystemController {
         network: d.connectionState,
         runtime: d.runtimeState,
       })),
-      network: Object.values(networkInterfaces())
-        .flat()
-        .filter((a) => a?.family === "IPv4" && !a.internal)
-        .map((a) => ({
-          address: a!.address,
-          url: `http://${a!.address}:${config.SERVER_PORT}`,
-        })),
+      network: serverAddresses(config.SERVER_PORT),
     };
   }
   @Roles("ADMIN", "ENGINEER") @Get("system/jobs") async jobs(
@@ -442,7 +436,14 @@ export class SystemController {
       z
         .object({
           stationId: z.string().optional(),
-          serverUrl: z.string().url(),
+          serverUrl: z
+            .string()
+            .trim()
+            .url()
+            .refine(
+              mobileServerUrl,
+              "请使用手机可访问的电脑 WLAN 地址，不能使用 localhost、回环地址或带路径的地址",
+            ),
         })
         .strict(),
       body,
@@ -459,7 +460,7 @@ export class SystemController {
       },
     });
     return {
-      serverUrl: dto.serverUrl,
+      serverUrl: new URL(dto.serverUrl).origin,
       stationId: dto.stationId,
       pairingToken: token,
       expiry: expiry.toISOString(),

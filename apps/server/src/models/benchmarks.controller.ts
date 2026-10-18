@@ -61,8 +61,12 @@ export class BenchmarksController {
     const real = device.type === "ZYNQ";
     const before = transport.getStatus();
     const previousVersion = transport.getCurrentModel();
+    const payloadSha256 = weights.subarray(88, 120).toString("hex");
+    const replacing =
+      previousVersion !== model.version ||
+      before.reportedState.modelPayloadSha256 !== payloadSha256;
     const previousModels =
-      real && previousVersion && previousVersion !== model.version
+      real && previousVersion && replacing
         ? await this.db.model.findMany({
             where: { version: previousVersion, source: "IMPORT" },
           })
@@ -78,10 +82,15 @@ export class BenchmarksController {
         break;
       }
     }
-    if (real && previousVersion !== model.version && !previousModel)
+    if (real && replacing && !previousModel)
       throw new DomainError(
-        "INVALID_STATE",
+        "MODEL_RESTORE_REQUIRED",
         "Import the active model before evaluating a replacement so it can be restored",
+        409,
+        {
+          version: previousVersion,
+          payloadSha256: before.reportedState.modelPayloadSha256,
+        },
       );
     const frame = real
       ? await this.commands.run(
@@ -104,6 +113,7 @@ export class BenchmarksController {
                   const frame = await transport.captureOnce();
                   if (
                     frame.modelState.modelVersion === model.version &&
+                    frame.modelState.modelPayloadSha256 === payloadSha256 &&
                     frame.outputs &&
                     frame.telemetry &&
                     frame.telemetry.errorCode === 0
@@ -156,6 +166,9 @@ export class BenchmarksController {
             candidateExecuted: real,
             frameId: frame.frameId,
             restoredModelVersion: real ? previousVersion : null,
+            restoredModelPayloadSha256: real
+              ? before.reportedState.modelPayloadSha256
+              : null,
             inferenceUs: frame.telemetry?.inferenceUs ?? null,
             cycleUs: frame.telemetry?.cycleUs ?? null,
             fps: frame.telemetry?.fps ?? null,
