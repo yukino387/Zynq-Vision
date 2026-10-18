@@ -1,0 +1,18 @@
+/* Include in the Linux device tree generated from the terminal XSA.
+ * Disable generated drivers for the same GPIO/DMA/conv/VDMA resources first.
+ * Include navigator-v3.9-usb.dtsi for the board's verified USB wiring.
+ */
+/ {
+    vision_accel {
+        compatible = "cnn,vision-accel-v1";
+        reg = <0x41200000 0x10000>, <0x40400000 0x10000>, <0x43c00000 0x10000>;
+        reg-names = "gpio", "capture", "conv";
+        clocks = <&clkc 15>;
+    };
+    vision_display {
+        compatible = "cnn,vision-fb-720p-v1";
+        reg = <0x43000000 0x10000>;
+        clocks = <&clkc 15>, <&clkc 16>;
+        clock-names = "axi", "video";
+    };
+};

@@ -1,0 +1,18 @@
+[Unit]
+Description=HDMI vision operator panel
+After=vision-engine.service
+Requires=vision-engine.service
+
+[Service]
+Type=simple
+ExecStartPre=/sbin/modprobe vision_fb
+ExecStart=/usr/local/bin/vision-panel /usr/share/vision/NotoSansCJKsc-Regular.otf
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/vision
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

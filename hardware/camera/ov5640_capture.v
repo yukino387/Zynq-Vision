@@ -1,5 +1,5 @@
 module ov5640_capture (
-    (* X_INTERFACE_INFO = "xilinx.com:signal:clock:1.0 clk CLK", X_INTERFACE_PARAMETER = "ASSOCIATED_BUSIF m_axis:control:status, ASSOCIATED_RESET resetn, FREQ_HZ 125000000" *)
+    (* X_INTERFACE_INFO = "xilinx.com:signal:clock:1.0 clk CLK", X_INTERFACE_PARAMETER = "ASSOCIATED_BUSIF m_axis:control:status, ASSOCIATED_RESET resetn" *)
     input wire clk,
     (* X_INTERFACE_INFO = "xilinx.com:signal:reset:1.0 resetn RST", X_INTERFACE_PARAMETER = "POLARITY ACTIVE_LOW" *)
     input wire resetn,

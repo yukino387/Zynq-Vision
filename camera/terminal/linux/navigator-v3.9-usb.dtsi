@@ -1,0 +1,21 @@
+#include <dt-bindings/gpio/gpio.h>
+
+/* V3.9 schematic sheet 7: fit P4 jumpers 3-5 and 4-6 for the GL850G hub.
+ * Hub power/reset are passive; USB3320 CPEN controls the TPS2051 VBUS switch.
+ * P6 inverts MIO9: a high GPIO asserts the PHY's active-low RESETB pin.
+ */
+/ {
+    terminal_usb_phy: usb-phy {
+        compatible = "usb-nop-xceiv";
+        #phy-cells = <0>;
+        reset-gpios = <&gpio0 9 GPIO_ACTIVE_HIGH>;
+    };
+};
+
+&usb0 {
+    status = "okay";
+    dr_mode = "host";
+    phy_type = "ulpi";
+    phys = <&terminal_usb_phy>;
+    phy-names = "usb-phy";
+};

@@ -1,5 +1,6 @@
 #include "camera_input.h"
 #include "../hardware/camera/ov5640_registers.h"
+#include "../hardware/camera/ov5640_mode.h"
 #include "sleep.h"
 #include "xil_cache.h"
 #include "xil_io.h"
@@ -107,20 +108,7 @@ bool camera_init()
             return false;
         }
     }
-    const struct
-    {
-        uint16_t address;
-        uint8_t value;
-    } output[] = {{0x3035, 0x11}, {0x3037, 0x03}, {0x3824, 0x04}, {0x3a00, 0x38},
-                  // Fixed 25 fps: 56 MHz / 1896 HTS / 1181 VTS. Force 50 Hz banding.
-                  {0x380e, 0x04}, {0x380f, 0x9d}, {0x3c01, 0xb4}, {0x3c00, 0x04},
-                  {0x3a02, 0x04}, {0x3a03, 0x99}, {0x3a14, 0x04}, {0x3a15, 0x99},
-                  {0x3a08, 0x01}, {0x3a09, 0x27}, {0x3a0a, 0x00}, {0x3a0b, 0xf6},
-                  {0x3a0e, 0x03}, {0x3a0d, 0x04},
-                  {0x5583, 0x40}, {0x5584, 0x40},
-                  {0x4300, 0x61}, {0x501f, 0x01}, {0x4740, 0x21}, {0x3808, 0x01},
-                  {0x3809, 0xa0}, {0x380a, 0x01}, {0x380b, 0xa0}, {0x3008, 0x02}};
-    for (const auto &reg : output)
+    for (const auto &reg : camera_output_registers)
     {
         uint8_t value = 0;
         if (!write_register(reg.address, reg.value) || !read_register(reg.address, value) ||

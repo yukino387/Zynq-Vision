@@ -1,0 +1,42 @@
+// SPDX-License-Identifier: GPL-2.0
+/dts-v1/;
+#include "zynq-7000.dtsi"
+#include "navigator-v3.9-usb.dtsi"
+#include "vision-pl.dtsi"
+
+/ {
+    model = "Navigator V3.9 Zynq-7020 vision terminal";
+    compatible = "cnn,navigator-v39-terminal", "xlnx,zynq-7000";
+    aliases {
+        serial0 = &uart0;
+        ethernet0 = &gem0;
+        mmc0 = &sdhci0;
+    };
+    chosen {
+        stdout-path = "serial0:115200n8";
+    };
+    memory@0 {
+        device_type = "memory";
+        reg = <0x0 0x40000000>;
+    };
+};
+
+&clkc {
+    ps-clk-frequency = <33333333>;
+    fclk-enable = <0x3>;
+};
+
+&uart0 { status = "okay"; };
+&sdhci0 { status = "okay"; bus-width = <4>; disable-wp; no-1-8-v; };
+
+&gem0 {
+    status = "okay";
+    phy-mode = "rgmii-id";
+    phy-handle = <&terminal_ethernet_phy>;
+    /* Core 2V5 sheet 11: PHYAD[2:1] pull down, PHYAD0 pulls up. */
+    terminal_ethernet_phy: ethernet-phy@1 {
+        reg = <1>;
+        rx-internal-delay-ps = <1950>;
+        tx-internal-delay-ps = <1950>;
+    };
+};

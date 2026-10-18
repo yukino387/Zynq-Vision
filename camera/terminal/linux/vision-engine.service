@@ -1,0 +1,19 @@
+[Unit]
+Description=Independent vision inspection engine
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStartPre=/sbin/modprobe vision_accel
+ExecStart=/usr/local/bin/vision-engine /var/lib/vision /var/lib/vision/jobs
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/vision
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

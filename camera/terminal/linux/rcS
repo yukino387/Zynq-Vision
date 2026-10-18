@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+mkdir -p /dev/pts /dev/input /run /tmp /var/lib/vision/jobs /boot
+mount -t devpts devpts /dev/pts
+mount -t tmpfs -o mode=755,nosuid,nodev tmpfs /run
+mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /tmp
+hostname vision-terminal
+chmod 700 /var/lib/vision
+modprobe vision_accel
+modprobe vision_fb
+ifconfig lo up
+# Local production link; use /etc/vision-network for a different deployment.
+if [ -f /etc/vision-network ]; then
+    . /etc/vision-network
+else
+    VISION_ADDRESS=169.254.140.110
+    VISION_NETMASK=255.255.0.0
+fi
+ifconfig eth0 "$VISION_ADDRESS" netmask "$VISION_NETMASK" up || echo "Network unavailable; local inspection remains available" >&2
+# The FAT boot partition is the PC-managed transfer area, mounted read-only.
+if mount -t vfat -o ro,nodev,nosuid,noexec /dev/mmcblk0p1 /boot; then
+    for package in /boot/vision/*.zip; do
+        [ -f "$package" ] || continue
+        python3 /usr/local/bin/vision-install-job.py "$package" || echo "Job import failed: $package" >&2
+    done
+    if [ -f /boot/vision/connection.json ]; then
+        cp /boot/vision/connection.json /var/lib/vision/connection.json
+        chmod 600 /var/lib/vision/connection.json
+    fi
+fi
+sync

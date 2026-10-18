@@ -1,0 +1,7 @@
+::sysinit:/etc/init.d/rcS
+ttyPS0::respawn:/bin/sh
+::respawn:/usr/local/bin/vision-engine /var/lib/vision /var/lib/vision/jobs
+::respawn:/usr/local/bin/vision-panel /usr/share/vision/NotoSansCJKsc-Regular.otf
+::ctrlaltdel:/sbin/reboot
+::shutdown:/bin/sync
+::shutdown:/bin/umount -a -r
