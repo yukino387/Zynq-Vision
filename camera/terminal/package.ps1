@@ -10,7 +10,7 @@ foreach ($name in @('vision-engine','vision-panel')) {
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'install_job.py') -Destination (Join-Path $prefix 'usr/local/bin/vision-install-job.py')
 foreach ($name in @('vision-engine.service','vision-panel.service')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot "linux/$name") -Destination (Join-Path $prefix 'etc/systemd/system') }
-foreach ($name in @('vision_accel.c','vision_fb.c','vision_uapi.h','Makefile','vision-pl.dtsi','navigator-v3.9.dts','navigator-v3.9-usb.dtsi','kernel.config','uboot.config','build-kernel.sh','build-uboot.sh','build-modules.sh','build-rootfs.sh','build-sd-image.sh','install-rootfs.sh','rcS','inittab')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot "linux/$name") -Destination (Join-Path $output 'kernel') }
+foreach ($name in @('vision_accel.c','vision_fb.c','vision_uapi.h','Makefile','vision-pl.dtsi','navigator-v3.9.dts','navigator-v3.9-usb.dtsi','kernel.config','uboot.config','build-kernel.sh','build-uboot.sh','build-modules.sh','build-rootfs.sh','build-initramfs.sh','build-sd-image.sh','install-rootfs.sh','rcS','inittab')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot "linux/$name") -Destination (Join-Path $output 'kernel') }
 $fontRoot = 'https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans'
 $font = Join-Path $prefix 'usr/share/vision/NotoSansCJKsc-Regular.otf'
 if (!(Test-Path -LiteralPath $font)) { Invoke-WebRequest -Uri "$fontRoot/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf" -OutFile $font }

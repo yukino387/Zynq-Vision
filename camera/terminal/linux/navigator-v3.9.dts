@@ -33,9 +33,9 @@
     status = "okay";
     phy-mode = "rgmii-id";
     phy-handle = <&terminal_ethernet_phy>;
-    /* Core 2V5 sheet 11: PHYAD[2:1] pull down, PHYAD0 pulls up. */
-    terminal_ethernet_phy: ethernet-phy@1 {
-        reg = <1>;
+    /* Physical board verified: YT8521 at MDIO address 7. */
+    terminal_ethernet_phy: ethernet-phy@7 {
+        reg = <7>;
         rx-internal-delay-ps = <1950>;
         tx-internal-delay-ps = <1950>;
     };
