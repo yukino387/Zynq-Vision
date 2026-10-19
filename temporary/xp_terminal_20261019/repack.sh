@@ -2,7 +2,7 @@
 set -eu
 delivery=/workspace/camera/terminal/build/delivery
 root=/opt/vision/rootfs-20261018-v2
-backup=/workspace/camera/terminal/build/pre-xp-ui
+backup=/workspace/camera/terminal/build/pre-xp-desktop
 test ! -e "$backup"
 mkdir -p "$backup/boot"
 for name in rootfs.tar.gz vision-terminal-sd.img vision-terminal-sd.img.gz; do

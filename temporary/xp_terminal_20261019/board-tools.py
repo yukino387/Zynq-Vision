@@ -29,6 +29,10 @@ elif sys.argv[1] == 'collect':
     assert hashlib.sha256(raw).hexdigest() == evidence['frameSha256']
     assert evidence['panelSha256'] == update['sha256']
     Image.frombytes('RGB', (1280,720), raw, 'raw', 'BGRX').save(task/'board-xp.png')
+    for marker, name in [('XP_UI_DESKTOP','board-desktop.png'),('XP_UI_START','board-start.png')]:
+        frames = re.findall(r'^'+marker+r' (.+)\r?$',log,re.M)
+        if frames:
+            Image.frombytes('RGB',(1280,720),zlib.decompress(base64.b64decode(frames[-1])),'raw','BGRX').save(task/name)
     evidence['panelUpdate'] = update
     evidence['armRenderedStates'] = ['idle', 'review (synthetic fixture)', 'error']
     assert (task/'render.exit').read_text().strip() == '0'

@@ -73,7 +73,7 @@ try:
         assert data[:3686400] == data[3686400:], 'Back page is stale'
         # The fixed 416-square image must be entirely present, and cleared on loss.
         def pixel(x, y): return struct.unpack_from('<I', data, (y*1280+x)*4)[0]&0xffffff
-        assert pixel(230, 220) != 0 if name == 'review' else pixel(230, 220) == 0
+        assert pixel(50, 215) != 0 if name == 'review' else pixel(50, 215) == 0
         (task/(name+'.bin')).write_bytes(data[:3686400])
         print('PASS ARM render:', name, flush=True)
 finally:

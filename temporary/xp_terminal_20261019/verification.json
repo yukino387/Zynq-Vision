@@ -1,5 +1,5 @@
 {
-  "panelSha256": "0a9ede4e8b8b634d62c77af4bfcf305c52975b35df6d229b6d97b5fcde2e3dfe",
+  "panelSha256": "d1d91aafa369ba320f335fa0961d1ae8f3fc76db73f8575ddbc287ef21b918c1",
   "persistentSdRoot": true,
   "mouseDevice": "event8",
   "keyboardDevice": "event4",
@@ -7,15 +7,22 @@
   "edgeRecovery": true,
   "oldCursorPixelsCleared": true,
   "dropdownClickVerified": true,
-  "dropdownRoiChangedBytes": 59672,
+  "dropdownRoiChangedBytes": 32103,
   "keyboardTabVerified": true,
-  "keyboardFocusChangedBytes": 576,
-  "frameSha256": "e85eff96569fe36e92a56735c15a8677ae2f253baa048c0d26bf7f9edfc2015d",
+  "keyboardFocusChangedBytes": 1560,
+  "maximizeRestoreVerified": true,
+  "titleDragVerified": true,
+  "minimizeTaskbarRestoreVerified": true,
+  "closeVerified": true,
+  "desktopDoubleClickVerified": true,
+  "startMenuLaunchVerified": true,
+  "fileMenuVerified": true,
+  "frameSha256": "6e30aed7528c1dba753fede38ec8d69a8072d716d0cd196eaece463b39282f45",
   "physicalHandTestAfterStyleChange": false,
   "panelUpdate": {
-    "previousSha256": "020eb99dc7d79b4bbab20e0799249e36256339d144c81219a5fee8b45a1c2cde",
-    "sha256": "0a9ede4e8b8b634d62c77af4bfcf305c52975b35df6d229b6d97b5fcde2e3dfe",
-    "bytes": 2258256,
+    "previousSha256": "0b7c8a4617bcd2b381cc3175fa81005f3a0715c949265f1eccf7c0906bb33de2",
+    "sha256": "d1d91aafa369ba320f335fa0961d1ae8f3fc76db73f8575ddbc287ef21b918c1",
+    "bytes": 2269080,
     "persistedToSdRoot": true
   },
   "armRenderedStates": [
@@ -23,11 +30,12 @@
     "review (synthetic fixture)",
     "error"
   ],
-  "style": "Windows XP Luna inspired; native LVGL on Linux",
+  "style": "XP Luna window chrome, menus, desktop, taskbar and arrow cursor",
+  "guidanceTextRemoved": true,
   "deliveryPayloadsVerified": [
     "SD ext4 image",
     "initramfs",
     "rootfs.tar.gz"
   ],
-  "deliverySdImageSha256": "60d04b8671ada48ddb64a451150a0a740aa3a27df01e4194ff99eff629d08114"
+  "deliverySdImageSha256": "6f43a6f93e1b5f2d59b83fc61b62fb41c5c8aa8d01df4a241215e580f9b23f62"
 }
