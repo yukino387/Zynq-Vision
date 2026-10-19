@@ -1,0 +1,10 @@
+*.log
+*.bin
+*.dtb
+*.exit
+*.b64
+uart.commands
+uart.stop
+uart.py
+*.img
+*.gz

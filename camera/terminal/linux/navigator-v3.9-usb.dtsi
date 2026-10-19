@@ -2,13 +2,29 @@
 
 /* V3.9 schematic sheet 7: fit P4 jumpers 3-5 and 4-6 for the GL850G hub.
  * Hub power/reset are passive; USB3320 CPEN controls the TPS2051 VBUS switch.
- * P6 inverts MIO9: a high GPIO asserts the PHY's active-low RESETB pin.
+ * P6 is a BAS16 diode, not an inverter: MIO9 low asserts RESETB.
  */
 / {
     terminal_usb_phy: usb-phy {
         compatible = "usb-nop-xceiv";
         #phy-cells = <0>;
-        reset-gpios = <&gpio0 9 GPIO_ACTIVE_HIGH>;
+        pinctrl-names = "default";
+        pinctrl-0 = <&terminal_usb_reset>;
+        reset-gpios = <&gpio0 9 GPIO_ACTIVE_LOW>;
+    };
+};
+
+&pinctrl0 {
+    terminal_usb_reset: usb-reset-default {
+        mux {
+            groups = "gpio0_9_grp";
+            function = "gpio0";
+        };
+        conf {
+            pins = "MIO9";
+            /* Clear the boot firmware's TRI_ENABLE so GPIO drives RESETB. */
+            bias-disable;
+        };
     };
 };
 
