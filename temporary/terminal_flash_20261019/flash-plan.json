@@ -1,0 +1,32 @@
+{
+  "cid": "fe3432534431364720000001cf017b00",
+  "sectors": 61067264,
+  "backupSha256": "ba73455910d2d35d04bd5848499ed691454e9a9546738bc8babd25314c71ab4d",
+  "compressed": {
+    "path": "vision-terminal-sd.img.gz",
+    "size": 59414252,
+    "sha256": "f3b93f9478e4a2d9437d13e2431ca111d6c0ce06708e9b7946630833820d1fa6"
+  },
+  "image": {
+    "path": "vision-terminal-sd.img",
+    "size": 2147483648,
+    "sha256": "ed0d1294a1b49ede9ccebc7a378e6624e58822796801553a0a804a07ccad8457"
+  },
+  "boot": {
+    "BOOT.bin": {
+      "path": "boot/BOOT.bin",
+      "size": 4983280,
+      "sha256": "6bb1a35bc2a6bebef4944ac709de54da1aec8d43f2e7bb65f69405d7481fa878"
+    },
+    "zImage": {
+      "path": "boot/zImage",
+      "size": 10981888,
+      "sha256": "f24bdc361dd036100ffd05a81acc33b1e438d2cb4c280f3d23cfc9136185dde3"
+    },
+    "system.dtb": {
+      "path": "boot/system.dtb",
+      "size": 11305,
+      "sha256": "a3d9bbeea38090a6d4915c1bb52949034ceedcea2dd437b0e101a36f13ea35dd"
+    }
+  }
+}

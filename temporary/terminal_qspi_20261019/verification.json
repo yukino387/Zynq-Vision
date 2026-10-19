@@ -1,0 +1,161 @@
+{
+  "formatVersion": 1,
+  "bootLayout": "QSPI FSBL + PL bitstream + U-Boot; SD FAT kernel/DT/models; SD ext4 persistent root",
+  "physicalColdBootVerified": true,
+  "coldBootEvidence": "User confirmed actual power-off/on; UART then captured autonomous U-Boot and SD-root Linux startup",
+  "normalLinuxRebootVerified": true,
+  "statePersistedAcrossReboot": true,
+  "physicalMonitorAndKeyboardConfirmedAfterFlash": false,
+  "physicalMouseOperationVerified": false,
+  "qspi": {
+    "jedec": "ef4019",
+    "flashCapacityBytes": 33554432,
+    "programmedBytes": 4983280,
+    "programmedSha256": "6bb1a35bc2a6bebef4944ac709de54da1aec8d43f2e7bb65f69405d7481fa878",
+    "ordinaryReadbackVerified": true,
+    "quadReadbackVerified": true,
+    "backup": {
+      "backup": "C:\\00_workplace\\fpga\\cnn_accelerator\\camera\\terminal\\build\\qspi-backups\\flash-before-terminal-20261019-134541.bin",
+      "bytes": 5046272,
+      "sha256": "ef3f3189c8feada43042a5dc9b6d722433e8475f0154c0f36a3026965734bd2e"
+    },
+    "originalResetRequestFailed": true
+  },
+  "sd": {
+    "cid": "fe3432534431364720000001cf017b00",
+    "imageBytes": 2147483648,
+    "imageSha256BeforeModelRestore": "ed0d1294a1b49ede9ccebc7a378e6624e58822796801553a0a804a07ccad8457",
+    "fullRawReadbackVerified": true,
+    "restoredFiles": 10,
+    "allRestoredModelHashesVerified": true,
+    "bootFilesVerified": true,
+    "partition2Present": true
+  },
+  "coldBoot": {
+    "phase": "write",
+    "bootId": "d3fea063-1338-4774-846f-fed2689a4842",
+    "rootDevice": [
+      179,
+      2
+    ],
+    "rootOnPhysicalSd": true,
+    "kernel": "6.6.159-vision-terminal",
+    "modelsRestoredAndVerified": 10,
+    "usbDevices": [
+      [
+        "1d6b",
+        "0002"
+      ],
+      [
+        "0c45",
+        "fefe"
+      ],
+      [
+        "05e3",
+        "0608"
+      ],
+      [
+        "046d",
+        "c53f"
+      ]
+    ],
+    "processes": {
+      "vision-engine": 79,
+      "vision-panel": 80
+    },
+    "panelInputFds": [
+      "/dev/input/event7",
+      "/dev/input/event5",
+      "/dev/input/event4",
+      "/dev/input/event3",
+      "/dev/input/event2",
+      "/dev/input/event1",
+      "/dev/input/event0",
+      "/dev/input/event8",
+      "/dev/input/event9",
+      "/dev/input/event10"
+    ],
+    "engineResponding": true,
+    "engineJob": null,
+    "statePersistedAcrossReboot": false
+  },
+  "normalReboot": {
+    "phase": "verify",
+    "bootId": "88eae27a-d4e6-41cc-89f1-c68e478b0d12",
+    "rootDevice": [
+      179,
+      2
+    ],
+    "rootOnPhysicalSd": true,
+    "kernel": "6.6.159-vision-terminal",
+    "modelsRestoredAndVerified": 10,
+    "usbDevices": [
+      [
+        "1d6b",
+        "0002"
+      ],
+      [
+        "0c45",
+        "fefe"
+      ],
+      [
+        "05e3",
+        "0608"
+      ],
+      [
+        "046d",
+        "c53f"
+      ]
+    ],
+    "processes": {
+      "vision-engine": 80,
+      "vision-panel": 81
+    },
+    "panelInputFds": [
+      "/dev/input/event7",
+      "/dev/input/event5",
+      "/dev/input/event4",
+      "/dev/input/event3",
+      "/dev/input/event2",
+      "/dev/input/event1",
+      "/dev/input/event0",
+      "/dev/input/event8",
+      "/dev/input/event9",
+      "/dev/input/event10"
+    ],
+    "engineResponding": true,
+    "engineJob": null,
+    "statePersistedAcrossReboot": true
+  },
+  "mouseFix": {
+    "method": "Linux evdev injection into the enumerated Logitech mouse node",
+    "device": "/dev/input/event8",
+    "leftTopRecovery": true,
+    "rightBottomRecovery": true,
+    "cursorVisible": true,
+    "oldCursorPixelsCleared": true,
+    "leftClickOpenedDropdown": true,
+    "dropdownRoiBytesChanged": 40264,
+    "frameSha256": "28b4e3b8cbcfbdaa5d8a72ef072d119830aca4d6f311471e4d2d06b10491fe7b",
+    "physicalMouseOperationConfirmed": false,
+    "physicalInputEventsBeforeFix": {
+      "seconds": 45,
+      "counts": {
+        "/dev/input/event8:2": 16385,
+        "/dev/input/event8:1": 60
+      },
+      "pressedKeyCodes": {
+        "272": 30
+      }
+    },
+    "panelUpdate": {
+      "previousSha256": "f444ba71a2ba42eb4167ad8be05ec441c343cc883af50a5f439c3d92a9ed7e23",
+      "sha256": "020eb99dc7d79b4bbab20e0799249e36256339d144c81219a5fee8b45a1c2cde",
+      "bytes": 2249992,
+      "persistedToSdRoot": true
+    },
+    "armEdgeRegressionFailedBeforeFix": true,
+    "armEdgeRegressionPassedAfterFix": true
+  },
+  "updatedSdImageBootAndPanelHashVerifiedInQemu": true
+}

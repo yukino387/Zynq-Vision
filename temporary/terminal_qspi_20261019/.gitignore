@@ -1,0 +1,9 @@
+*.log
+*.bin
+*.exit
+*.b64
+uart.*
+__pycache__/
+evdev-edge-before
+evdev-edge-after
+*.png

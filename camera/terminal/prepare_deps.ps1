@@ -19,4 +19,14 @@ foreach ($dependency in $dependencies) {
         & git -C $path sparse-checkout set @($dependency.Sparse)
         if ($LASTEXITCODE) { throw "Dependency checkout failed: $($dependency.Name)" }
     }
+    if ($dependency.Name -eq 'lvgl') {
+        $patch = Join-Path $PSScriptRoot 'lvgl-evdev-bounds.patch'
+        & git -C $path apply --reverse --check $patch 2>$null
+        if ($LASTEXITCODE) {
+            & git -C $path apply --check $patch
+            if ($LASTEXITCODE) { throw 'LVGL mouse patch does not match the pinned source' }
+            & git -C $path apply $patch
+            if ($LASTEXITCODE) { throw 'LVGL mouse patch failed' }
+        }
+    }
 }

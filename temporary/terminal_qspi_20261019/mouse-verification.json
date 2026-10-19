@@ -1,0 +1,30 @@
+{
+  "method": "Linux evdev injection into the enumerated Logitech mouse node",
+  "device": "/dev/input/event8",
+  "leftTopRecovery": true,
+  "rightBottomRecovery": true,
+  "cursorVisible": true,
+  "oldCursorPixelsCleared": true,
+  "leftClickOpenedDropdown": true,
+  "dropdownRoiBytesChanged": 40264,
+  "frameSha256": "28b4e3b8cbcfbdaa5d8a72ef072d119830aca4d6f311471e4d2d06b10491fe7b",
+  "physicalMouseOperationConfirmed": false,
+  "physicalInputEventsBeforeFix": {
+    "seconds": 45,
+    "counts": {
+      "/dev/input/event8:2": 16385,
+      "/dev/input/event8:1": 60
+    },
+    "pressedKeyCodes": {
+      "272": 30
+    }
+  },
+  "panelUpdate": {
+    "previousSha256": "f444ba71a2ba42eb4167ad8be05ec441c343cc883af50a5f439c3d92a9ed7e23",
+    "sha256": "020eb99dc7d79b4bbab20e0799249e36256339d144c81219a5fee8b45a1c2cde",
+    "bytes": 2249992,
+    "persistedToSdRoot": true
+  },
+  "armEdgeRegressionFailedBeforeFix": true,
+  "armEdgeRegressionPassedAfterFix": true
+}

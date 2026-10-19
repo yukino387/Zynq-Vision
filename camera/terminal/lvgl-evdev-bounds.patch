@@ -1,0 +1,21 @@
+diff --git a/src/drivers/evdev/lv_evdev.c b/src/drivers/evdev/lv_evdev.c
+index 1b8319e..270c871 100644
+--- a/src/drivers/evdev/lv_evdev.c
++++ b/src/drivers/evdev/lv_evdev.c
+@@ -166,8 +166,14 @@ static void _evdev_read(lv_indev_t * indev, lv_indev_data_t * data)
+     ssize_t br;
+     while((br = read(dsc->fd, &in, sizeof(in))) > 0) {
+         if(in.type == EV_REL) {
+-            if(in.code == REL_X) dsc->root_x += in.value;
+-            else if(in.code == REL_Y) dsc->root_y += in.value;
++            if(in.code == REL_X) {
++                int width = lv_display_get_horizontal_resolution(lv_indev_get_display(indev));
++                dsc->root_x = LV_CLAMP(0, (int64_t)dsc->root_x + in.value, width - 1);
++            }
++            else if(in.code == REL_Y) {
++                int height = lv_display_get_vertical_resolution(lv_indev_get_display(indev));
++                dsc->root_y = LV_CLAMP(0, (int64_t)dsc->root_y + in.value, height - 1);
++            }
+         }
+         else if(in.type == EV_ABS) {
+ #if LV_USE_GESTURE_RECOGNITION

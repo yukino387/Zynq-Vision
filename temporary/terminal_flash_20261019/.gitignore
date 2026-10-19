@@ -1,0 +1,7 @@
+*.log
+*.bin
+*.gz
+*.exit
+uart.*
+sd-backup-*/
+__pycache__/

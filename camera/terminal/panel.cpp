@@ -76,7 +76,13 @@ void pause(lv_event_t*) {
 }
 void discover(lv_indev_t* input,lv_evdev_type_t type,void*) {
     if(type==LV_EVDEV_TYPE_KEY)lv_indev_set_group(input,focus_group);
-    else if(type==LV_EVDEV_TYPE_REL){auto cursor=label(lv_screen_active(),"●");lv_indev_set_cursor(input,cursor);}
+    else if(type==LV_EVDEV_TYPE_REL){
+        auto cursor=lv_obj_create(lv_layer_sys());lv_obj_remove_style_all(cursor);
+        lv_obj_set_size(cursor,14,14);lv_obj_set_style_radius(cursor,LV_RADIUS_CIRCLE,0);
+        lv_obj_set_style_bg_color(cursor,lv_color_white(),0);lv_obj_set_style_bg_opa(cursor,LV_OPA_COVER,0);
+        lv_obj_set_style_border_width(cursor,2,0);lv_obj_set_style_border_color(cursor,lv_color_black(),0);
+        lv_indev_set_cursor(input,cursor);
+    }
 }
 void jobs(lv_timer_t*) {
     try {
