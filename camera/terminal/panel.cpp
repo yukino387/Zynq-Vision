@@ -15,7 +15,8 @@
 using json=nlohmann::json;
 namespace {
 httplib::Client engine("http://127.0.0.1:8877");
-lv_obj_t *job_label,*statistics,*result_label,*error_label,*fresh_label,*job_select,*picture,*pause_button;
+lv_obj_t *job_label,*result_label,*result_badge,*error_label,*fresh_label,*job_select,*picture,*pause_button,*run_label;
+lv_obj_t* counters[5];
 lv_group_t* focus_group;
 lv_image_dsc_t image{};
 std::vector<uint8_t> pixels(416*416*2);
@@ -53,8 +54,30 @@ json post(const std::string& path,const json& payload) {
     if(response->status!=200){if(path=="/check" && body.contains("mayHaveSaved") && !body.at("mayHaveSaved").get<bool>()){store_pending("");pending.clear();}throw std::runtime_error(body.value("error","检测服务拒绝了本次操作"));}return body;
 }
 lv_obj_t* label(lv_obj_t* parent,const char* value) {auto object=lv_label_create(parent);lv_label_set_text(object,value);lv_label_set_long_mode(object,LV_LABEL_LONG_WRAP);return object;}
+lv_obj_t* panel(lv_obj_t* parent,int x,int y,int width,int height,uint32_t color) {
+    auto object=lv_obj_create(parent);lv_obj_remove_style_all(object);lv_obj_set_pos(object,x,y);lv_obj_set_size(object,width,height);
+    lv_obj_set_style_bg_color(object,lv_color_hex(color),0);lv_obj_set_style_bg_opa(object,LV_OPA_COVER,0);
+    lv_obj_remove_flag(object,LV_OBJ_FLAG_SCROLLABLE);return object;
+}
+lv_obj_t* caption(lv_obj_t* parent,const char* value,int x,int y,int width,uint32_t color=0x17264a) {
+    auto object=label(parent,value);lv_obj_set_pos(object,x,y);lv_obj_set_width(object,width);lv_obj_set_style_text_color(object,lv_color_hex(color),0);return object;
+}
+void bevel(lv_obj_t* object,uint32_t edge=0x7f9db9) {
+    lv_obj_set_style_border_width(object,1,0);lv_obj_set_style_border_color(object,lv_color_hex(edge),0);
+    lv_obj_set_style_radius(object,3,0);lv_obj_set_style_shadow_width(object,0,0);
+}
+void vertical_scroll(lv_obj_t* object) {
+    lv_obj_add_flag(object,LV_OBJ_FLAG_SCROLLABLE);lv_obj_set_scroll_dir(object,LV_DIR_VER);
+    lv_obj_set_style_bg_color(object,lv_color_hex(0x9cb8df),LV_PART_SCROLLBAR);lv_obj_set_style_bg_opa(object,LV_OPA_COVER,LV_PART_SCROLLBAR);
+    lv_obj_set_style_width(object,8,LV_PART_SCROLLBAR);lv_obj_set_style_radius(object,2,LV_PART_SCROLLBAR);
+}
 lv_obj_t* button(lv_obj_t* parent,const char* value,lv_event_cb_t action) {
-    auto object=lv_button_create(parent);lv_obj_set_height(object,48);label(object,value);lv_obj_add_event_cb(object,action,LV_EVENT_CLICKED,nullptr);lv_group_add_obj(focus_group,object);return object;
+    auto object=lv_button_create(parent);lv_obj_set_size(object,148,42);bevel(object,0x003c74);
+    lv_obj_set_style_bg_color(object,lv_color_hex(0xffffff),0);lv_obj_set_style_bg_grad_color(object,lv_color_hex(0xe0dfd3),0);lv_obj_set_style_bg_grad_dir(object,LV_GRAD_DIR_VER,0);
+    lv_obj_set_style_text_color(object,lv_color_hex(0x17264a),0);
+    lv_obj_set_style_bg_color(object,lv_color_hex(0xc1d2ee),LV_STATE_PRESSED);lv_obj_set_style_bg_grad_color(object,lv_color_hex(0xe0e9f7),LV_STATE_PRESSED);
+    lv_obj_set_style_outline_color(object,lv_color_hex(0xe59700),LV_STATE_FOCUS_KEY);lv_obj_set_style_outline_width(object,2,LV_STATE_FOCUS_KEY);lv_obj_set_style_outline_pad(object,2,LV_STATE_FOCUS_KEY);
+    auto title=label(object,value);lv_obj_center(title);lv_obj_add_event_cb(object,action,LV_EVENT_CLICKED,nullptr);lv_group_add_obj(focus_group,object);return object;
 }
 void check(lv_event_t*) {
     try {
@@ -95,13 +118,18 @@ void refresh(lv_timer_t*) {
     try {
         const auto state=get("/state");
         paused=state.at("paused");text(lv_obj_get_child(pause_button,0),paused?"继续检测":"暂停检测");
+        text(run_label,state.at("job").is_null()?"等待选择作业":paused?"检测已暂停":"检测运行中");
         text(job_label,state.at("job").is_null()?"请选择已经下发的作业":state["job"].at("name").get<std::string>()+" · "+state["job"].at("instructions").get<std::string>());
-        text(statistics,"本批次已检查 "+std::to_string(state.at("total").get<unsigned>())+" 件    本地符合 "+std::to_string(state["counts"]["PASS"].get<unsigned>())+"    本地不符合 "+std::to_string(state["counts"]["FAIL"].get<unsigned>())+"    待复核 "+std::to_string(state["counts"]["REVIEW"].get<unsigned>())+"    待同步 "+std::to_string(state["pendingSync"].get<unsigned>()));
+        const unsigned values[]={state.at("total").get<unsigned>(),state["counts"]["PASS"].get<unsigned>(),state["counts"]["FAIL"].get<unsigned>(),state["counts"]["REVIEW"].get<unsigned>(),state["pendingSync"].get<unsigned>()};
+        const char* names[]={"本批次已检查","本地符合","本地不符合","待人工复核","待同步"};
+        for(unsigned i=0;i<5;++i)text(counters[i],std::string(names[i])+"   "+std::to_string(values[i]));
         if(!state.at("last").is_null()) {
             const auto& last=state.at("last");std::string report="最近检查：第 "+std::to_string(last.at("sequence").get<unsigned>())+" 件 · "+translated(last.at("result"));
+            const std::string result=last.at("result");text(result_badge,translated(result));
+            lv_obj_set_style_text_color(result_badge,lv_color_hex(result=="PASS"?0x22712b:result=="FAIL"?0xb3261e:0x925b00),0);
             if(last.contains("findings"))for(const auto& finding:last["findings"])report+='\n'+finding.at("label").get<std::string>()+"：确认 "+std::to_string(finding.at("count").get<unsigned>())+"，待确认 "+std::to_string(finding.at("uncertain").get<unsigned>())+"，要求 "+std::to_string(finding.at("min").get<unsigned>())+"–"+std::to_string(finding.at("max").get<unsigned>());
             text(result_label,report);
-        }else text(result_label,"当前作业尚无检查记录");
+        }else {text(result_label,"当前作业尚无检查记录\n\n选择已下发的作业后，点击“检查一件”。\n检查结果与记录将在此显示。");text(result_badge,"等待检查");lv_obj_set_style_text_color(result_badge,lv_color_hex(0x316ac5),0);}
         text(error_label,state.at("error").get<std::string>()+(!state.at("syncError").get<std::string>().empty()?"\n同步暂不可用，检查记录保存在本地":""));
         const auto response=engine.Get("/frame");
         if(!response || response->status!=200 || response->body.size()<4){clear_picture();text(fresh_label,"暂无有效画面");return;}
@@ -115,7 +143,7 @@ void refresh(lv_timer_t*) {
             auto rectangle=lv_obj_create(picture);lv_obj_remove_style_all(rectangle);
             lv_obj_set_pos(rectangle,int(box["x1"].get<double>()),int(box["y1"].get<double>()));lv_obj_set_size(rectangle,int(box["x2"].get<double>()-box["x1"].get<double>()),int(box["y2"].get<double>()-box["y1"].get<double>()));lv_obj_set_style_border_width(rectangle,2,0);lv_obj_set_style_border_color(rectangle,lv_color_hex(0xd8e5dc),0);rectangles.push_back(rectangle);
         }
-    }catch(const std::exception& e){text(fresh_label,"画面不可用");text(error_label,e.what());}
+    }catch(const std::exception& e){text(fresh_label,"画面不可用");text(run_label,"服务连接异常");text(error_label,e.what());}
 }
 }
 int main(int argc,char** argv) {
@@ -124,18 +152,57 @@ int main(int argc,char** argv) {
     lv_init();lv_tick_set_cb(tick);focus_group=lv_group_create();lv_group_set_default(focus_group);
     lv_log_register_print_cb([](lv_log_level_t,const char* message){std::cerr<<message;});
     Framebuffer framebuffer;
-    auto font=lv_freetype_font_create(argv[1],LV_FREETYPE_FONT_RENDER_MODE_BITMAP,20,LV_FREETYPE_FONT_STYLE_NORMAL);
-    if(!font){std::cerr<<"Cannot load terminal font\n";return 1;}
-    font->fallback=&lv_font_montserrat_14;
-    auto root=lv_screen_active();lv_obj_set_style_text_font(root,font,0);lv_obj_set_style_bg_color(root,lv_color_hex(0x11151b),0);lv_obj_set_style_text_color(root,lv_color_hex(0xe3e7eb),0);lv_obj_set_flex_flow(root,LV_FLEX_FLOW_COLUMN);lv_obj_set_style_pad_all(root,12,0);lv_obj_set_style_pad_row(root,6,0);
-    job_label=label(root,"正在连接本地检测服务…");lv_obj_set_width(job_label,LV_PCT(100));
-    auto controls=lv_obj_create(root);lv_obj_set_size(controls,LV_PCT(100),64);lv_obj_set_flex_flow(controls,LV_FLEX_FLOW_ROW);lv_obj_set_style_bg_opa(controls,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(controls,6,0);
-    job_select=lv_dropdown_create(controls);lv_dropdown_set_options(job_select,"正在读取作业…");lv_obj_set_width(job_select,400);lv_group_add_obj(focus_group,job_select);button(controls,"选择作业",select_job);button(controls,"检查一件",check);pause_button=button(controls,"暂停检测",pause);
-    statistics=label(root,"等待作业记录");lv_obj_set_width(statistics,LV_PCT(100));
-    auto workspace=lv_obj_create(root);lv_obj_set_size(workspace,LV_PCT(100),440);lv_obj_set_flex_flow(workspace,LV_FLEX_FLOW_ROW);lv_obj_set_style_bg_opa(workspace,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(workspace,10,0);
+    auto font=lv_freetype_font_create(argv[1],LV_FREETYPE_FONT_RENDER_MODE_BITMAP,18,LV_FREETYPE_FONT_STYLE_NORMAL);
+    auto title_font=lv_freetype_font_create(argv[1],LV_FREETYPE_FONT_RENDER_MODE_BITMAP,20,LV_FREETYPE_FONT_STYLE_BOLD);
+    auto result_font=lv_freetype_font_create(argv[1],LV_FREETYPE_FONT_RENDER_MODE_BITMAP,28,LV_FREETYPE_FONT_STYLE_BOLD);
+    if(!font || !title_font || !result_font){std::cerr<<"Cannot load terminal font\n";return 1;}
+    font->fallback=title_font->fallback=result_font->fallback=&lv_font_montserrat_14;
+    auto root=lv_screen_active();lv_obj_set_style_text_font(root,font,0);lv_obj_set_style_text_color(root,lv_color_hex(0x17264a),0);
+    lv_obj_set_style_bg_color(root,lv_color_hex(0x3a6ea5),0);lv_obj_set_style_pad_all(root,0,0);lv_obj_remove_flag(root,LV_OBJ_FLAG_SCROLLABLE);
+    auto window=panel(root,12,10,1256,662,0xece9d8);bevel(window,0x003cba);
+    auto titlebar=panel(window,0,0,1254,34,0x0865e8);
+    lv_obj_set_style_bg_grad_color(titlebar,lv_color_hex(0x0044c4),0);lv_obj_set_style_bg_grad_dir(titlebar,LV_GRAD_DIR_VER,0);
+    auto icon=panel(titlebar,10,8,19,19,0xe5f0ff);bevel(icon,0xffffff);panel(icon,3,3,11,4,0x42a44a);panel(icon,3,9,11,5,0x316ac5);
+    auto title=caption(titlebar,"CNN 视觉检测终端",38,3,650,0xffffff);lv_obj_set_style_text_font(title,title_font,0);
+    caption(titlebar,"独立工作站",1126,5,116,0xe5efff);
+    job_label=caption(window,"正在连接本地检测服务…",16,44,1220);lv_label_set_long_mode(job_label,LV_LABEL_LONG_DOT);
+    auto controls=panel(window,12,82,1232,44,0xece9d8);
+    job_select=lv_dropdown_create(controls);lv_dropdown_set_options(job_select,"正在读取作业…");lv_obj_set_pos(job_select,0,1);lv_obj_set_size(job_select,500,42);bevel(job_select);
+    lv_obj_set_style_bg_color(job_select,lv_color_white(),0);lv_obj_set_style_text_color(job_select,lv_color_hex(0x17264a),0);lv_obj_set_style_pad_ver(job_select,7,0);
+    lv_obj_set_style_outline_color(job_select,lv_color_hex(0xe59700),LV_STATE_FOCUS_KEY);lv_obj_set_style_outline_width(job_select,2,LV_STATE_FOCUS_KEY);
+    auto list=lv_dropdown_get_list(job_select);lv_obj_set_style_text_font(list,font,0);lv_obj_set_style_text_color(list,lv_color_hex(0x17264a),0);lv_obj_set_style_bg_color(list,lv_color_white(),0);bevel(list);
+    lv_obj_set_style_bg_color(list,lv_color_hex(0x316ac5),LV_PART_SELECTED);lv_obj_set_style_text_color(list,lv_color_white(),LV_PART_SELECTED);
+    lv_group_add_obj(focus_group,job_select);
+    lv_obj_set_pos(button(controls,"选择作业",select_job),516,1);lv_obj_set_pos(button(controls,"检查一件",check),680,1);pause_button=button(controls,"暂停检测",pause);lv_obj_set_pos(pause_button,844,1);
+    caption(controls,"Tab 切换 · Enter 确认",1010,10,222,0x52647d);
+    const char* initial[]={"本批次已检查   0","本地符合   0","本地不符合   0","待人工复核   0","待同步   0"};
+    const uint32_t count_colors[]={0x17264a,0x22712b,0xb3261e,0x925b00,0x316ac5};
+    for(unsigned i=0;i<5;++i){auto cell=panel(window,12+int(i)*248,136,240,34,0xfaf9f2);bevel(cell,0xc5c3b6);counters[i]=caption(cell,initial[i],10,3,220,count_colors[i]);}
+    auto workspace=panel(window,12,180,1232,446,0xece9d8);
+    auto tasks=panel(workspace,0,0,182,446,0xd6dff7);bevel(tasks,0x7c9ed9);
+    auto task_title=panel(tasks,0,0,180,30,0xf1f5ff);caption(task_title,"检测任务",12,2,154,0x215dc6);
+    caption(tasks,"01  选择作业\n\n02  核对实时画面\n\n03  检查并保存结果",12,46,158,0x214f98);
+    panel(tasks,12,208,156,1,0xa4b9df);
+    caption(tasks,"工作站状态",12,224,158,0x215dc6);run_label=caption(tasks,"连接中…",12,258,158);
+    caption(tasks,"操作提示",12,314,158,0x215dc6);caption(tasks,"鼠标点击操作\nTab 切换焦点\nEnter 确认选择",12,348,158);
+    auto preview=panel(workspace,194,0,432,446,0xffffff);bevel(preview);
+    caption(preview,"摄像头实时画面",8,0,414,0x215dc6);
     image.header.magic=LV_IMAGE_HEADER_MAGIC;image.header.cf=LV_COLOR_FORMAT_RGB565;image.header.w=416;image.header.h=416;image.header.stride=416*2;image.data_size=pixels.size();image.data=pixels.data();
-    picture=lv_image_create(workspace);lv_image_set_src(picture,&image);result_label=label(workspace,"本次启动尚无检查记录");lv_obj_set_style_text_color(result_label,lv_color_hex(0xe3e7eb),0);lv_obj_set_flex_grow(result_label,1);
-    fresh_label=label(root,"等待画面");error_label=label(root,"");lv_obj_set_width(error_label,LV_PCT(100));
+    picture=lv_image_create(preview);lv_obj_set_pos(picture,7,24);lv_image_set_src(picture,&image);
+    auto results=panel(workspace,638,0,594,446,0xffffff);bevel(results);
+    auto result_title=panel(results,0,0,592,30,0xe3ecfc);caption(result_title,"检查结果与本地记录",12,2,564,0x215dc6);
+    result_badge=caption(results,"等待检查",16,42,558,0x316ac5);lv_obj_set_style_text_font(result_badge,result_font,0);
+    auto report=panel(results,12,92,566,220,0xffffff);vertical_scroll(report);
+    result_label=caption(report,"本次启动尚无检查记录",4,0,542);lv_obj_set_style_text_line_space(result_label,7,0);
+    panel(results,12,320,566,1,0xd4d0c8);caption(results,"运行提示",16,328,552,0x52647d);
+    auto notices=panel(results,12,358,566,76,0xffffff);vertical_scroll(notices);
+    error_label=caption(notices,"",4,0,542,0xb3261e);
+    auto status=panel(window,12,634,1232,22,0xe3e0d4);bevel(status,0xb2afa0);fresh_label=caption(status,"等待画面",7,-2,850,0x45546a);caption(status,"本地检测 · Linux",1042,-2,182,0x45546a);
+    auto taskbar=panel(root,0,680,1280,40,0x245edb);lv_obj_set_style_bg_grad_color(taskbar,lv_color_hex(0x1142b6),0);lv_obj_set_style_bg_grad_dir(taskbar,LV_GRAD_DIR_VER,0);
+    auto station=panel(taskbar,0,0,148,40,0x3c9638);lv_obj_set_style_bg_grad_color(station,lv_color_hex(0x236b20),0);lv_obj_set_style_bg_grad_dir(station,LV_GRAD_DIR_VER,0);lv_obj_set_style_radius(station,10,0);
+    auto station_text=caption(station,"检测工作站",20,5,120,0xffffff);lv_obj_set_style_text_font(station_text,title_font,0);
+    auto active=panel(taskbar,160,5,326,30,0x1646a1);bevel(active,0x6ba5f4);caption(active,"CNN 视觉检测终端",15,0,296,0xffffff);
+    caption(taskbar,"工业视觉 / 独立检测终端",990,7,276,0xffffff);
     lv_evdev_discovery_start(discover,nullptr);
     engine.set_connection_timeout(0,300000);engine.set_read_timeout(0,600000);engine.set_write_timeout(0,600000);
     jobs(nullptr);lv_timer_create(jobs,2000,nullptr);lv_timer_create(refresh,100,nullptr);
