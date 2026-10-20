@@ -6,6 +6,7 @@ import type {
   Inspection,
   Page,
   Model,
+  TerminalStatus,
 } from "@vision/contracts";
 import { api, post, download, errorText, RequestError } from "../api";
 import { useDeviceStore } from "../stores/devices";
@@ -16,6 +17,40 @@ import InspectionDetail from "../components/InspectionDetail.vue";
 import Status from "../components/Status.vue";
 import Drawer from "../components/Drawer.vue";
 
+const terminalStatus = ref<TerminalStatus | null>(null),
+  terminalError = ref("");
+let terminalTimer: ReturnType<typeof setInterval> | undefined;
+let terminalLoading = false;
+async function refreshTerminal() {
+  const deviceId =
+    batch.value?.execution === "TERMINAL" ? batch.value.deviceId : "";
+  if (!deviceId) {
+    terminalStatus.value = null;
+    terminalError.value = "";
+    return;
+  }
+  if (terminalLoading) return;
+  terminalLoading = true;
+  try {
+    const status = await api<TerminalStatus>(
+      `/terminal/${encodeURIComponent(deviceId)}/status`,
+    );
+    if (
+      batch.value?.deviceId === deviceId &&
+      batch.value.execution === "TERMINAL"
+    ) {
+      terminalStatus.value = status;
+      terminalError.value = "";
+    }
+  } catch (e) {
+    if (batch.value?.deviceId === deviceId) {
+      terminalStatus.value = null;
+      terminalError.value = errorText(e);
+    }
+  } finally {
+    terminalLoading = false;
+  }
+}
 const devices = useDeviceStore(),
   tasks = useTaskStore(),
   auth = useAuthStore();
@@ -35,7 +70,7 @@ const name = ref(""),
   qualityGate = ref(true),
   detail = ref<Inspection | null>(null);
 const now = ref(Date.now());
-const execution = ref<"HOST" | "TERMINAL">("HOST"),
+const execution = ref<"HOST" | "TERMINAL">("TERMINAL"),
   modelId = ref("");
 const models = ref<Model[]>([]);
 const connectionEditing = ref(false),
@@ -161,6 +196,8 @@ async function refresh() {
   }
 }
 async function create() {
+  if (devices.current?.executionMode !== "BARE_METAL")
+    execution.value = "TERMINAL";
   if (!devices.current || !tasks.selected || busy.value) return;
   busy.value = true;
   error.value = "";
@@ -291,11 +328,15 @@ function keyboard(event: KeyboardEvent) {
   }
 }
 watch(selected, () => {
+  terminalStatus.value = null;
   void refresh();
+  void refreshTerminal();
 });
 watch(
   () => devices.current?.id,
   () => {
+    if (devices.current?.executionMode !== "BARE_METAL")
+      execution.value = "TERMINAL";
     if (!busy.value)
       void loadBatches().catch((e) => (error.value = errorText(e)));
   },
@@ -314,6 +355,10 @@ watch(
 );
 onMounted(async () => {
   timer = setInterval(() => (now.value = Date.now()), 500);
+  terminalTimer = setInterval(() => {
+    void refreshTerminal();
+    if (batch.value?.execution === "TERMINAL" && !loading.value) void refresh();
+  }, 3000);
   window.addEventListener("keydown", keyboard);
   try {
     await tasks.load();
@@ -338,6 +383,7 @@ onMounted(async () => {
 });
 onUnmounted(() => {
   clearInterval(timer);
+  clearInterval(terminalTimer);
   window.removeEventListener("keydown", keyboard);
 });
 </script>
@@ -348,7 +394,11 @@ onUnmounted(() => {
       <h1>检测作业</h1>
       <p>按批次检查实物，保存判定依据与处理结果</p>
     </div>
-    <RouterLink :to="{ name: 'workbench' }">采样与设备画面</RouterLink>
+    <RouterLink
+      v-if="devices.current?.executionMode === 'BARE_METAL'"
+      :to="{ name: 'workbench' }"
+      >旧设备采样与画面</RouterLink
+    >
   </div>
   <div class="toolbar">
     <label
@@ -422,15 +472,83 @@ onUnmounted(() => {
           ).catch((e) => (error = errorText(e)))
         "
       >
-        下载板端作业包
+        下载离线作业包
       </button>
       <button :disabled="busy" @click="connectionEditing = true">
-        生成终端连接配置
+        下载离线连接配置
       </button>
     </template>
   </div>
   <p v-if="error" role="alert" class="error-box">{{ error }}</p>
   <p v-if="message" role="status" class="note">{{ message }}</p>
+  <section
+    v-if="batch?.execution === 'TERMINAL'"
+    class="panel terminal-link"
+    aria-label="板端与平台同步状态"
+  >
+    <div class="toolbar">
+      <strong>板端执行</strong
+      ><Status :value="terminalStatus?.online ? 'ONLINE' : 'OFFLINE'" />
+    </div>
+    <p v-if="batch.status === 'OPEN'">
+      在板端“系统管理 →
+      平台”登录管理员，按机身编号绑定设备，然后直接领取本批次。
+    </p>
+    <p v-else>
+      本批次已结束。板端收到结束状态后停止记件，已有证据仍可补传和复核。
+    </p>
+    <p v-if="terminalError" role="alert" class="error-box">
+      {{ terminalError }}
+    </p>
+    <template v-if="terminalStatus?.state">
+      <p>
+        {{ terminalStatus.online ? "当前作业" : "最近上报作业" }}：{{
+          terminalStatus.state.jobName || "未启用"
+        }}
+        ·
+        {{
+          terminalStatus.state.paused
+            ? "已暂停"
+            : terminalStatus.state.fresh
+              ? "检测中"
+              : "等待画面"
+        }}<span
+          v-if="
+            terminalStatus.state.jobId &&
+            terminalStatus.state.jobId !== batch.id
+          "
+        >
+          · 正在执行其他批次</span
+        >
+      </p>
+      <p>
+        板端已记件 {{ terminalStatus.state.total }} · 全部作业待上传
+        {{ terminalStatus.state.pendingSync }} · 模型
+        {{ terminalStatus.state.modelVersion || "—" }} · CPU
+        {{
+          terminalStatus.state.cpuPercent === null
+            ? "—"
+            : terminalStatus.state.cpuPercent.toFixed(1) + "%"
+        }}
+      </p>
+      <p
+        v-if="terminalStatus.state.error || terminalStatus.state.syncError"
+        class="error-box"
+      >
+        {{ terminalStatus.state.error }} {{ terminalStatus.state.syncError }}
+      </p>
+    </template>
+    <p>
+      最近状态：{{
+        terminalStatus?.lastSeenAt
+          ? new Date(terminalStatus.lastSeenAt).toLocaleString()
+          : "尚未收到板端心跳"
+      }}<span v-if="!terminalStatus?.online && batch.status === 'OPEN'">
+        ·
+        离线时板端可继续执行已启用作业，记录恢复连接后补传；下方统计为平台已接收数量。</span
+      >
+    </p>
+  </section>
   <div v-if="summary" class="production-stats" aria-label="本批次统计">
     <div>
       <span>已检查 / 目标</span
@@ -455,7 +573,7 @@ onUnmounted(() => {
     </div>
   </div>
   <div class="production-grid">
-    <section class="panel">
+    <section v-if="batch?.execution !== 'TERMINAL'" class="panel">
       <div class="toolbar">
         <strong>现场画面</strong
         ><Status :value="devices.current?.connectionState" /><span
@@ -495,6 +613,27 @@ onUnmounted(() => {
       </p>
       <p class="note">
         {{ blocked || "每次触发保存一件，连续视频帧不自动累计。" }}
+      </p>
+    </section>
+    <section v-else class="panel">
+      <div class="toolbar">
+        <strong>最近回传证据</strong><span class="right">板端独立执行</span>
+      </div>
+      <ImageViewer
+        v-if="latest"
+        compact
+        operator
+        :assets="latest.sample.assets"
+        :boxes="latest.detections"
+        :width="416"
+        :height="416"
+        :region="batch?.snapshot.rules.region"
+      />
+      <p v-else class="note">
+        等待板端完成检查并上传证据。实时画面与检查按钮位于板端检测台。
+      </p>
+      <p class="note">
+        此处展示已上传的检查证据；当前作业、在线状态和待上传数量见上方板端状态。
       </p>
     </section>
     <section class="panel" aria-live="polite">
@@ -608,7 +747,12 @@ onUnmounted(() => {
       </p>
       <label
         >执行位置<select v-model="execution">
-          <option value="HOST">平台采集检查</option>
+          <option
+            v-if="devices.current?.executionMode === 'BARE_METAL'"
+            value="HOST"
+          >
+            旧裸机平台采集检查
+          </option>
           <option value="TERMINAL">板端独立检测终端</option>
         </select></label
       >
@@ -697,6 +841,18 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.terminal-link {
+  margin-block: 1rem;
+  padding: 1rem;
+}
+.terminal-link > .toolbar {
+  padding: 0;
+  margin-bottom: 0.5rem;
+}
+.terminal-link p {
+  margin: 0.5rem 0;
+  overflow-wrap: anywhere;
+}
 .production-stats {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));

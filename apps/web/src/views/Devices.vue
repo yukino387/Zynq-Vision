@@ -45,6 +45,22 @@ const tab = computed(() =>
 /** 遥测是微秒，界面按毫秒显示。 */
 const metric = (us: number | undefined) =>
   us === undefined ? "—" : (us / 1000).toFixed(1);
+const legacy = (d: DeviceSnapshot | null | undefined) =>
+  d?.executionMode === "BARE_METAL";
+const modeName = (d: DeviceSnapshot | null | undefined) =>
+  d?.executionMode === "LINUX_TERMINAL"
+    ? "Linux 独立终端"
+    : legacy(d)
+      ? "旧裸机设备"
+      : "运行环境待确认";
+watch(
+  () => devices.devices,
+  () => {
+    if (selected.value)
+      selected.value =
+        devices.devices.find((d) => d.id === selected.value?.id) ?? null;
+  },
+);
 const firmware = computed(() => selected.value?.reportedState.firmware ?? null);
 const slotName = (slot: number | null | undefined) =>
   slot === 0
@@ -199,7 +215,7 @@ function versionText(
   return typeof value === "boolean" ? (value ? "是" : "否") : String(value);
 }
 async function switchModel(entry: ResidentModel) {
-  if (!selected.value) return;
+  if (!selected.value || !legacy(selected.value)) return;
   busy.value = true;
   try {
     // 切换照走 Deployment：板端发现制品已在库里，就不传字节直接激活。
@@ -224,7 +240,7 @@ async function switchModel(entry: ResidentModel) {
   }
 }
 async function removeModel(entry: ResidentModel) {
-  if (!selected.value) return;
+  if (!selected.value || !legacy(selected.value)) return;
   busy.value = true;
   try {
     await post(`/devices/${selected.value.id}/models/delete`, {
@@ -239,7 +255,7 @@ async function removeModel(entry: ResidentModel) {
   }
 }
 async function action(kind: string) {
-  if (!selected.value) return;
+  if (!selected.value || !legacy(selected.value)) return;
   busy.value = true;
   try {
     const id = selected.value.id;
@@ -303,13 +319,51 @@ async function create() {
       </h1>
       <p class="mono">
         {{ displayName(devices.current?.name ?? "（无设备）") }} ·
-        {{ devices.current?.protocolVersion ?? "协议版本未上报" }}
+        {{ modeName(devices.current) }}
       </p>
     </div>
   </div>
 
   <section
-    v-if="tab === 'registry'"
+    v-if="tab === 'registry' && !legacy(devices.current)"
+    class="panel terminal-summary"
+    aria-label="Linux 终端状态"
+  >
+    <div class="toolbar">
+      <strong>{{ modeName(devices.current) }}</strong
+      ><Status :value="devices.current?.connectionState" /><RouterLink
+        to="/production"
+        class="text-button"
+        >查看检测作业</RouterLink
+      >
+    </div>
+    <p>
+      板端自主启动、采集和检测，通过心跳上报状态，无需在网页连接 UDP 接收端。
+    </p>
+    <template v-if="devices.current?.terminal?.state">
+      <p>
+        最近上报作业：{{ devices.current.terminal.state.jobName || "未启用" }} ·
+        已检查 {{ devices.current.terminal.state.total }} · 待上传
+        {{ devices.current.terminal.state.pendingSync }}
+      </p>
+      <p>
+        CPU {{ devices.current.terminal.state.cpuPercent?.toFixed(1) ?? "—" }}%
+        · 内存
+        {{ (devices.current.terminal.state.memoryUsed / 1048576).toFixed(1) }} /
+        {{ (devices.current.terminal.state.memoryTotal / 1048576).toFixed(1) }}
+        MiB
+      </p>
+    </template>
+    <p v-else>
+      尚未收到板端状态。请在板端“系统管理 →
+      平台”登录管理员，按机身编号绑定此设备。
+    </p>
+    <p v-if="devices.current?.lastSeenAt">
+      最近心跳：{{ new Date(devices.current.lastSeenAt).toLocaleString() }}
+    </p>
+  </section>
+  <section
+    v-if="tab === 'registry' && legacy(devices.current)"
     class="panel section-space telemetry-panel"
   >
     <div class="panel-head">
@@ -422,7 +476,7 @@ async function create() {
       :loading="loading"
       :error="error"
       :empty="!deviceRows.length"
-      hint="还没有设备。注册设备后，它上报的遥测会显示在顶部。"
+      hint="还没有设备。注册 Linux 终端后，在板端登录平台并绑定设备编号。"
       @retry="load"
     >
       <div class="table-wrap">
@@ -467,7 +521,7 @@ async function create() {
                 </button>
               </td>
               <td class="col-type">
-                <span class="tag">{{ chinese(d.type) }}</span>
+                <span class="tag">{{ modeName(d) }}</span>
               </td>
               <td><Status :value="d.connectionState" /></td>
               <td class="col-runtime"><Status :value="d.runtimeState" /></td>
@@ -478,7 +532,7 @@ async function create() {
               <td class="col-action action-cell">
                 <div class="row-actions">
                   <button class="table-action" @click="open(d)">
-                    控制与详情
+                    状态与详情
                   </button>
                 </div>
               </td>
@@ -592,15 +646,35 @@ async function create() {
         :value="selected.runtimeState"
       /><Status :value="selected.syncState" />
     </div>
-    <p class="note" v-if="selected.type === 'ZYNQ'">
+    <section v-if="!legacy(selected)" class="terminal-summary">
+      <h3>{{ modeName(selected) }}</h3>
+      <p>
+        检查、暂停和作业切换在板端执行；平台用于分配作业、查看状态与复核证据。
+      </p>
+      <p>当前模型：{{ selected.reportedState.modelVersion || "未上报" }}</p>
+      <p v-if="selected.terminal?.state">
+        作业：{{ selected.terminal.state.jobName || "未启用" }} · 待上传
+        {{ selected.terminal.state.pendingSync }}
+      </p>
+      <RouterLink
+        to="/production"
+        class="text-button"
+        @click="
+          devices.selected = selected.id;
+          selected = null;
+        "
+        >进入检测作业</RouterLink
+      >
+    </section>
+    <p class="note" v-if="legacy(selected)">
       连接设备会接管图像接收，请先断开其他上位机。
     </p>
-    <div class="toolbar" v-if="auth.engineer">
+    <div class="toolbar" v-if="auth.engineer && legacy(selected)">
       <button class="primary" @click="action('connect')" :disabled="busy">
         连接设备</button
       ><button @click="action('disconnect')" :disabled="busy">断开连接</button>
     </div>
-    <section class="version-compare">
+    <section v-if="legacy(selected)" class="version-compare">
       <h3>目标版本 / 实际版本</h3>
       <div class="compare-row compare-head">
         <span>项目</span><span>目标</span><span>实际</span>
@@ -657,7 +731,7 @@ async function create() {
         }}</b>
       </div>
     </section>
-    <template v-if="residentModels.length">
+    <template v-if="legacy(selected) && residentModels.length">
       <h3 class="section-space">设备模型库</h3>
       <div class="table-wrap">
         <table>
@@ -706,7 +780,10 @@ async function create() {
         切换会照走部署流程；制品已经在设备上时板端跳过传输直接激活。
       </p>
     </template>
-    <p v-else-if="selected.capabilities.localStorage" class="note">
+    <p
+      v-else-if="legacy(selected) && selected.capabilities.localStorage"
+      class="note"
+    >
       设备 SD 卡上还没有已提交的模型。
     </p>
     <h3 class="section-space">设备能力</h3>
@@ -716,7 +793,7 @@ async function create() {
         <b :class="{ off: !value }">{{ value ? "支持" : "不支持" }}</b>
       </div>
     </div>
-    <template v-if="auth.engineer"
+    <template v-if="auth.engineer && legacy(selected)"
       ><h3 class="section-space">设备命令</h3>
       <label
         >控制命令<select v-model="command">
@@ -784,6 +861,14 @@ async function create() {
   >
 </template>
 <style scoped>
+.terminal-summary {
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+.terminal-summary p {
+  margin: 0.6rem 0;
+  overflow-wrap: anywhere;
+}
 .page-heading h1 {
   display: flex;
   align-items: center;

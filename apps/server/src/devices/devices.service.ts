@@ -11,6 +11,11 @@ import { Db } from "../core/db.js";
 import { Events } from "../core/events.js";
 import { DomainError } from "../core/errors.js";
 import { config } from "../config.js";
+import {
+  isLinuxTerminal,
+  terminalStatus,
+  terminalCapabilities,
+} from "./terminal-state.js";
 import { SimulatorTransport } from "./simulator.js";
 import { ZynqUdpTransport } from "./zynq.js";
 import type { DeviceTransport, CapturedFrame } from "./transport.js";
@@ -97,8 +102,9 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
     await this.db.device.update({
       where: { id },
       data: {
-        capabilities:
-          transport.capabilities as unknown as Prisma.InputJsonValue,
+        capabilities: (isLinuxTerminal(device)
+          ? terminalCapabilities
+          : transport.capabilities) as unknown as Prisma.InputJsonValue,
       },
     });
     if (device.type === "SIMULATOR") await transport.connect();
@@ -113,38 +119,96 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
     const devices = await this.db.device.findMany({
       orderBy: { createdAt: "asc" },
     });
-    return devices.map((d) => {
-      const t = this.transport(d.id),
-        s = t.getStatus(),
-        desired = d.desiredState as DeviceState;
-      return {
-        id: d.id,
-        name: d.name,
-        type: d.type,
-        source: d.type === "SIMULATOR" ? "SIMULATION" : "BOARD",
-        connectionState: connectionState(
-          s.lastSeen,
-          Date.now(),
-          config.DEVICE_STALE,
-          config.DEVICE_TIMEOUT,
-        ),
-        runtimeState:
-          s.lastSeen && Date.now() - s.lastSeen <= config.DEVICE_TIMEOUT
-            ? s.runtimeState
-            : "UNKNOWN",
-        desiredState: desired,
-        reportedState: s.reportedState,
-        syncState: syncState(desired, s.reportedState),
-        telemetry: s.telemetry,
-        capabilities: t.capabilities,
-        lastSeenAt: s.lastSeen ? new Date(s.lastSeen).toISOString() : null,
-        firmwareVersion:
-          (s.reportedState as DeviceState).firmwareVersion ??
-          d.firmwareVersion,
-        protocolVersion: d.protocolVersion,
-        error: s.error,
-      };
-    });
+    return Promise.all(
+      devices.map(async (d) => {
+        if (isLinuxTerminal(d)) {
+          const terminal = await terminalStatus(this.db, d),
+            state = terminal.state;
+          return {
+            id: d.id,
+            name: d.name,
+            type: d.type,
+            source: "BOARD" as const,
+            executionMode: "LINUX_TERMINAL" as const,
+            terminal,
+            connectionState: terminal.online
+              ? ("ONLINE" as const)
+              : ("OFFLINE" as const),
+            runtimeState: !terminal.online
+              ? ("UNKNOWN" as const)
+              : state?.error
+                ? ("FAULT" as const)
+                : state?.paused
+                  ? ("READY" as const)
+                  : state?.fresh
+                    ? ("RUNNING" as const)
+                    : ("READY" as const),
+            desiredState: {},
+            reportedState: {
+              modelVersion: state?.modelVersion ?? null,
+              inspectionEnabled: state ? !state.paused : undefined,
+            },
+            syncState: !state
+              ? ("UNKNOWN" as const)
+              : state.pendingSync
+                ? ("DESYNCED" as const)
+                : ("SYNCED" as const),
+            telemetry: null,
+            capabilities: terminalCapabilities,
+            lastSeenAt: terminal.lastSeenAt,
+            firmwareVersion: null,
+            protocolVersion: null,
+            error: state?.error || state?.syncError || null,
+          };
+        }
+        const t = this.transport(d.id),
+          s = t.getStatus(),
+          desired = d.desiredState as DeviceState;
+        return {
+          executionMode:
+            d.type === "SIMULATOR"
+              ? ("SIMULATOR" as const)
+              : s.lastSeen
+                ? ("BARE_METAL" as const)
+                : ("UNCONFIRMED" as const),
+          terminal: null,
+          id: d.id,
+          name: d.name,
+          type: d.type,
+          source: d.type === "SIMULATOR" ? "SIMULATION" : "BOARD",
+          connectionState: connectionState(
+            s.lastSeen,
+            Date.now(),
+            config.DEVICE_STALE,
+            config.DEVICE_TIMEOUT,
+          ),
+          runtimeState:
+            s.lastSeen && Date.now() - s.lastSeen <= config.DEVICE_TIMEOUT
+              ? s.runtimeState
+              : "UNKNOWN",
+          desiredState: desired,
+          reportedState: s.reportedState,
+          syncState: syncState(desired, s.reportedState),
+          telemetry: s.telemetry,
+          capabilities: t.capabilities,
+          lastSeenAt: s.lastSeen ? new Date(s.lastSeen).toISOString() : null,
+          firmwareVersion:
+            (s.reportedState as DeviceState).firmwareVersion ??
+            d.firmwareVersion,
+          protocolVersion: d.protocolVersion,
+          error: s.error,
+        };
+      }),
+    );
+  }
+  async assertLegacyTransport(id: string) {
+    const device = await this.db.device.findUniqueOrThrow({ where: { id } });
+    if (isLinuxTerminal(device))
+      throw new DomainError(
+        "NO_CAPABILITY",
+        "Linux 板端通过作业领取和心跳运行，不支持旧裸机控制、直接模型部署或固件 OTA",
+        422,
+      );
   }
   async persist() {
     for (const model of await this.db.model.findMany({

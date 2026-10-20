@@ -95,6 +95,8 @@ export class BatchesController {
         "每个类别都需要配置数量要求",
         400,
       );
+    if (dto.execution === "HOST")
+      await this.devices.assertLegacyTransport(dto.deviceId);
     const state =
       dto.execution === "HOST"
         ? this.devices.transport(dto.deviceId).getCurrentConfig()

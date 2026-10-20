@@ -16,6 +16,7 @@ import { Db } from "../core/db.js";
 import { Roles, type Request } from "../core/auth.js";
 import { parse, DomainError } from "../core/errors.js";
 import { listing, page } from "../core/list.js";
+import { terminalCapabilities } from "./terminal-state.js";
 import { DevicesService } from "./devices.service.js";
 import { CommandsService } from "./commands.service.js";
 import { baseCapabilities } from "./transport.js";
@@ -62,23 +63,13 @@ export class DevicesController {
         .strict(),
       body,
     );
-    if (
-      dto.type === "ZYNQ" &&
-      (await this.db.device.count({ where: { type: "ZYNQ" } }))
-    )
-      throw new DomainError(
-        "INVALID_STATE",
-        "This adapter currently supports one configured Zynq endpoint",
-        409,
-      );
     const device = await this.db.device.create({
       data: {
         ...dto,
-        protocolVersion:
-          dto.type === "ZYNQ"
-            ? "CNC1/CST1/YLO1 (source verified)"
-            : "SIMULATED-v1",
-        capabilities: baseCapabilities as unknown as Prisma.InputJsonValue,
+        protocolVersion: dto.type === "ZYNQ" ? null : "SIMULATED-v1",
+        capabilities: (dto.type === "ZYNQ"
+          ? terminalCapabilities
+          : baseCapabilities) as unknown as Prisma.InputJsonValue,
         reportedState:
           dto.type === "SIMULATOR"
             ? {
@@ -88,6 +79,7 @@ export class DevicesController {
               }
             : {},
         metadata: {
+          ...(dto.type === "ZYNQ" ? { runtimeProfile: "LINUX_TERMINAL" } : {}),
           source:
             dto.type === "SIMULATOR"
               ? "SIMULATED"
@@ -132,6 +124,7 @@ export class DevicesController {
     @Param("id") id: string,
     @Body() body: unknown,
   ) {
+    await this.devices.assertLegacyTransport(id);
     const dto = parse(
       z
         .object({

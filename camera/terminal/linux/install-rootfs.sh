@@ -8,8 +8,10 @@ install -d "$rootfs/usr/local/bin" "$rootfs/usr/share/vision" "$rootfs/etc/syste
 install -m755 "$delivery/rootfs/usr/local/bin/vision-engine" "$rootfs/usr/local/bin/vision-engine"
 install -m755 "$delivery/rootfs/usr/local/bin/vision-panel" "$rootfs/usr/local/bin/vision-panel"
 install -m755 "$delivery/rootfs/usr/local/bin/vision-install-job.py" "$rootfs/usr/local/bin/vision-install-job.py"
-install -m644 "$delivery/rootfs/usr/share/vision/NotoSansCJKsc-Regular.otf" "$rootfs/usr/share/vision/"
-for service in vision-engine.service vision-panel.service; do
+install -m755 "$delivery/rootfs/usr/local/bin/vision-manager.py" "$rootfs/usr/local/bin/vision-manager.py"
+install -m644 "$delivery/rootfs/usr/local/bin/vision_auth.py" "$rootfs/usr/local/bin/vision_auth.py"
+install -m644 "$delivery/rootfs/usr/share/vision/simsun.ttc" "$rootfs/usr/share/vision/"
+for service in vision-engine.service vision-panel.service vision-manager.service; do
     install -m644 "$delivery/rootfs/etc/systemd/system/$service" "$rootfs/etc/systemd/system/$service"
     ln -sfn "../$service" "$rootfs/etc/systemd/system/multi-user.target.wants/$service"
 done

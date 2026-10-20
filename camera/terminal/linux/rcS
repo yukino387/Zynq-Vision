@@ -11,15 +11,28 @@ hostname vision-terminal
 chmod 700 /var/lib/vision
 modprobe vision_accel
 modprobe vision_fb
+echo performance > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
 ifconfig lo up
-# Local production link; use /etc/vision-network for a different deployment.
+# Fixed locally administered MAC; override VISION_MAC in /etc/vision-network
+# when several terminals share one network.
+VISION_DHCP=1
+VISION_MAC=02:00:00:00:70:20
+VISION_ADDRESS=169.254.140.110
+VISION_NETMASK=255.255.0.0
 if [ -f /etc/vision-network ]; then
     . /etc/vision-network
-else
-    VISION_ADDRESS=169.254.140.110
-    VISION_NETMASK=255.255.0.0
 fi
-ifconfig eth0 "$VISION_ADDRESS" netmask "$VISION_NETMASK" up || echo "Network unavailable; local inspection remains available" >&2
+ifconfig eth0 down 2>/dev/null || true
+if [ -n "${VISION_MAC:-}" ]; then
+    ifconfig eth0 hw ether "$VISION_MAC" || echo "Cannot set Ethernet MAC" >&2
+fi
+ifconfig eth0 up
+if [ "${VISION_DHCP:-0}" = 1 ]; then
+    udhcpc -i eth0 -s /etc/udhcpc.script -n -t 3 -T 2 || true
+fi
+if ! ifconfig eth0 2>/dev/null | grep -Eq "inet addr:[1-9]"; then
+    ifconfig eth0 "$VISION_ADDRESS" netmask "$VISION_NETMASK" up || echo "Network unavailable; local inspection remains available" >&2
+fi
 # The FAT boot partition is the PC-managed transfer area, mounted read-only.
 if mount -t vfat -o ro,nodev,nosuid,noexec /dev/mmcblk0p1 /boot; then
     for package in /boot/vision/*.zip; do

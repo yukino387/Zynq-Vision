@@ -44,6 +44,7 @@ export class ModelsService {
     return { model, manifest, weights };
   }
   async check(id: string, deviceId: string) {
+    await this.devices.assertLegacyTransport(deviceId);
     const transport = this.devices.transport(deviceId);
     if (!transport.capabilities.modelUpdate)
       throw new DomainError(

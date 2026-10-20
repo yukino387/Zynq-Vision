@@ -61,30 +61,56 @@ void gray_input(const uint16_t* pixels,int8_t* input) {
     gray_input_rows(pixels,input,0,640);
 }
 
+static inline int32x2_t rgb_horizontal_pair(const uint8_t* row,unsigned x) {
+    const auto& coeff=resize_coefficients[x];
+    const uint16x8_t values=vmovl_u8(vld1_u8(row+coeff.start));
+    const int32x4_t low=vmulq_s32(vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(values))),vld1q_s32(coeff.value));
+    const int32x4_t high=vmulq_s32(vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(values))),vld1q_s32(coeff.value+4));
+    const int32x4_t sum=vaddq_s32(low,high);
+    return vpadd_s32(vget_low_s32(sum),vget_high_s32(sum));
+}
+
 void model_input_rows(const uint16_t* pixels,int8_t* input,unsigned first,unsigned count,unsigned channels) {
     if(channels==1) {gray_input_rows(pixels,input,first,count);return;}
     static uint8_t rgb_horizontal[3][416][224];
-    uint8_t rgb[3][416];
+    uint8_t rgb[3][424] __attribute__((aligned(16)))={};
     const unsigned end=first+count;
     for(unsigned y=first;y<end && y<416;++y) {
-        for(unsigned x=0;x<416;++x) {
-            const unsigned p=pixels[y*416+x],r=p>>11,g=(p>>5)&63,b=p&31;
-            rgb[0][x]=(r<<3)|(r>>2);rgb[1][x]=(g<<2)|(g>>4);rgb[2][x]=(b<<3)|(b>>2);
+        const uint16_t* row=pixels+y*416;
+        for(unsigned x=0;x<416;x+=8) {
+            const uint16x8_t p=vld1q_u16(row+x);
+            const uint16x8_t r5=vshrq_n_u16(p,11),g6=vandq_u16(vshrq_n_u16(p,5),vdupq_n_u16(63));
+            const uint16x8_t b5=vandq_u16(p,vdupq_n_u16(31));
+            const uint16x8_t r=vorrq_u16(vshlq_n_u16(r5,3),vshrq_n_u16(r5,2));
+            const uint16x8_t g=vorrq_u16(vshlq_n_u16(g6,2),vshrq_n_u16(g6,4));
+            const uint16x8_t b=vorrq_u16(vshlq_n_u16(b5,3),vshrq_n_u16(b5,2));
+            vst1_u8(rgb[0]+x,vmovn_u16(r));vst1_u8(rgb[1]+x,vmovn_u16(g));vst1_u8(rgb[2]+x,vmovn_u16(b));
         }
-        for(unsigned c=0;c<3;++c) for(unsigned x=0;x<224;++x) {
-            const auto& coeff=resize_coefficients[x];
-            int sum=1<<21;
-            for(unsigned k=0;k<coeff.count;++k) sum+=rgb[c][coeff.start+k]*coeff.value[k];
-            rgb_horizontal[c][y][x]=clip(sum>>22);
+        for(unsigned c=0;c<3;++c) for(unsigned x=0;x<224;x+=4) {
+            const int32x2_t p0=rgb_horizontal_pair(rgb[c],x),p1=rgb_horizontal_pair(rgb[c],x+1);
+            const int32x2_t p2=rgb_horizontal_pair(rgb[c],x+2),p3=rgb_horizontal_pair(rgb[c],x+3);
+            const int32x4_t sums=vcombine_s32(vpadd_s32(p0,p1),vpadd_s32(p2,p3));
+            const uint16x4_t bounded=vqmovun_s32(vshrq_n_s32(vaddq_s32(sums,vdupq_n_s32(1<<21)),22));
+            const uint8x8_t values=vqmovn_u16(vcombine_u16(bounded,vdup_n_u16(0)));
+            const uint32_t packed=vget_lane_u32(vreinterpret_u32_u8(values),0);
+            __builtin_memcpy(rgb_horizontal[c][y]+x,&packed,sizeof(packed));
         }
     }
     for(unsigned row=first<416?416:first;row<end && row<640;++row) {
         const unsigned y=row-416;
         const auto& coeff=resize_coefficients[y];
-        for(unsigned c=0;c<3;++c) for(unsigned x=0;x<224;++x) {
-            int sum=1<<21;
-            for(unsigned k=0;k<coeff.count;++k) sum+=rgb_horizontal[c][coeff.start+k][x]*coeff.value[k];
-            input[c*224*224+y*224+x]=(clip(sum>>22)*127+127)/255;
+        for(unsigned c=0;c<3;++c) for(unsigned x=0;x<224;x+=8) {
+            int32x4_t low=vdupq_n_s32(1<<21),high=low;
+            for(unsigned k=0;k<coeff.count;++k) {
+                const uint16x8_t values=vmovl_u8(vld1_u8(rgb_horizontal[c][coeff.start+k]+x));
+                low=vmlaq_n_s32(low,vreinterpretq_s32_u32(vmovl_u16(vget_low_u16(values))),coeff.value[k]);
+                high=vmlaq_n_s32(high,vreinterpretq_s32_u32(vmovl_u16(vget_high_u16(values))),coeff.value[k]);
+            }
+            const uint16x8_t bounded=vcombine_u16(vqmovun_s32(vshrq_n_s32(low,22)),vqmovun_s32(vshrq_n_s32(high,22)));
+            const uint8x8_t values=vqmovn_u16(bounded);
+            const uint16x8_t numerator=vaddq_u16(vmull_u8(values,vdup_n_u8(127)),vdupq_n_u16(127));
+            const uint16x8_t quotient=vshrq_n_u16(vaddq_u16(vaddq_u16(numerator,vdupq_n_u16(1)),vshrq_n_u16(numerator,8)),8);
+            vst1_s8(input+c*224*224+y*224+x,vreinterpret_s8_u8(vmovn_u16(quotient)));
         }
     }
 }

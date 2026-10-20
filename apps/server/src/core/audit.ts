@@ -48,7 +48,8 @@ export class Audit implements NestInterceptor {
     const req = ctx.switchToHttp().getRequest<Request>();
     if (
       ["GET", "HEAD", "OPTIONS"].includes(req.method) ||
-      req.url.startsWith("/api/auth")
+      req.url.startsWith("/api/auth") ||
+      req.url === "/api/terminal/heartbeat"
     )
       return next.handle();
     const id = (req.params as Record<string, string>)?.id;

@@ -7,11 +7,14 @@
 #include "../../hardware/camera/ov5640_registers.h"
 #include "../../hardware/camera/ov5640_mode.h"
 #include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <future>
 #include <stdexcept>
 #include <thread>
 #include <fcntl.h>
+#include <sched.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -19,6 +22,7 @@
 namespace terminal {
 static constexpr unsigned metadata_offset=weight_bytes,feature_offset=(weight_bytes+metadata_words*4+63)&~63u;
 static constexpr unsigned pixels_offset=(feature_offset+feature_bytes+63)&~63u;
+static constexpr unsigned camera_bytes=416*416*2;
 static uint64_t clock_ns() { return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 static void delay(unsigned us) { std::this_thread::sleep_for(std::chrono::microseconds(us)); }
 static uint32_t crc32(const uint8_t* bytes,unsigned size) {
@@ -76,40 +80,82 @@ void Hardware::load_model(const std::vector<uint8_t>& file,const std::string& ve
     if(graph[4]!=1 && graph[4]!=3)throw std::runtime_error("Unsupported input channels");
     for(unsigned i=0;i<33;++i)for(unsigned j=0;j<10;++j)if(!(i==0 && j==4) && graph[i*10+j]!=model_commands[i][j])throw std::runtime_error("Model graph mismatch");
     channels=graph[4];
+    have_frame=false;current=0;captured_ns=0;
+    std::memcpy(commands,graph,sizeof(commands));
+    gray.assign(3*224*224,0);
+    out0_raw.assign(1847,0);out1_raw.assign(7390,0);
     std::memcpy(buffer,file.data()+128,weight_bytes+metadata_words*4);
     std::atomic_thread_fence(std::memory_order_seq_cst);
 }
+void Hardware::start_capture(unsigned index) {
+    pin(16,false);dma[0x30/4]=4;const auto deadline=clock_ns()+1000000000ULL;
+    while(dma[0x30/4]&4){if(clock_ns()>deadline)throw std::runtime_error("Capture DMA reset timeout");delay(50);}
+    dma[0x34/4]=0x7000;dma[0x30/4]=1;dma[0x48/4]=bus+pixels_offset+index*camera_bytes;dma[0x58/4]=camera_bytes;
+    std::atomic_thread_fence(std::memory_order_seq_cst);pin(16,true);
+}
+void Hardware::wait_capture() {
+    const auto deadline=clock_ns()+2000000000ULL;
+    for(;;){const auto status=dma[0x34/4];if((status&0x770)||(gpio[2]&2)){pin(16,false);dma[0x30/4]=4;throw std::runtime_error("Camera/DMA capture error");}if(status&0x1000)break;if(clock_ns()>deadline){pin(16,false);dma[0x30/4]=4;throw std::runtime_error("Capture timeout");}delay(50);}
+    pin(16,false);if(dma[0x58/4]!=camera_bytes)throw std::runtime_error("Incomplete frame");
+}
 Frame Hardware::capture() {
     if(!channels)throw std::runtime_error("No validated model loaded");
-    auto pixels=reinterpret_cast<uint16_t*>(buffer+pixels_offset);
-    pin(16,false);dma[0x30/4]=4;auto deadline=clock_ns()+1000000000ULL;
-    while(dma[0x30/4]&4){if(clock_ns()>deadline)throw std::runtime_error("Capture DMA reset timeout");delay(50);}
-    dma[0x34/4]=0x7000;dma[0x30/4]=1;dma[0x48/4]=bus+pixels_offset;dma[0x58/4]=416*416*2;
-    std::atomic_thread_fence(std::memory_order_seq_cst);pin(16,true);deadline=clock_ns()+2000000000ULL;
-    for(;;){const auto status=dma[0x34/4];if((status&0x770)||(gpio[2]&2)){pin(16,false);dma[0x30/4]=4;throw std::runtime_error("Camera/DMA capture error");}if(status&0x1000)break;if(clock_ns()>deadline){pin(16,false);dma[0x30/4]=4;throw std::runtime_error("Capture timeout");}delay(50);}
-    pin(16,false);if(dma[0x58/4]!=416*416*2)throw std::runtime_error("Incomplete frame");
-    const auto acquired=clock_ns();
-    std::atomic_thread_fence(std::memory_order_seq_cst);
-    std::vector<int8_t> input(3*224*224);
-    model_input_rows(pixels,input.data(),0,640,channels);
+    if(!have_frame){current=0;start_capture(current);captured_ns=prepare_capture(current);have_frame=true;}
+    const auto prepare_begin=clock_ns();
+    Frame frame;frame.id=++sequence;frame.monotonic_ns=captured_ns;
+    frame.pixels.swap(captured_pixels);
     auto features=reinterpret_cast<int8_t*>(buffer+feature_offset);
-    for(unsigned c=0;c<channels;++c)for(unsigned y=0;y<224;++y)std::memcpy(features+c*224*256+y*256,input.data()+c*224*224+y*224,224);
-    const auto metadata=reinterpret_cast<int32_t*>(buffer+metadata_offset);
+    for(unsigned c=0;c<channels;++c)for(unsigned y=0;y<224;++y)std::memcpy(features+c*224*256+y*256,gray.data()+c*224*224+y*224,224);
+    prepare_ns.store(clock_ns()-prepare_begin);
+    const unsigned next=current^1;
+    const auto forward_begin=clock_ns();
+    // The worker owns camera completion and next-frame preprocessing until get().
+    // Keep that work outside the loop that launches the 33 accelerator layers.
+    auto preparation=std::async(std::launch::async,[this,next]{
+        cpu_set_t cpu;CPU_ZERO(&cpu);CPU_SET(0,&cpu);
+        if(sched_setaffinity(0,sizeof(cpu),&cpu))throw std::runtime_error("Cannot assign preprocessing CPU");
+        return prepare_capture(next);
+    });
     const auto inference_deadline=clock_ns()+2000000000ULL;
+    const auto conv_begin=clock_ns();
     for(unsigned layer=0;layer<33;++layer) {
-        const int32_t* c=metadata+layer*10;
+        const int32_t* c=commands+layer*10;
         for(unsigned reg:{0x10u,0x18u,0x20u,0x28u})conv[reg/4]=bus+feature_offset+c[0];
         for(unsigned reg:{0x30u,0x38u,0x40u,0x48u})conv[reg/4]=bus+c[2];
         conv[0x50/4]=bus+metadata_offset+c[3]*4;
         for(unsigned reg:{0x58u,0x60u,0x68u,0x70u})conv[reg/4]=bus+feature_offset+c[1];
         for(unsigned j=4;j<10;++j)conv[(0x78+(j-4)*8)/4]=c[j];
         std::atomic_thread_fence(std::memory_order_seq_cst);conv[0]=1;
-        while(!(conv[0]&2)){if(clock_ns()>inference_deadline)throw std::runtime_error("PL inference timeout");delay(50);}
+        while(!(conv[0]&2)){
+            if(clock_ns()>inference_deadline)throw std::runtime_error("PL inference timeout");
+        }
     }
+    conv_ns.store(clock_ns()-conv_begin);
+    const auto next_captured_ns=preparation.get();
+    forward_ns.store(clock_ns()-forward_begin);
+    const auto post_begin=clock_ns();
     std::atomic_thread_fence(std::memory_order_seq_cst);
-    Frame frame;frame.id=++sequence;frame.monotonic_ns=acquired;frame.pixels.assign(pixels,pixels+416*416);frame.out0.resize(1617);frame.out1.resize(6468);
-    for(unsigned i=0;i<1617;++i)frame.out0[i]=features[out0_offset+(i/7)*8+i%7];
-    for(unsigned i=0;i<6468;++i)frame.out1[i]=features[out1_offset+(i/14)*16+i%14];
+    const auto extract_begin=clock_ns();
+    std::memcpy(out0_raw.data(),features+out0_offset,out0_raw.size());
+    std::memcpy(out1_raw.data(),features+out1_offset,out1_raw.size());
+    frame.out0.resize(1617);frame.out1.resize(6468);
+    for(unsigned i=0;i<1617;++i)frame.out0[i]=out0_raw[(i/7)*8+i%7];
+    for(unsigned i=0;i<6468;++i)frame.out1[i]=out1_raw[(i/14)*16+i%14];
+    extract_ns.store(clock_ns()-extract_begin);
+    current=next;captured_ns=next_captured_ns;
+    post_ns.store(clock_ns()-post_begin);
     return frame;
+}
+uint64_t Hardware::prepare_capture(unsigned index) {
+    wait_capture();
+    const auto captured=clock_ns();
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+    captured_pixels.resize(416*416);
+    std::memcpy(captured_pixels.data(),buffer+pixels_offset+index*camera_bytes,camera_bytes);
+    // The previous pixels are cached now; rearm the other DMA buffer immediately,
+    // as in the bare-metal pipeline, before preprocessing or the next inference.
+    start_capture(index^1);
+    model_input_rows(captured_pixels.data(),gray.data(),0,640,channels);
+    return captured;
 }
 }

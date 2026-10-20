@@ -1,3 +1,4 @@
+param([string]$UiFont = "C:/Windows/Fonts/simsun.ttc")
 $ErrorActionPreference = 'Stop'
 $output = Join-Path $PSScriptRoot 'build/delivery'
 $prefix = Join-Path $output 'rootfs'
@@ -9,13 +10,13 @@ foreach ($name in @('vision-engine','vision-panel')) {
     Copy-Item -LiteralPath $source -Destination (Join-Path $prefix "usr/local/bin/$name")
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'install_job.py') -Destination (Join-Path $prefix 'usr/local/bin/vision-install-job.py')
-foreach ($name in @('vision-engine.service','vision-panel.service')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot "linux/$name") -Destination (Join-Path $prefix 'etc/systemd/system') }
-foreach ($name in @('vision_accel.c','vision_fb.c','vision_uapi.h','Makefile','vision-pl.dtsi','navigator-v3.9.dts','navigator-v3.9-usb.dtsi','kernel.config','uboot.config','build-kernel.sh','build-uboot.sh','build-modules.sh','build-rootfs.sh','build-initramfs.sh','build-sd-image.sh','install-rootfs.sh','rcS','inittab')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot "linux/$name") -Destination (Join-Path $output 'kernel') }
-$fontRoot = 'https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans'
-$font = Join-Path $prefix 'usr/share/vision/NotoSansCJKsc-Regular.otf'
-if (!(Test-Path -LiteralPath $font)) { Invoke-WebRequest -Uri "$fontRoot/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf" -OutFile $font }
-if ((Get-FileHash -LiteralPath $font -Algorithm SHA256).Hash.ToLowerInvariant() -ne '2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b') { throw 'Chinese font checksum mismatch' }
-Invoke-WebRequest -Uri "$fontRoot/LICENSE" -OutFile (Join-Path $output 'licenses/Noto-CJK-OFL.txt')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'manager.py') -Destination (Join-Path $prefix 'usr/local/bin/vision-manager.py')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'vision_auth.py') -Destination (Join-Path $prefix 'usr/local/bin/vision_auth.py')
+foreach ($name in @('vision-engine.service','vision-panel.service','vision-manager.service')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot "linux/$name") -Destination (Join-Path $prefix 'etc/systemd/system') }
+foreach ($name in @('vision_accel.c','vision_fb.c','vision_uapi.h','Makefile','vision-pl.dtsi','navigator-v3.9.dts','navigator-v3.9-usb.dtsi','kernel.config','uboot.config','build-kernel.sh','build-uboot.sh','build-modules.sh','build-rootfs.sh','build-initramfs.sh','build-sd-image.sh','install-rootfs.sh','rcS','udhcpc.script','inittab')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot "linux/$name") -Destination (Join-Path $output 'kernel') }
+$font = Join-Path $prefix 'usr/share/vision/simsun.ttc'
+Copy-Item -LiteralPath $UiFont -Destination $font
+foreach ($name in @('XP.css-LICENSE.txt','winXP-LICENSE.txt')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot "assets/xp/$name") -Destination (Join-Path $output "licenses/$name") }
 $licenses = @(
     @('lvgl/LICENCE.txt','LVGL.txt'), @('json/LICENSE.MIT','nlohmann-json.txt'),
     @('httplib/LICENSE','cpp-httplib.txt'), @('freetype/LICENSE.TXT','FreeType.txt')

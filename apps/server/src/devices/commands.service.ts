@@ -17,6 +17,7 @@ export class CommandsService {
     requestId: string,
     action: () => Promise<T>,
   ): Promise<T> {
+    await this.devices.assertLegacyTransport(deviceId);
     const size = this.sizes.get(deviceId) ?? 0;
     if (size >= 8)
       throw new DomainError(
@@ -57,6 +58,7 @@ export class CommandsService {
               data: { status: "RUNNING", attempts: attempt },
             });
             try {
+              await this.devices.assertLegacyTransport(deviceId);
               result = await action();
               break;
             } catch (error) {

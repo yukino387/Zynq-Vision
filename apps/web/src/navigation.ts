@@ -165,15 +165,16 @@ export const routes: RouteRecordRaw[] = [
     name: "firmware",
     component: Firmware,
     meta: {
-      title: "固件与更新",
+      title: "终端与更新",
       nav: true,
       order: 7,
       roles: ENGINEER,
       discipline: "business",
-      defaultTab: "registry",
+      defaultTab: "overview",
       tabs: [
-        { tab: "registry", label: "固件仓库" },
-        { tab: "deployments", label: "更新记录" },
+        { tab: "overview", label: "更新能力" },
+        { tab: "registry", label: "旧固件档案" },
+        { tab: "deployments", label: "历史发布记录" },
       ],
     },
   },
@@ -247,9 +248,9 @@ export function canAccess(
   return !!role && roles.includes(role);
 }
 
-/** 登录后的落地页：管理员看总览，操作工直接进工作台。 */
+/** 登录后的落地页：管理员看总览，操作工直接进板端检测作业。 */
 export function landingFor(role: Role | null | undefined) {
-  return role === "ADMIN" || role === "ENGINEER" ? "overview" : "workbench";
+  return role === "ADMIN" || role === "ENGINEER" ? "overview" : "production";
 }
 
 /** 侧栏项，按 order 排。 */

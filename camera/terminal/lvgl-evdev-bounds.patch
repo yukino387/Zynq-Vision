@@ -1,13 +1,77 @@
-diff --git a/src/drivers/evdev/lv_evdev.c b/src/drivers/evdev/lv_evdev.c
-index 1b8319e..270c871 100644
 --- a/src/drivers/evdev/lv_evdev.c
 +++ b/src/drivers/evdev/lv_evdev.c
-@@ -166,8 +166,14 @@ static void _evdev_read(lv_indev_t * indev, lv_indev_data_t * data)
+@@ -68,6 +68,9 @@
+     int key;
+     lv_indev_state_t state;
+     bool deleting;
++    bool shift_left;
++    bool shift_right;
++    bool caps_lock;
+     /* Multi-touch support */
+ #if LV_USE_GESTURE_RECOGNITION
+     lv_indev_touch_data_t touch_data[MAX_TOUCH_POINTS]; /* Array of touch points for gesture recognition */
+@@ -124,6 +127,50 @@
+     }
+ }
+
++static int _evdev_character(lv_evdev_t * dsc, uint16_t code)
++{
++    const bool shift = dsc->shift_left || dsc->shift_right;
++    int key = 0;
++    if(code >= KEY_Q && code <= KEY_P) key = "qwertyuiop"[code - KEY_Q];
++    else if(code >= KEY_A && code <= KEY_L) key = "asdfghjkl"[code - KEY_A];
++    else if(code >= KEY_Z && code <= KEY_M) key = "zxcvbnm"[code - KEY_Z];
++    if(key) return (shift != dsc->caps_lock) ? key - 'a' + 'A' : key;
++    if(code >= KEY_1 && code <= KEY_0) return (shift ? "!@#$%^&*()" : "1234567890")[code - KEY_1];
++    switch(code) {
++        case KEY_SPACE: return ' ';
++        case KEY_MINUS: return shift ? '_' : '-';
++        case KEY_EQUAL: return shift ? '+' : '=';
++        case KEY_LEFTBRACE: return shift ? '{' : '[';
++        case KEY_RIGHTBRACE: return shift ? '}' : ']';
++        case KEY_BACKSLASH: return shift ? '|' : 92;
++        case KEY_SEMICOLON: return shift ? ':' : ';';
++        case KEY_APOSTROPHE: return shift ? 34 : 39;
++        case KEY_GRAVE: return shift ? '~' : '`';
++        case KEY_COMMA: return shift ? '<' : ',';
++        case KEY_DOT: return shift ? '>' : '.';
++        case KEY_SLASH: return shift ? '?' : '/';
++        case KEY_TAB: return shift ? LV_KEY_PREV : LV_KEY_NEXT;
++        default: return _evdev_process_key(code);
++    }
++}
++
++static void _evdev_wheel(lv_indev_t * indev, int dx, int dy, lv_point_t point)
++{
++    lv_display_t * display = lv_indev_get_display(indev);
++    lv_obj_t * object = lv_indev_search_obj(lv_display_get_layer_top(display), &point);
++    if(object == NULL) object = lv_indev_search_obj(lv_display_get_screen_active(display), &point);
++    while(object) {
++        const lv_dir_t direction = lv_obj_get_scroll_dir(object);
++        const bool vertical = dy && (direction & LV_DIR_VER) && (lv_obj_get_scroll_top(object) > 0 || lv_obj_get_scroll_bottom(object) > 0);
++        const bool horizontal = dx && (direction & LV_DIR_HOR) && (lv_obj_get_scroll_left(object) > 0 || lv_obj_get_scroll_right(object) > 0);
++        if(lv_obj_has_flag(object, LV_OBJ_FLAG_SCROLLABLE) && (vertical || horizontal)) {
++            lv_obj_scroll_by_bounded(object, horizontal ? -dx * 36 : 0, vertical ? dy * 36 : 0, LV_ANIM_OFF);
++            return;
++        }
++        object = lv_obj_get_parent(object);
++    }
++}
++
+ static int _evdev_calibrate(int v, int in_min, int in_max, int out_min, int out_max)
+ {
+     if(in_min != in_max) v = (v - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+@@ -164,10 +211,19 @@
+     /*Update dsc with buffered events*/
+     struct input_event in = { 0 };
      ssize_t br;
++    int wheel_y = 0, wheel_x = 0;
      while((br = read(dsc->fd, &in, sizeof(in))) > 0) {
          if(in.type == EV_REL) {
 -            if(in.code == REL_X) dsc->root_x += in.value;
 -            else if(in.code == REL_Y) dsc->root_y += in.value;
++            if(in.code == REL_WHEEL) wheel_y += in.value;
++            if(in.code == REL_HWHEEL) wheel_x += in.value;
 +            if(in.code == REL_X) {
 +                int width = lv_display_get_horizontal_resolution(lv_indev_get_display(indev));
 +                dsc->root_x = LV_CLAMP(0, (int64_t)dsc->root_x + in.value, width - 1);
@@ -19,3 +83,33 @@ index 1b8319e..270c871 100644
          }
          else if(in.type == EV_ABS) {
  #if LV_USE_GESTURE_RECOGNITION
+@@ -236,13 +292,17 @@
+                 }
+         }
+         else if(in.type == EV_KEY) {
++            if(in.code == KEY_LEFTSHIFT) {dsc->shift_left = in.value != 0;continue;}
++            if(in.code == KEY_RIGHTSHIFT) {dsc->shift_right = in.value != 0;continue;}
++            if(in.code == KEY_CAPSLOCK) {if(in.value == 1) dsc->caps_lock = !dsc->caps_lock;continue;}
+             if(in.code == BTN_MOUSE || in.code == BTN_TOUCH) {
+                 if(in.value == 0) dsc->state = LV_INDEV_STATE_RELEASED;
+                 else if(in.value == 1) dsc->state = LV_INDEV_STATE_PRESSED;
+             }
+             else {
+-                dsc->key = _evdev_process_key(in.code);
+-                if(dsc->key) {
++                const int mapped = _evdev_character(dsc, in.code);
++                if(mapped && in.value) dsc->key = mapped;
++                if(mapped) {
+                     dsc->state = in.value ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+                     data->continue_reading = true; /*Keep following events in buffer for now*/
+                     break;
+@@ -317,6 +377,9 @@
+         lv_async_call(_evdev_async_delete_cb, indev);
+         dsc->deleting = true;
+     }
++
++    if((wheel_x || wheel_y) && lv_indev_get_type(indev) == LV_INDEV_TYPE_POINTER)
++        _evdev_wheel(indev, wheel_x, wheel_y, _evdev_process_pointer(indev, dsc->root_x, dsc->root_y));
+
+     /*Process and store in data*/
+     switch(lv_indev_get_type(indev)) {

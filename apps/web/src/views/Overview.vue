@@ -118,8 +118,8 @@ const actions = computed(() => [
   {
     number: "06",
     title: "现场使用与反馈",
-    body: "查看设备实际结果，提交复核意见",
-    to: "/workbench",
+    body: "查看板端批次结果，提交复核意见",
+    to: "/production",
     owner: "工人 / 管理员",
   },
 ]);

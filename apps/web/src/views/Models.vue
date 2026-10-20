@@ -15,6 +15,8 @@ import AsyncState from "../components/AsyncState.vue";
 import SortableTh from "../components/SortableTh.vue";
 import Pager from "../components/Pager.vue";
 import Drawer from "../components/Drawer.vue";
+const legacyTarget = (id: unknown) =>
+  devices.devices.some((d) => d.id === id && d.executionMode === "BARE_METAL");
 const metricFps = (row: Named): number | null => {
   const value = (row.metrics as { fps?: unknown } | null)?.fps;
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -334,7 +336,7 @@ watch(
             : tab === "registry"
               ? "查看模型效果、下载模型包，并由管理员批准发布。"
               : tab === "deployments"
-                ? "将管理员批准的模型发布到设备，部署后检查实际检测结果。"
+                ? "Linux 板端通过检测作业领取已批准模型；此处保留旧裸机直接部署记录。"
                 : "评估候选模型，确认效果后再发布到设备。"
         }}
       </p>
@@ -342,7 +344,11 @@ watch(
     <div class="heading-actions">
       <button v-if="tab === 'registry'" @click="importing = true">
         导入模型制品</button
-      ><button v-else class="primary" @click="openForm">
+      ><button
+        v-else-if="tab !== 'deployments' || legacyTarget(devices.current?.id)"
+        class="primary"
+        @click="openForm"
+      >
         {{
           tab === "training"
             ? "创建训练"
@@ -435,6 +441,13 @@ watch(
         >评估完成后显示实际指标</small
       >
     </div>
+  </section>
+  <section v-if="tab === 'deployments'" class="panel terminal-model-guide">
+    <p>
+      当前 Linux
+      板端的模型和检查规则随作业包一起发布，启用时校验模型与作业身份。
+    </p>
+    <RouterLink to="/production" class="text-button">创建板端作业</RouterLink>
   </section>
   <form class="toolbar" @submit.prevent="list.filter">
     <input v-model="list.search.value" placeholder="搜索模型或任务…" /><select
@@ -625,6 +638,7 @@ watch(
             <button @click="open(r)">执行证据</button
             ><button
               v-if="
+                legacyTarget(r.deviceId) &&
                 r.previousVersion &&
                 ['ACTIVE', 'FAILED'].includes(r.status ?? '')
               "
@@ -740,6 +754,7 @@ watch(
                 ><button
                   v-if="
                     tab === 'deployments' &&
+                    legacyTarget(r.deviceId) &&
                     r.previousVersion &&
                     ['ACTIVE', 'FAILED'].includes(r.status ?? '')
                   "
@@ -985,10 +1000,18 @@ watch(
             v-for="d in devices.devices"
             :key="d.id"
             :value="d.id"
-            :disabled="!d.capabilities.modelUpdate"
+            :disabled="
+              d.executionMode !== 'BARE_METAL' || !d.capabilities.modelUpdate
+            "
           >
             {{ displayName(d.name) }}
-            {{ !d.capabilities.modelUpdate ? "· 不支持模型更新" : "" }}
+            {{
+              d.executionMode !== "BARE_METAL"
+                ? "· 请通过检测作业领取模型"
+                : !d.capabilities.modelUpdate
+                  ? "· 不支持直接模型更新"
+                  : ""
+            }}
           </option>
         </select></label
       >
@@ -1124,6 +1147,10 @@ watch(
   >
 </template>
 <style scoped>
+.terminal-model-guide {
+  padding: 1rem;
+  margin: 1rem 0;
+}
 .training-empty {
   padding: 16px 18px;
   margin: 16px 0;

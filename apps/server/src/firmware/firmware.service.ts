@@ -50,10 +50,12 @@ export class FirmwareService {
   ) {}
 
   async info(deviceId: string): Promise<FirmwareInfo> {
+    await this.devices.assertLegacyTransport(deviceId);
     return this.devices.transport(deviceId).getFirmwareInfo();
   }
 
   async createDeployment(firmwareId: string, deviceId: string) {
+    await this.devices.assertLegacyTransport(deviceId);
     const firmware = await this.db.firmware.findUniqueOrThrow({
       where: { id: firmwareId },
       include: { asset: true },
@@ -61,23 +63,11 @@ export class FirmwareService {
     const transport = this.devices.transport(deviceId);
     const info = await transport.getFirmwareInfo();
     if (!info.supported)
-      throw new DomainError(
-        "NO_CAPABILITY",
-        "设备固件不支持 PS 应用 OTA",
-        422,
-      );
+      throw new DomainError("NO_CAPABILITY", "设备固件不支持 PS 应用 OTA", 422);
     if (info.pendingSlot !== 0xffffffff)
-      throw new DomainError(
-        "DEVICE_BUSY",
-        "设备上有待确认的固件试运行",
-        409,
-      );
+      throw new DomainError("DEVICE_BUSY", "设备上有待确认的固件试运行", 409);
     if (info.version === firmware.version && info.sha256 === firmware.sha256)
-      throw new DomainError(
-        "INVALID_STATE",
-        "设备已经在运行这个固件版本",
-        409,
-      );
+      throw new DomainError("INVALID_STATE", "设备已经在运行这个固件版本", 409);
     return this.db.$transaction(async (tx) => {
       const firmwareBusy = await tx.firmwareDeployment.count({
         where: { deviceId, status: { in: FIRMWARE_BUSY_STATES } },

@@ -32,7 +32,7 @@ PY
 mkdir -p "$root/etc/init.d" "$root/proc" "$root/sys" "$root/dev" "$root/run" "$root/tmp" "$root/boot"
 mknod -m600 "$root/dev/console" c 5 1
 mknod -m666 "$root/dev/null" c 1 3
-for applet in sh mount umount mkdir modprobe hostname ifconfig sleep sync chmod cp reboot dmesg cat ls poweroff; do
+for applet in sh mount umount mkdir modprobe hostname ifconfig route udhcpc grep sleep sync chmod cp reboot dmesg cat ls poweroff; do
     [ -e "$root/bin/$applet" ] || ln -s busybox "$root/bin/$applet"
 done
 ln -s ../bin/busybox "$root/sbin/init"
@@ -44,6 +44,7 @@ ln -s ../proc/self/mounts "$root/etc/mtab"
 sh "$board/install-rootfs.sh" "$delivery" "$root"
 cp -a "$modules/lib/modules" "$root/lib/"
 install -m755 "$board/rcS" "$root/etc/init.d/rcS"
+install -m755 "$board/udhcpc.script" "$root/etc/udhcpc.script"
 install -m644 "$board/inittab" "$root/etc/inittab"
 printf '%s\n' 'root:x:0:0:Terminal administrator:/root:/bin/sh' > "$root/etc/passwd"
 printf '%s\n' 'root:x:0:' > "$root/etc/group"

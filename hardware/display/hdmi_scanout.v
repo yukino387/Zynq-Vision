@@ -1,5 +1,5 @@
 module hdmi_scanout (
-    (* X_INTERFACE_INFO="xilinx.com:signal:clock:1.0 axi_clk CLK", X_INTERFACE_PARAMETER="ASSOCIATED_BUSIF s_axis, ASSOCIATED_RESET resetn, FREQ_HZ 100000000" *) input wire axi_clk,
+    (* X_INTERFACE_INFO="xilinx.com:signal:clock:1.0 axi_clk CLK", X_INTERFACE_PARAMETER="ASSOCIATED_BUSIF s_axis, ASSOCIATED_RESET resetn, FREQ_HZ 125000000" *) input wire axi_clk,
     (* X_INTERFACE_INFO="xilinx.com:signal:reset:1.0 resetn RST", X_INTERFACE_PARAMETER="POLARITY ACTIVE_LOW" *) input wire resetn,
     (* X_INTERFACE_INFO="xilinx.com:signal:clock:1.0 pixel_clk CLK", X_INTERFACE_PARAMETER="FREQ_HZ 74250000" *) input wire pixel_clk,
     (* X_INTERFACE_INFO="xilinx.com:signal:clock:1.0 serial_clk CLK", X_INTERFACE_PARAMETER="FREQ_HZ 371250000" *) input wire serial_clk,input wire locked,
@@ -17,17 +17,17 @@ module hdmi_scanout (
     always @(posedge pixel_clk or negedge locked)if(!locked)reset_pipe<=0;else reset_pipe<={reset_pipe[1:0],resetn};
     wire pixel_reset=!reset_pipe[2],fifo_reset=!resetn || !locked;
     wire full,empty,write_busy,read_busy;
-    wire [25:0] head;
+    wire [17:0] head;
     wire active,hsync,vsync,frame_start,line_end;
     wire [10:0] x;wire [9:0] y;
     video_timing timing(pixel_clk,pixel_reset,active,hsync,vsync,frame_start,line_end,x,y);
     reg synchronized=0;
     reg [31:0] failures=0;
     wire available=!empty && !read_busy;
-    wire aligned=available && ((frame_start && head[25]) || (!frame_start && synchronized && !head[25])) && head[24]==line_end;
+    wire aligned=available && ((frame_start && head[17]) || (!frame_start && synchronized && !head[17])) && head[16]==line_end;
     wire consume=active && aligned;
-    wire discard=!active && !synchronized && available && !head[25];
-    wire [23:0] rgb=consume?head[23:0]:24'b0;
+    wire discard=!active && !synchronized && available && !head[17];
+    wire [23:0] rgb=consume?{head[15:11],head[15:13],head[10:5],head[10:9],head[4:0],head[4:2]}:24'b0;
     always @(posedge pixel_clk) begin
         if(pixel_reset) begin synchronized<=0;failures<=0;end
         else if(active)begin
@@ -37,8 +37,10 @@ module hdmi_scanout (
         end
     end
     assign s_axis_tready=!full && !write_busy && !fifo_reset;
-    xpm_fifo_async #(.FIFO_MEMORY_TYPE("block"),.FIFO_WRITE_DEPTH(4096),.WRITE_DATA_WIDTH(26),.READ_DATA_WIDTH(26),.READ_MODE("fwft"),.FIFO_READ_LATENCY(0),.CDC_SYNC_STAGES(2),.USE_ADV_FEATURES("0000")) fifo (
-        .rst(fifo_reset),.wr_clk(axi_clk),.wr_en(s_axis_tvalid && s_axis_tready),.din({s_axis_tuser,s_axis_tlast,s_axis_tdata[23:0]}),.full(full),.wr_rst_busy(write_busy),
+    // Each 32-bit VDMA beat holds two RGB565 pixels, low pixel first.
+    // SOF belongs to the first pixel and EOL to the second (1280 pixels/line).
+    xpm_fifo_async #(.FIFO_MEMORY_TYPE("block"),.FIFO_WRITE_DEPTH(2048),.WRITE_DATA_WIDTH(36),.READ_DATA_WIDTH(18),.READ_MODE("fwft"),.FIFO_READ_LATENCY(0),.CDC_SYNC_STAGES(2),.USE_ADV_FEATURES("0000")) fifo (
+        .rst(fifo_reset),.wr_clk(axi_clk),.wr_en(s_axis_tvalid && s_axis_tready),.din({1'b0,s_axis_tlast,s_axis_tdata[31:16],s_axis_tuser,1'b0,s_axis_tdata[15:0]}),.full(full),.wr_rst_busy(write_busy),
         .rd_clk(pixel_clk),.rd_en(consume || discard),.dout(head),.empty(empty),.rd_rst_busy(read_busy),.sleep(1'b0),.injectsbiterr(1'b0),.injectdbiterr(1'b0)
     );
     wire [9:0] red,green,blue;

@@ -1,0 +1,11 @@
+[Unit]
+Description=Vision terminal Linux management
+After=local-fs.target network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/bin/vision-manager.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -94,7 +94,32 @@ export interface DetectionBox {
   x2: number;
   y2: number;
 }
+export interface TerminalStatus {
+  bound: boolean;
+  online: boolean;
+  lastSeenAt: string | null;
+  state: null | {
+    bootId: string;
+    uptime: number;
+    jobId: string | null;
+    jobName: string | null;
+    batchStatus: string | null;
+    paused: boolean;
+    fresh: boolean;
+    modelVersion: string | null;
+    total: number;
+    pendingSync: number;
+    error: string;
+    syncError: string;
+    cpuPercent: number | null;
+    memoryUsed: number;
+    memoryTotal: number;
+    receivedAt: string;
+  };
+}
 export interface DeviceSnapshot {
+  executionMode: "LINUX_TERMINAL" | "BARE_METAL" | "UNCONFIRMED" | "SIMULATOR";
+  terminal: TerminalStatus | null;
   id: string;
   name: string;
   type: string;

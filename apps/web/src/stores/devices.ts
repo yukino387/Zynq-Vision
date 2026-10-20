@@ -39,6 +39,9 @@ export const useDeviceStore = defineStore("devices", () => {
   let socket: WebSocket | null = null,
     retry: ReturnType<typeof setTimeout> | null = null,
     clock: ReturnType<typeof setInterval> | null = null,
+    snapshotTimer: ReturnType<typeof setInterval> | null = null,
+    refreshing = false,
+    snapshotRevision = 0,
     stopped = false;
   const current = computed(
     () =>
@@ -49,9 +52,11 @@ export const useDeviceStore = defineStore("devices", () => {
     history.value = [];
   });
   async function snapshot() {
+    const revision = ++snapshotRevision;
     policy = await api("/devices/policy");
     // 现场只展示真实板卡；模拟器仅保留给后端自动化验证，不再进入界面。
     const all = await api<DeviceSnapshot[]>("/devices/snapshot");
+    if (revision !== snapshotRevision) return;
     devices.value = all.filter((d) => d.type !== "SIMULATOR");
     if (!devices.value.some((d) => d.id === selected.value))
       selected.value =
@@ -96,7 +101,11 @@ export const useDeviceStore = defineStore("devices", () => {
         previews.value[event.entityId] = event.payload as Preview;
         return;
       }
-      if (event.type === "device.telemetry" && device) {
+      if (
+        event.type === "device.telemetry" &&
+        device &&
+        device.executionMode !== "LINUX_TERMINAL"
+      ) {
         const p = event.payload as {
           telemetry: Telemetry;
           reportedState: DeviceState;
@@ -155,6 +164,16 @@ export const useDeviceStore = defineStore("devices", () => {
     connect();
     clock = setInterval(() => {
       for (const d of devices.value) {
+        if (d.executionMode === "LINUX_TERMINAL") {
+          d.connectionState =
+            d.terminal?.online &&
+            d.lastSeenAt &&
+            Date.now() - Date.parse(d.lastSeenAt) <= 20000
+              ? "ONLINE"
+              : "OFFLINE";
+          if (d.connectionState === "OFFLINE") d.runtimeState = "UNKNOWN";
+          continue;
+        }
         d.connectionState = connectionState(
           d.lastSeenAt ? Date.parse(d.lastSeenAt) : null,
           Date.now(),
@@ -164,6 +183,17 @@ export const useDeviceStore = defineStore("devices", () => {
         if (d.connectionState === "OFFLINE") d.runtimeState = "UNKNOWN";
       }
     }, 2000);
+    snapshotTimer = setInterval(async () => {
+      if (refreshing || stopped) return;
+      refreshing = true;
+      try {
+        await snapshot();
+      } catch (e) {
+        useNotificationStore().error(e);
+      } finally {
+        refreshing = false;
+      }
+    }, 5000);
   }
   function stop() {
     generation++;
@@ -177,6 +207,8 @@ export const useDeviceStore = defineStore("devices", () => {
     connected.value = false;
     if (retry) clearTimeout(retry);
     if (clock) clearInterval(clock);
+    if (snapshotTimer) clearInterval(snapshotTimer);
+    snapshotRevision++;
   }
   return {
     devices,

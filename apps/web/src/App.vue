@@ -22,6 +22,7 @@ import Icon from "./components/Icon.vue";
 const navIcons: Record<string, string> = {
   overview: "dashboard",
   plans: "clipboard",
+  production: "scan",
   workbench: "camera",
   records: "audit",
   data: "database",

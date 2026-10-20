@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -15,13 +16,23 @@ class Hardware {
     volatile uint32_t *gpio=nullptr,*dma=nullptr,*conv=nullptr;
     uint32_t bus=0,control=3,sequence=0;
     unsigned channels=0;
+    unsigned current=0;
+    bool have_frame=false;
+    uint64_t captured_ns=0;
+    int32_t commands[330]{};
+    std::vector<uint16_t> captured_pixels;
+    std::vector<int8_t> gray,out0_raw,out1_raw;
     void pin(unsigned,bool);
     void start();void stop();
+    void start_capture(unsigned);
+    void wait_capture();
+    uint64_t prepare_capture(unsigned);
     bool write_byte(uint8_t);
     uint8_t read_byte();
     bool write_register(uint16_t,uint8_t);
     bool read_register(uint16_t,uint8_t&);
 public:
+    std::atomic<uint64_t> prepare_ns{0},conv_ns{0},forward_ns{0},post_ns{0},extract_ns{0};
     Hardware();~Hardware();
     Hardware(const Hardware&)=delete;
     Hardware& operator=(const Hardware&)=delete;

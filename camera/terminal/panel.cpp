@@ -2,7 +2,11 @@
 #include "nlohmann/json.hpp"
 #include "httplib.h"
 #include "framebuffer.h"
+#include "management.h"
+#include "xp_style.h"
 #include <algorithm>
+#include <atomic>
+#include <mutex>
 #include <chrono>
 #include <ctime>
 #include <cstring>
@@ -12,19 +16,29 @@
 #include <thread>
 #include <vector>
 #include <fcntl.h>
+#include <sched.h>
 #include <unistd.h>
 using json=nlohmann::json;
 namespace {
 httplib::Client engine("http://127.0.0.1:8877");
-lv_obj_t *job_label,*result_label,*result_badge,*error_label,*fresh_label,*job_select,*picture,*pause_button,*run_label;
+lv_obj_t *job_label,*result_label,*result_badge,*error_label,*fresh_label,*job_select,*picture,*empty_label,*pause_button,*run_label;
 lv_obj_t* counters[5];
-lv_obj_t *app_window,*titlebar,*toolbar,*workspace,*preview,*results,*report,*notices,*statusbar,*task_button,*start_button,*clock_label,*popup_layer=nullptr,*mouse_cursor=nullptr;
-lv_obj_t *min_button,*max_button,*close_button,*max_icon,*restore_icon;
-lv_font_t *ui_font,*title_font;
+lv_obj_t *app_window,*titlebar,*toolbar,*workspace,*preview,*results,*report,*notices,*statusbar,*task_button,*start_button,*clock_label,*health_dot,*popup_layer=nullptr,*mouse_cursor=nullptr;
+lv_obj_t *min_button,*max_button,*close_button,*check_button,*select_button,*login_button;
+std::mutex inspection_mailbox;
+json polled_state,polled_jobs,inspection_command;
+std::string polled_frame,poll_error,command_error,active_job_ui;
+std::atomic<bool> inspection_busy{false},unconfirmed{false};
+uint32_t poll_revision=0,painted_revision=0,polled_at=0;
+void submit_inspection(const char* action,json payload=json::object()){
+    std::lock_guard<std::mutex> lock(inspection_mailbox);if(inspection_busy)return;inspection_command={{"path",action},{"payload",payload}};inspection_busy=true;
+}
+lv_group_t* menu_group=nullptr;
+const lv_font_t *ui_font,*title_font,*menu_title_font;
 bool maximized=false;
 int window_x=20,window_y=16;
 lv_point_t drag_point;
-enum class Action { Show,Minimize,Maximize,Close,Select,Check,Pause };
+enum class Action { Show,Minimize,Maximize,Close,Select,Check,Pause,Manage,ShowDesktop };
 lv_group_t* focus_group;
 lv_image_dsc_t image{};
 std::vector<uint8_t> pixels(416*416*2);
@@ -32,6 +46,7 @@ std::vector<lv_obj_t*> rectangles;
 std::vector<std::string> job_ids;
 std::string pending,options_cache;
 bool paused=false,picture_valid=false,jobs_loaded=false;
+uint32_t displayed_frame=0;
 const char* pending_file="/var/lib/vision/panel-request";
 void store_pending(const std::string& value) {
     const std::string temporary=std::string(pending_file)+".tmp";
@@ -45,13 +60,14 @@ void store_pending(const std::string& value) {
 }
 uint32_t tick(){return uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());}
 std::string translated(const std::string& result){return result=="PASS"?"符合要求":result=="FAIL"?"不符合要求":result=="REVIEW"?"待人工复核":"执行错误";}
-void text(lv_obj_t* label,const std::string& value){lv_label_set_text(label,value.c_str());}
+void text(lv_obj_t* label,const std::string& value){if(value!=lv_label_get_text(label))lv_label_set_text(label,value.c_str());}
 void clear_picture() {
     if(!picture_valid)return;
     std::fill(pixels.begin(),pixels.end(),0);
     lv_image_set_src(picture,&image);lv_obj_invalidate(picture);
     for(auto object:rectangles)lv_obj_delete(object);
     rectangles.clear();picture_valid=false;
+    if(empty_label)lv_obj_remove_flag(empty_label,LV_OBJ_FLAG_HIDDEN);
 }
 json get(const std::string& path) {
     const auto response=engine.Get(path);if(!response || response->status!=200)throw std::runtime_error("检测服务尚未就绪");return json::parse(response->body);
@@ -59,7 +75,7 @@ json get(const std::string& path) {
 json post(const std::string& path,const json& payload) {
     const auto response=engine.Post(path,payload.dump(),"application/json");if(!response)throw std::runtime_error("检测服务暂时不可达，请核对上一次操作");
     const auto body=json::parse(response->body);
-    if(response->status!=200){if(path=="/check" && body.contains("mayHaveSaved") && !body.at("mayHaveSaved").get<bool>()){store_pending("");pending.clear();}throw std::runtime_error(body.value("error","检测服务拒绝了本次操作"));}return body;
+    if(response->status!=200){if(path=="/check" && body.contains("mayHaveSaved") && !body.at("mayHaveSaved").get<bool>()){store_pending("");pending.clear();unconfirmed=false;}throw std::runtime_error(body.value("error","检测服务拒绝了本次操作"));}return body;
 }
 lv_obj_t* label(lv_obj_t* parent,const char* value) {auto object=lv_label_create(parent);lv_label_set_text(object,value);lv_label_set_long_mode(object,LV_LABEL_LONG_WRAP);return object;}
 lv_obj_t* panel(lv_obj_t* parent,int x,int y,int width,int height,uint32_t color) {
@@ -77,40 +93,60 @@ void bevel(lv_obj_t* object,uint32_t edge=0x7f9db9) {
 void vertical_scroll(lv_obj_t* object) {
     lv_obj_add_flag(object,LV_OBJ_FLAG_SCROLLABLE);lv_obj_add_flag(object,LV_OBJ_FLAG_CLICKABLE);lv_obj_set_scroll_dir(object,LV_DIR_VER);
     lv_obj_set_style_bg_color(object,lv_color_hex(0x9cb8df),LV_PART_SCROLLBAR);lv_obj_set_style_bg_opa(object,LV_OPA_COVER,LV_PART_SCROLLBAR);
-    lv_obj_set_style_width(object,8,LV_PART_SCROLLBAR);lv_obj_set_style_radius(object,2,LV_PART_SCROLLBAR);
+    xp::scrollbar(object);
 }
 lv_obj_t* button(lv_obj_t* parent,const char* value,lv_event_cb_t action) {
-    auto object=lv_button_create(parent);lv_obj_set_size(object,88,28);bevel(object,0x003c74);
-    lv_obj_set_style_bg_color(object,lv_color_hex(0xffffff),0);lv_obj_set_style_bg_grad_color(object,lv_color_hex(0xe0dfd3),0);lv_obj_set_style_bg_grad_dir(object,LV_GRAD_DIR_VER,0);
-    lv_obj_set_style_text_color(object,lv_color_black(),0);lv_obj_set_style_pad_all(object,0,0);
-    lv_obj_set_style_bg_color(object,lv_color_hex(0xc1d2ee),LV_STATE_PRESSED);lv_obj_set_style_bg_grad_color(object,lv_color_hex(0xe0e9f7),LV_STATE_PRESSED);
-    lv_obj_set_style_outline_color(object,lv_color_hex(0xe59700),LV_STATE_FOCUS_KEY);lv_obj_set_style_outline_width(object,2,LV_STATE_FOCUS_KEY);lv_obj_set_style_outline_pad(object,2,LV_STATE_FOCUS_KEY);
+    auto object=lv_button_create(parent);lv_obj_set_size(object,88,23);xp::skin(object,xp::Skin::Button);
+    lv_obj_set_style_text_color(object,lv_color_black(),0);
+    lv_obj_set_style_text_color(object,lv_color_hex(0xa1a192),LV_STATE_DISABLED);
     auto title=label(object,value);lv_obj_center(title);lv_obj_add_event_cb(object,action,LV_EVENT_CLICKED,nullptr);lv_group_add_obj(focus_group,object);return object;
 }
-void check(lv_event_t*) {
-    try {
-        if(pending.empty()){std::ifstream file("/proc/sys/kernel/random/uuid");std::getline(file,pending);if(pending.size()!=36)throw std::runtime_error("无法建立检查编号");}
-        store_pending(pending);
-        const auto saved=post("/check",{{"requestId",pending}});store_pending("");pending.clear();text(result_label,"第 "+std::to_string(saved.at("sequence").get<unsigned>())+" 件 · "+translated(saved.at("result")));text(error_label,"");
-    }catch(const std::exception& e){text(error_label,e.what());}
-}
+void check(lv_event_t*) {submit_inspection("/check");}
 void select_job(lv_event_t*) {
-    try {
-        if(!pending.empty())throw std::runtime_error("请先再次点击检查，核对上一次操作");
-        const auto selected=lv_dropdown_get_selected(job_select);if(selected>=job_ids.size())throw std::runtime_error("没有可执行的作业包");
-        post("/select",{{"id",job_ids[selected]}});paused=false;text(error_label,"");
-    }catch(const std::exception& e){text(error_label,e.what());}
+    if(unconfirmed){text(error_label,"请先再次点击检查，核对上一次操作");return;}
+    const auto selected=lv_dropdown_get_selected(job_select);
+    if(selected>=job_ids.size()){terminal::show_management_tab(8);if(!terminal::is_administrator())terminal::show_login();return;}
+    terminal::request_job_activation(job_ids[selected]);
 }
-void pause(lv_event_t*) {
-    try {post("/pause",{{"paused",!paused}});paused=!paused;text(lv_obj_get_child(pause_button,0),paused?"继续检测":"暂停检测");}
-    catch(const std::exception& e){text(error_label,e.what());}
+void pause(lv_event_t*) {submit_inspection("/pause",{{"paused",!paused}});}
+void inspection_worker(){
+    uint32_t last_jobs=0,last_frame=0;
+    for(;;){
+        const auto poll_started=tick();
+        json command;{std::lock_guard<std::mutex> lock(inspection_mailbox);command=std::move(inspection_command);inspection_command=nullptr;}
+        std::string message;
+        if(!command.is_null()){
+            try{
+                const std::string path=command.at("path");
+                if(path=="/check"){
+                    if(pending.empty()){std::ifstream file("/proc/sys/kernel/random/uuid");std::getline(file,pending);if(pending.size()!=36)throw std::runtime_error("无法建立检查编号");}
+                    unconfirmed=true;store_pending(pending);post(path,{{"requestId",pending}});store_pending("");pending.clear();unconfirmed=false;
+                }else post(path,command.at("payload"));
+            }catch(const std::exception& e){message=e.what();}
+            {std::lock_guard<std::mutex> lock(inspection_mailbox);command_error=message;}
+            inspection_busy=false;
+        }
+        try{
+            auto state=get("/state");json list;
+            if(!last_jobs || tick()-last_jobs>2000){list=get("/jobs");last_jobs=tick();}
+            const auto frame=engine.Get("/frame?after="+std::to_string(last_frame));std::string data=frame && frame->status==200?std::move(frame->body):std::string();
+            if(data.size()>=4){uint32_t size=0;std::memcpy(&size,data.data(),4);if(size<=100000 && data.size()>=4+size)last_frame=json::parse(data.substr(4,size)).at("frameId").get<uint32_t>();}
+            {std::lock_guard<std::mutex> lock(inspection_mailbox);polled_state=std::move(state);if(!list.is_null())polled_jobs=std::move(list);polled_frame=std::move(data);poll_error.clear();polled_at=tick();++poll_revision;}
+        }catch(const std::exception& e){std::lock_guard<std::mutex> lock(inspection_mailbox);poll_error=e.what();polled_frame.clear();++poll_revision;}
+        if(tick()-poll_started<10)std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
 }
-void close_popup() {if(popup_layer){lv_obj_delete(popup_layer);popup_layer=nullptr;}}
+void close_popup() {
+    if(!popup_layer)return;lv_obj_delete(popup_layer);popup_layer=nullptr;
+    if(menu_group){lv_group_delete(menu_group);menu_group=nullptr;}
+    lv_obj_remove_state(start_button,LV_STATE_CHECKED);
+    for(auto input=lv_indev_get_next(nullptr);input;input=lv_indev_get_next(input))if(lv_indev_get_type(input)==LV_INDEV_TYPE_KEYPAD)lv_indev_set_group(input,terminal::management_input_group()?terminal::management_input_group():focus_group);
+}
 void layout_window() {
     const int width=maximized?1280:1240,height=maximized?690:658;
     lv_obj_set_pos(app_window,maximized?0:window_x,maximized?0:window_y);lv_obj_set_size(app_window,width,height);
-    lv_obj_set_width(titlebar,width-8);lv_obj_set_width(toolbar,width-16);
-    lv_obj_set_pos(min_button,width-82,6);lv_obj_set_pos(max_button,width-58,6);lv_obj_set_pos(close_button,width-34,6);
+    lv_obj_set_width(titlebar,width);lv_obj_set_width(toolbar,width-6);
+    lv_obj_set_pos(min_button,width-72,5);lv_obj_set_pos(max_button,width-49,5);lv_obj_set_pos(close_button,width-26,5);
     lv_obj_set_width(job_label,width-32);
     const int cell=(width-24)/5;
     for(unsigned i=0;i<5;++i){auto parent=lv_obj_get_parent(counters[i]);lv_obj_set_pos(parent,12+int(i)*cell,124);lv_obj_set_width(parent,cell-4);lv_obj_set_width(counters[i],cell-18);}
@@ -119,55 +155,104 @@ void layout_window() {
     lv_obj_set_width(result_badge,width-500);lv_obj_set_size(report,width-496,height-380);lv_obj_set_width(result_label,width-520);
     lv_obj_set_pos(notices,10,height-292);lv_obj_set_size(notices,width-496,84);lv_obj_set_width(error_label,width-520);
     lv_obj_set_pos(statusbar,8,height-26);lv_obj_set_width(statusbar,width-16);lv_obj_set_pos(run_label,width-230,1);
-    lv_obj_set_pos(max_icon,maximized?7:5,maximized?3:5);lv_obj_set_size(max_icon,maximized?9:11,maximized?9:10);lv_obj_set_style_border_width(max_icon,2,0);
-    lv_obj_set_style_border_color(max_icon,lv_color_white(),0);
-    if(maximized)lv_obj_remove_flag(restore_icon,LV_OBJ_FLAG_HIDDEN);else lv_obj_add_flag(restore_icon,LV_OBJ_FLAG_HIDDEN);
+    xp::skin(max_button,maximized?xp::Skin::Restore:xp::Skin::Maximize);
 }
 void perform(Action action) {
     close_popup();
     if(action==Action::Show || action==Action::Minimize || action==Action::Close || action==Action::Maximize)lv_dropdown_close(job_select);
-    if(action==Action::Show){lv_obj_remove_flag(app_window,LV_OBJ_FLAG_HIDDEN);lv_obj_remove_flag(task_button,LV_OBJ_FLAG_HIDDEN);lv_obj_add_state(task_button,LV_STATE_CHECKED);lv_group_focus_obj(job_select);}
-    else if(action==Action::Minimize || action==Action::Close){lv_obj_add_flag(app_window,LV_OBJ_FLAG_HIDDEN);lv_obj_remove_state(task_button,LV_STATE_CHECKED);if(action==Action::Close)lv_obj_add_flag(task_button,LV_OBJ_FLAG_HIDDEN);}
+    if(action==Action::Show){terminal::blur_management();lv_obj_remove_flag(app_window,LV_OBJ_FLAG_HIDDEN);lv_obj_move_foreground(app_window);lv_obj_remove_flag(task_button,LV_OBJ_FLAG_HIDDEN);lv_obj_add_state(task_button,LV_STATE_CHECKED);xp::activate_window(app_window);lv_group_focus_obj(job_select);}
+    else if(action==Action::Minimize || action==Action::Close){lv_obj_add_flag(app_window,LV_OBJ_FLAG_HIDDEN);xp::deactivate_window(app_window);lv_obj_remove_state(task_button,LV_STATE_CHECKED);if(action==Action::Close)lv_obj_add_flag(task_button,LV_OBJ_FLAG_HIDDEN);}
     else if(action==Action::Maximize){maximized=!maximized;layout_window();}
     else if(action==Action::Select)select_job(nullptr);
     else if(action==Action::Check)check(nullptr);
     else if(action==Action::Pause)pause(nullptr);
+    else if(action==Action::Manage)terminal::show_management();
+    else if(action==Action::ShowDesktop){perform(Action::Minimize);terminal::hide_management();}
 }
 void dispatch(lv_event_t* event) {perform(static_cast<Action>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(event))));}
-void task_click(lv_event_t*) {perform(lv_obj_has_flag(app_window,LV_OBJ_FLAG_HIDDEN)?Action::Show:Action::Minimize);}
+void task_click(lv_event_t*) {perform((lv_obj_has_flag(app_window,LV_OBJ_FLAG_HIDDEN)||!lv_obj_has_state(task_button,LV_STATE_CHECKED))?Action::Show:Action::Minimize);}
 void drag_window(lv_event_t* event) {
     if(maximized)return;
     lv_point_t point;lv_indev_get_point(lv_indev_active(),&point);
-    if(lv_event_get_code(event)==LV_EVENT_PRESSING){window_x=std::clamp(window_x+int(point.x-drag_point.x),-1160,1200);window_y=std::clamp(window_y+int(point.y-drag_point.y),0,660);lv_obj_set_pos(app_window,window_x,window_y);}
+    if(lv_event_get_code(event)==LV_EVENT_PRESSING){window_x=std::clamp(window_x+int(point.x-drag_point.x),0,1280-lv_obj_get_width(app_window));window_y=std::clamp(window_y+int(point.y-drag_point.y),0,690-lv_obj_get_height(app_window));lv_obj_set_pos(app_window,window_x,window_y);}
     drag_point=point;
 }
-lv_obj_t* menu_item(lv_obj_t* parent,const char* value,int y,Action action) {
+lv_obj_t* menu_item(lv_obj_t* parent,const char* value,int y,Action action,bool with_icon=false) {
     lv_obj_update_layout(parent);
     auto object=button(parent,value,dispatch);lv_obj_set_pos(object,4,y);lv_obj_set_size(object,lv_obj_get_width(parent)-8,30);
     lv_obj_set_style_bg_color(object,lv_color_hex(0xffffff),0);lv_obj_set_style_bg_grad_dir(object,LV_GRAD_DIR_NONE,0);lv_obj_set_style_border_width(object,0,0);lv_obj_set_style_radius(object,0,0);
     lv_obj_set_style_bg_color(object,lv_color_hex(0x316ac5),LV_STATE_PRESSED);lv_obj_set_style_text_color(object,lv_color_white(),LV_STATE_PRESSED);
-    auto title=lv_obj_get_child(object,0);lv_obj_align(title,LV_ALIGN_LEFT_MID,18,0);
+    lv_obj_set_style_bg_color(object,lv_color_hex(0x316ac5),LV_STATE_HOVERED);lv_obj_set_style_text_color(object,lv_color_white(),LV_STATE_HOVERED);
+    xp::skin(object,xp::Skin::Menu);
+    if(with_icon)xp::icon(object,action==Action::Manage?xp::Icon::Control:xp::Icon::Computer,16,5,7);
+    auto title=lv_obj_get_child(object,0);lv_obj_align(title,LV_ALIGN_LEFT_MID,with_icon?26:18,0);
     lv_obj_remove_event_cb(object,dispatch);lv_obj_add_event_cb(object,dispatch,LV_EVENT_CLICKED,reinterpret_cast<void*>(static_cast<uintptr_t>(action)));
-    lv_group_remove_obj(object);return object;
+    lv_group_remove_obj(object);lv_group_add_obj(menu_group,object);
+    lv_obj_add_event_cb(object,[](lv_event_t* e){const auto key=lv_event_get_key(e);if(key==LV_KEY_ESC){close_popup();return;}if(key==LV_KEY_DOWN)lv_group_focus_next(menu_group);else if(key==LV_KEY_UP)lv_group_focus_prev(menu_group);},LV_EVENT_KEY,nullptr);
+    return object;
 }
 lv_obj_t* popup(int x,int y,int width,int height) {
-    close_popup();popup_layer=panel(lv_layer_top(),0,0,1280,720,0xffffff);lv_obj_set_style_bg_opa(popup_layer,LV_OPA_TRANSP,0);lv_obj_add_flag(popup_layer,LV_OBJ_FLAG_CLICKABLE);
+    close_popup();menu_group=lv_group_create();popup_layer=panel(lv_layer_top(),0,0,1280,720,0xffffff);lv_obj_set_style_bg_opa(popup_layer,LV_OPA_TRANSP,0);lv_obj_add_flag(popup_layer,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(popup_layer,[](lv_event_t*){close_popup();},LV_EVENT_CLICKED,nullptr);
-    auto menu=panel(popup_layer,x,y,width,height,0xffffff);bevel(menu,0x7f9db9);lv_obj_set_style_radius(menu,0,0);
+    auto menu=panel(popup_layer,x,y,width,height,0xffffff);bevel(menu,0x808080);lv_obj_set_style_radius(menu,0,0);
     lv_obj_set_style_text_font(menu,ui_font,0);
     lv_obj_set_style_shadow_width(menu,8,0);lv_obj_set_style_shadow_opa(menu,LV_OPA_30,0);lv_obj_set_style_shadow_ofs_x(menu,3,0);lv_obj_set_style_shadow_ofs_y(menu,3,0);
+    for(auto input=lv_indev_get_next(nullptr);input;input=lv_indev_get_next(input))if(lv_indev_get_type(input)==LV_INDEV_TYPE_KEYPAD)lv_indev_set_group(input,menu_group);
     return menu;
+}
+void start_left_icon(lv_obj_t* object,Action action) {xp::icon(object,action==Action::Manage?xp::Icon::Control:xp::Icon::Computer,32,5,2);}
+void start_tab_icon(lv_obj_t* object,unsigned tab) {
+    const xp::Icon icons[]={xp::Icon::Control,xp::Icon::Document,xp::Icon::Network,xp::Icon::Disk,xp::Icon::Device,xp::Icon::Document,xp::Icon::Records,xp::Icon::Jobs};
+    auto image=xp::icon(object,icons[std::min(tab,7u)],32,5,3);lv_image_set_scale(image,192);
+}
+lv_obj_t* start_left_item(lv_obj_t* parent,const char* text,int y,Action action) {
+    auto object=button(parent,text,dispatch);lv_obj_set_pos(object,4,y);lv_obj_set_size(object,181,36);
+    lv_obj_set_style_bg_color(object,lv_color_hex(0xffffff),0);lv_obj_set_style_bg_grad_dir(object,LV_GRAD_DIR_NONE,0);lv_obj_set_style_border_width(object,0,0);lv_obj_set_style_radius(object,0,0);
+    lv_obj_set_style_bg_color(object,lv_color_hex(0x316ac5),LV_STATE_HOVERED);lv_obj_set_style_text_color(object,lv_color_white(),LV_STATE_HOVERED);
+    lv_obj_set_style_bg_color(object,lv_color_hex(0x316ac5),LV_STATE_PRESSED);lv_obj_set_style_text_color(object,lv_color_white(),LV_STATE_PRESSED);
+    xp::skin(object,xp::Skin::Menu);start_left_icon(object,action);
+    lv_obj_align(lv_obj_get_child(object,0),LV_ALIGN_LEFT_MID,38,0);
+    lv_obj_remove_event_cb(object,dispatch);lv_obj_add_event_cb(object,dispatch,LV_EVENT_CLICKED,reinterpret_cast<void*>(static_cast<uintptr_t>(action)));
+    lv_group_remove_obj(object);lv_group_add_obj(menu_group,object);
+    lv_obj_add_event_cb(object,[](lv_event_t* e){if(lv_event_get_key(e)==LV_KEY_ESC)close_popup();else if(lv_event_get_key(e)==LV_KEY_DOWN)lv_group_focus_next(menu_group);else if(lv_event_get_key(e)==LV_KEY_UP)lv_group_focus_prev(menu_group);},LV_EVENT_KEY,nullptr);return object;
+}
+lv_obj_t* start_tab_item(lv_obj_t* parent,const char* text,int y,unsigned tab,bool right) {
+    auto object=button(parent,text,[](lv_event_t*){});lv_obj_set_pos(object,4,y);lv_obj_set_size(object,181,36);
+    lv_obj_set_style_bg_color(object,lv_color_hex(right?0xd3e5fa:0xffffff),0);lv_obj_set_style_bg_grad_dir(object,LV_GRAD_DIR_NONE,0);lv_obj_set_style_border_width(object,0,0);lv_obj_set_style_radius(object,0,0);
+    lv_obj_set_style_text_color(object,lv_color_hex(right?0x00136b:0x000000),0);
+    lv_obj_set_style_bg_color(object,lv_color_hex(right?0x1b4fa8:0x316ac5),LV_STATE_HOVERED);lv_obj_set_style_text_color(object,lv_color_white(),LV_STATE_HOVERED);
+    lv_obj_set_style_bg_color(object,lv_color_hex(right?0x1b4fa8:0x316ac5),LV_STATE_PRESSED);lv_obj_set_style_text_color(object,lv_color_white(),LV_STATE_PRESSED);
+    xp::skin(object,xp::Skin::Menu);start_tab_icon(object,tab);
+    lv_obj_align(lv_obj_get_child(object,0),LV_ALIGN_LEFT_MID,38,0);
+    lv_obj_add_event_cb(object,[](lv_event_t* event){close_popup();terminal::show_management_tab(unsigned(reinterpret_cast<uintptr_t>(lv_event_get_user_data(event))));},LV_EVENT_CLICKED,reinterpret_cast<void*>(static_cast<uintptr_t>(tab)));
+    lv_group_remove_obj(object);lv_group_add_obj(menu_group,object);
+    lv_obj_add_event_cb(object,[](lv_event_t* e){if(lv_event_get_key(e)==LV_KEY_ESC)close_popup();else if(lv_event_get_key(e)==LV_KEY_DOWN)lv_group_focus_next(menu_group);else if(lv_event_get_key(e)==LV_KEY_UP)lv_group_focus_prev(menu_group);},LV_EVENT_KEY,nullptr);return object;
 }
 void start_menu(lv_event_t*) {
     if(popup_layer){close_popup();return;}
-    auto menu=popup(0,534,252,156);
-    auto header=panel(menu,1,1,250,35,0x245edb);auto title=caption(header,"开始",14,5,220,0xffffff);lv_obj_set_style_text_font(title,title_font,0);
-    menu_item(menu,"视觉检测",43,Action::Show);panel(menu,8,81,236,1,0xd4d0c8);menu_item(menu,"显示桌面",91,Action::Minimize);
+    auto menu=popup(0,246,380,444);lv_obj_add_state(start_button,LV_STATE_CHECKED);
+    auto header=panel(menu,1,1,378,62,0x0062ea);lv_obj_set_style_bg_grad_color(header,lv_color_hex(0x081bcb),0);lv_obj_set_style_bg_grad_dir(header,LV_GRAD_DIR_VER,0);panel(header,0,0,378,2,0x5db3ff);
+    auto avatar=lv_image_create(header);lv_image_set_src(avatar,&xp::assets::user);lv_obj_set_pos(avatar,8,7);
+    auto name=caption(header,"巡检终端",64,7,300,0xffffff);lv_obj_set_style_text_font(name,menu_title_font,0);
+    caption(header,"本地视觉检测",64,31,300,0xd6e5ff);
+    auto left=panel(menu,1,63,189,337,0xffffff);
+    auto right=panel(menu,190,63,189,337,0xd3e5fa);panel(menu,189,63,1,337,0x95bdee);
+    start_left_item(left,"视觉检测",8,Action::Show);start_left_item(left,"系统管理",48,Action::Manage);start_left_item(left,"显示桌面",88,Action::ShowDesktop);
+    panel(left,8,128,173,1,0x808080);
+    start_tab_item(left,"进程监视",136,1,false);start_tab_item(left,"网络状态",176,2,false);start_tab_item(left,"记录浏览",216,6,false);start_tab_item(left,"作业管理",256,7,false);
+    start_tab_item(right,"系统概览",8,0,true);start_tab_item(right,"存储管理",48,3,true);start_tab_item(right,"设备管理",88,4,true);start_tab_item(right,"日志查看",128,5,true);
+    panel(right,8,172,173,1,0x9ebfe5);
+    auto footer=panel(menu,1,400,378,43,0x0062ea);lv_obj_set_style_bg_grad_color(footer,lv_color_hex(0x081bcb),0);lv_obj_set_style_bg_grad_dir(footer,LV_GRAD_DIR_VER,0);panel(footer,0,0,378,1,0x5db3ff);
+    auto shutdown=button(footer,"关闭计算机",[](lv_event_t*){close_popup();terminal::show_power_dialog(false);});
+    lv_obj_set_pos(shutdown,232,7);lv_obj_set_size(shutdown,140,28);xp::skin(shutdown,xp::Skin::Menu);lv_obj_set_style_text_color(shutdown,lv_color_white(),0);
+    auto power=lv_image_create(shutdown);lv_image_set_src(power,&xp::assets::power);lv_obj_set_pos(power,4,2);lv_obj_align(lv_obj_get_child(shutdown,0),LV_ALIGN_LEFT_MID,34,0);
+    lv_group_remove_obj(shutdown);lv_group_add_obj(menu_group,shutdown);lv_obj_add_event_cb(shutdown,[](lv_event_t* e){if(lv_event_get_key(e)==LV_KEY_ESC)close_popup();},LV_EVENT_KEY,nullptr);
+
 }
 void file_menu(lv_event_t*) {
     lv_area_t area;lv_obj_get_coords(toolbar,&area);auto menu=popup(area.x1,area.y1-1,186,143);
     menu_item(menu,"选择作业",4,Action::Select);menu_item(menu,"检查一件",36,Action::Check);menu_item(menu,paused?"继续检测":"暂停检测",68,Action::Pause);
-    panel(menu,8,102,170,1,0xd4d0c8);menu_item(menu,"关闭",107,Action::Close);
+    panel(menu,8,102,170,1,0x808080);menu_item(menu,"关闭",107,Action::Close);
 }
 void view_menu(lv_event_t*) {
     lv_area_t area;lv_obj_get_coords(toolbar,&area);auto menu=popup(area.x1+66,area.y1-1,186,74);
@@ -177,7 +262,7 @@ void update_clock(lv_timer_t*) {
     const auto now=std::time(nullptr);char value[16];std::strftime(value,sizeof(value),"%H:%M",std::localtime(&now));text(clock_label,value);
 }
 void discover(lv_indev_t* input,lv_evdev_type_t type,void*) {
-    if(type==LV_EVDEV_TYPE_KEY)lv_indev_set_group(input,focus_group);
+    if(type==LV_EVDEV_TYPE_KEY)lv_indev_set_group(input,terminal::management_input_group()?terminal::management_input_group():focus_group);
     else if(type==LV_EVDEV_TYPE_REL){
         if(!mouse_cursor){
             static uint32_t data[16*20]{};static lv_image_dsc_t cursor_image{};
@@ -191,17 +276,30 @@ void discover(lv_indev_t* input,lv_evdev_type_t type,void*) {
 }
 void jobs(lv_timer_t*) {
     try {
-        const auto list=get("/jobs");std::string options;std::vector<std::string> ids;
+        json list;{std::lock_guard<std::mutex> lock(inspection_mailbox);list=polled_jobs;}if(!list.is_array())return;std::string options;std::vector<std::string> ids;
         for(const auto& job:list){if(!options.empty())options+='\n';options+=job.at("name").get<std::string>();ids.push_back(job.at("id"));}
         if(!jobs_loaded || options!=options_cache || ids!=job_ids){jobs_loaded=true;options_cache=options;job_ids=std::move(ids);lv_dropdown_set_options(job_select,options.empty()?"":options.c_str());}
     }catch(const std::exception&){ }
 }
 void refresh(lv_timer_t*) {
+    if(terminal::take_inspection_focus())perform(Action::Show);
+    text(lv_obj_get_child(login_button,0),terminal::is_administrator()?"管理员已登录":"管理员登录");
+    if(inspection_busy){lv_obj_add_state(check_button,LV_STATE_DISABLED);lv_obj_add_state(pause_button,LV_STATE_DISABLED);}else if(unconfirmed)lv_obj_remove_state(check_button,LV_STATE_DISABLED);
     try {
-        const auto state=get("/state");
+        json state;std::string frame_data,error,action_error;uint32_t age;
+        {std::lock_guard<std::mutex> lock(inspection_mailbox);if(painted_revision==poll_revision && tick()-polled_at<1500)return;painted_revision=poll_revision;state=polled_state;frame_data=polled_frame;error=poll_error;action_error=command_error;age=tick()-polled_at;}
+        if(!error.empty() || state.is_null() || age>1500){clear_picture();lv_obj_add_state(check_button,LV_STATE_DISABLED);if(unconfirmed && !inspection_busy)lv_obj_remove_state(check_button,LV_STATE_DISABLED);lv_obj_add_state(pause_button,LV_STATE_DISABLED);throw std::runtime_error(error.empty()?"等待检测服务…":error);}
+        lv_obj_set_style_bg_color(health_dot,lv_color_hex(0x2bdf50),0);
         paused=state.at("paused");text(lv_obj_get_child(pause_button,0),paused?"继续检测":"暂停检测");
-        text(run_label,state.at("job").is_null()?"就绪":paused?"已暂停":"运行中");
-        text(job_label,state.at("job").is_null()?"作业：—":"作业："+state["job"].at("name").get<std::string>());
+        const bool has_job=!state.at("job").is_null();
+        text(run_label,!has_job?"未选择作业":paused?"已暂停":"运行中");
+        const bool can_check=!inspection_busy && (unconfirmed || (has_job && !paused && state.value("fresh",false)));
+        if(can_check)lv_obj_remove_state(check_button,LV_STATE_DISABLED);else lv_obj_add_state(check_button,LV_STATE_DISABLED);
+        if(has_job && !inspection_busy)lv_obj_remove_state(pause_button,LV_STATE_DISABLED);else lv_obj_add_state(pause_button,LV_STATE_DISABLED);
+        text(lv_obj_get_child(check_button,0),unconfirmed?"核对上次":"检查一件");
+        if(has_job && active_job_ui!=state["job"].value("id",std::string())){active_job_ui=state["job"].value("id",std::string());const auto found=std::find(job_ids.begin(),job_ids.end(),active_job_ui);if(found!=job_ids.end())lv_dropdown_set_selected(job_select,found-job_ids.begin());}
+        text(job_label,!has_job?(job_ids.empty()?"作业：未安装":"作业：—"):"作业："+state["job"].at("name").get<std::string>()+"    操作要求："+state["job"].value("instructions",std::string()));
+        text(empty_label,!has_job?"未启用作业\n管理员登录 → 平台 → 领取并启用":"等待画面…");
         const unsigned values[]={state.at("total").get<unsigned>(),state["counts"]["PASS"].get<unsigned>(),state["counts"]["FAIL"].get<unsigned>(),state["counts"]["REVIEW"].get<unsigned>(),state["pendingSync"].get<unsigned>()};
         const char* names[]={"已检查","合格","不合格","待复核","待同步"};
         for(unsigned i=0;i<5;++i)text(counters[i],std::string(names[i])+"   "+std::to_string(values[i]));
@@ -212,66 +310,76 @@ void refresh(lv_timer_t*) {
             if(last.contains("findings"))for(const auto& finding:last["findings"])report+='\n'+finding.at("label").get<std::string>()+"：确认 "+std::to_string(finding.at("count").get<unsigned>())+"，待确认 "+std::to_string(finding.at("uncertain").get<unsigned>())+"，要求 "+std::to_string(finding.at("min").get<unsigned>())+"–"+std::to_string(finding.at("max").get<unsigned>());
             text(result_label,report);
         }else {text(result_label,"");text(result_badge,"—");lv_obj_set_style_text_color(result_badge,lv_color_black(),0);}
-        text(error_label,state.at("error").get<std::string>()+(!state.at("syncError").get<std::string>().empty()?"\n同步失败":""));
-        const auto response=engine.Get("/frame");
-        if(!response || response->status!=200 || response->body.size()<4){clear_picture();text(fresh_label,"无图像");return;}
-        uint32_t size=0;std::memcpy(&size,response->body.data(),4);
-        if(size>100000 || response->body.size()!=4+size+pixels.size())throw std::runtime_error("画面数据长度异常");
-        const auto frame=json::parse(response->body.substr(4,size));std::memcpy(pixels.data(),response->body.data()+4+size,pixels.size());
-        lv_image_set_src(picture,&image);lv_obj_invalidate(picture);picture_valid=true;
+        text(error_label,action_error+(!action_error.empty()?"\n":"")+state.at("error").get<std::string>()+(!state.at("syncError").get<std::string>().empty()?"\n同步失败":""));
+        if(frame_data.size()<4){clear_picture();text(fresh_label,"无图像");return;}
+        uint32_t size=0;std::memcpy(&size,frame_data.data(),4);
+        if(size>100000 || frame_data.size()!=4+size+pixels.size())throw std::runtime_error("画面数据长度异常");
+        const auto frame=json::parse(frame_data.substr(4,size));
+        const auto frame_id=frame.at("frameId").get<uint32_t>();
+        if(picture_valid && frame.at("fresh").get<bool>() && displayed_frame==frame_id)return;
+        std::memcpy(pixels.data(),frame_data.data()+4+size,pixels.size());displayed_frame=frame_id;
+        lv_image_set_src(picture,&image);lv_obj_invalidate(picture);picture_valid=true;lv_obj_add_flag(empty_label,LV_OBJ_FLAG_HIDDEN);
         text(fresh_label,(frame.at("fresh").get<bool>()?"实时画面":"画面已超时")+std::string(" · #")+std::to_string(frame.at("frameId").get<unsigned>()));
         for(auto object:rectangles)lv_obj_delete(object);rectangles.clear();
         if(frame.at("fresh").get<bool>())for(const auto& box:frame.at("boxes")) {
             auto rectangle=lv_obj_create(picture);lv_obj_remove_style_all(rectangle);
             lv_obj_set_pos(rectangle,int(box["x1"].get<double>()),int(box["y1"].get<double>()));lv_obj_set_size(rectangle,int(box["x2"].get<double>()-box["x1"].get<double>()),int(box["y2"].get<double>()-box["y1"].get<double>()));lv_obj_set_style_border_width(rectangle,2,0);lv_obj_set_style_border_color(rectangle,lv_color_hex(0xd8e5dc),0);rectangles.push_back(rectangle);
         }
-    }catch(const std::exception& e){text(fresh_label,"画面不可用");text(run_label,"服务连接异常");text(error_label,e.what());}
+    }catch(const std::exception& e){clear_picture();lv_obj_set_style_bg_color(health_dot,lv_color_hex(0xd93025),0);text(fresh_label,"画面不可用");text(run_label,"服务连接异常");text(error_label,e.what());}
 }
 }
 int main(int argc,char** argv) {
     if(argc!=2){std::cerr<<"Usage: vision-panel CHINESE_FONT_FILE\n";return 2;}
+    cpu_set_t cpu;CPU_ZERO(&cpu);CPU_SET(0,&cpu);
+    if(sched_setaffinity(0,sizeof(cpu),&cpu)){std::cerr<<"Cannot assign panel CPU\n";return 1;}
     {std::ifstream file(pending_file);std::getline(file,pending);if(!pending.empty() && (pending.size()!=36 || pending.find_first_not_of("0123456789abcdef-")!=std::string::npos)){std::cerr<<"Invalid saved panel operation\n";return 1;}}
     lv_init();lv_tick_set_cb(tick);focus_group=lv_group_create();lv_group_set_default(focus_group);
     lv_log_register_print_cb([](lv_log_level_t,const char* message){std::cerr<<message;});
     Framebuffer framebuffer;
-    ui_font=lv_freetype_font_create(argv[1],LV_FREETYPE_FONT_RENDER_MODE_BITMAP,14,LV_FREETYPE_FONT_STYLE_NORMAL);
-    title_font=lv_freetype_font_create(argv[1],LV_FREETYPE_FONT_RENDER_MODE_BITMAP,16,LV_FREETYPE_FONT_STYLE_BOLD);
-    auto result_font=lv_freetype_font_create(argv[1],LV_FREETYPE_FONT_RENDER_MODE_BITMAP,22,LV_FREETYPE_FONT_STYLE_BOLD);
-    auto start_font=lv_freetype_font_create(argv[1],LV_FREETYPE_FONT_RENDER_MODE_BITMAP,18,static_cast<lv_freetype_font_style_t>(LV_FREETYPE_FONT_STYLE_BOLD|LV_FREETYPE_FONT_STYLE_ITALIC));
-    if(!ui_font || !title_font || !result_font || !start_font){std::cerr<<"Cannot load terminal font\n";return 1;}
-    ui_font->fallback=title_font->fallback=result_font->fallback=start_font->fallback=&lv_font_montserrat_14;
+    ui_font=xp::pixel_font(argv[1],12);title_font=xp::pixel_font(argv[1],12,true);
+    auto result_font=xp::pixel_font(argv[1],20,true);auto start_font=xp::pixel_font(argv[1],16,true);menu_title_font=start_font;
     auto root=lv_screen_active();lv_obj_set_style_text_font(root,ui_font,0);lv_obj_set_style_text_color(root,lv_color_black(),0);
-    lv_obj_set_style_bg_color(root,lv_color_hex(0x3a6ea5),0);lv_obj_set_style_pad_all(root,0,0);lv_obj_remove_flag(root,LV_OBJ_FLAG_SCROLLABLE);
-    auto shortcut=panel(root,16,16,80,76,0x3a6ea5);lv_obj_add_flag(shortcut,LV_OBJ_FLAG_CLICKABLE);
-    auto monitor=panel(shortcut,22,3,36,30,0xd4d0c8);bevel(monitor,0x414141);panel(monitor,3,3,28,20,0x1548ad);panel(monitor,8,7,18,12,0x68c3f0);panel(shortcut,36,34,8,5,0xd4d0c8);panel(shortcut,28,39,24,3,0xd4d0c8);
+    lv_obj_set_style_bg_color(root,lv_color_hex(xp::desktop),0);lv_obj_set_style_pad_all(root,0,0);lv_obj_remove_flag(root,LV_OBJ_FLAG_SCROLLABLE);
+    auto shortcut=panel(root,16,16,80,76,xp::desktop);lv_obj_add_flag(shortcut,LV_OBJ_FLAG_CLICKABLE);
+    xp::icon(shortcut,xp::Icon::Computer,32,24,3);
     auto shortcut_text=caption(shortcut,"视觉检测",0,49,80,0xffffff);lv_obj_set_style_text_align(shortcut_text,LV_TEXT_ALIGN_CENTER,0);
     lv_obj_add_event_cb(shortcut,dispatch,LV_EVENT_DOUBLE_CLICKED,reinterpret_cast<void*>(static_cast<uintptr_t>(Action::Show)));
-    app_window=panel(root,20,16,1240,658,0xece9d8);bevel(app_window,0x00138c);lv_obj_set_style_border_width(app_window,3,0);lv_obj_set_style_radius(app_window,7,0);
-    titlebar=panel(app_window,4,4,1232,28,0x0058e8);lv_obj_set_style_bg_grad_color(titlebar,lv_color_hex(0x003bb8),0);lv_obj_set_style_bg_grad_dir(titlebar,LV_GRAD_DIR_VER,0);
-    panel(titlebar,1,0,1230,2,0x3897ff);lv_obj_add_flag(titlebar,LV_OBJ_FLAG_CLICKABLE);
+    auto management_shortcut=panel(root,16,104,80,76,xp::desktop);lv_obj_add_flag(management_shortcut,LV_OBJ_FLAG_CLICKABLE);
+    xp::icon(management_shortcut,xp::Icon::Control,32,24,3);
+    auto management_caption=caption(management_shortcut,"系统管理",0,49,80,0xffffff);lv_obj_set_style_text_align(management_caption,LV_TEXT_ALIGN_CENTER,0);lv_obj_add_event_cb(management_shortcut,dispatch,LV_EVENT_DOUBLE_CLICKED,reinterpret_cast<void*>(static_cast<uintptr_t>(Action::Manage)));
+    app_window=panel(root,20,16,1240,658,xp::face);xp::skin(app_window,xp::Skin::Window);lv_obj_add_flag(app_window,LV_OBJ_FLAG_CLICKABLE);
+    titlebar=panel(app_window,0,0,1240,30,0x0053ee);xp::skin(titlebar,xp::Skin::Title);lv_obj_add_flag(titlebar,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(titlebar,drag_window,LV_EVENT_PRESSED,nullptr);lv_obj_add_event_cb(titlebar,drag_window,LV_EVENT_PRESSING,nullptr);
     lv_obj_add_event_cb(titlebar,dispatch,LV_EVENT_DOUBLE_CLICKED,reinterpret_cast<void*>(static_cast<uintptr_t>(Action::Maximize)));
-    auto icon=panel(titlebar,5,5,17,17,0xd4d0c8);bevel(icon,0xffffff);panel(icon,2,2,11,8,0x72c8ef);panel(icon,4,12,7,2,0xffffff);
-    auto title=caption(titlebar,"视觉检测",28,1,600,0xffffff);lv_obj_set_style_text_font(title,title_font,0);lv_obj_remove_flag(title,LV_OBJ_FLAG_CLICKABLE);
-    auto chrome=[&](Action action,uint32_t top,uint32_t bottom){
-        auto object=button(app_window,"",dispatch);lv_obj_set_size(object,22,22);lv_obj_set_style_radius(object,3,0);lv_obj_set_style_border_color(object,lv_color_hex(0xffffff),0);
-        lv_obj_set_style_bg_color(object,lv_color_hex(top),0);lv_obj_set_style_bg_grad_color(object,lv_color_hex(bottom),0);lv_obj_set_style_bg_grad_dir(object,LV_GRAD_DIR_VER,0);
-        lv_obj_remove_event_cb(object,dispatch);lv_obj_add_event_cb(object,dispatch,LV_EVENT_CLICKED,reinterpret_cast<void*>(static_cast<uintptr_t>(action)));lv_group_remove_obj(object);return object;
-    };
-    min_button=chrome(Action::Minimize,0x70a5ff,0x0750ce);panel(min_button,5,14,10,3,0xffffff);
-    max_button=chrome(Action::Maximize,0x70a5ff,0x0750ce);max_icon=panel(max_button,5,5,11,10,0x2168df);bevel(max_icon,0xffffff);lv_obj_set_style_radius(max_icon,0,0);panel(max_icon,0,0,9,1,0xffffff);
-    restore_icon=panel(max_button,4,7,9,9,0x2168df);bevel(restore_icon,0xffffff);lv_obj_set_style_border_width(restore_icon,2,0);lv_obj_set_style_radius(restore_icon,0,0);
-    close_button=chrome(Action::Close,0xefac94,0xcf3815);text(lv_obj_get_child(close_button,0),LV_SYMBOL_CLOSE);lv_obj_set_style_text_color(close_button,lv_color_white(),0);
-    auto menubar=panel(app_window,8,34,1224,24,0xece9d8);
+    xp::icon(titlebar,xp::Icon::Computer,16,6,7);
+    auto title_shadow=caption(titlebar,"视觉检测",27,8,600,0x0f1089);lv_obj_set_style_text_font(title_shadow,title_font,0);
+    auto title=caption(titlebar,"视觉检测",26,7,600,0xffffff);lv_obj_set_style_text_font(title,title_font,0);
+    auto chrome=[&](Action action,xp::Skin skin){auto object=button(app_window,"",dispatch);lv_obj_set_size(object,21,21);xp::skin(object,skin);lv_obj_remove_event_cb(object,dispatch);lv_obj_add_event_cb(object,dispatch,LV_EVENT_CLICKED,reinterpret_cast<void*>(static_cast<uintptr_t>(action)));lv_group_remove_obj(object);return object;};
+    min_button=chrome(Action::Minimize,xp::Skin::Minimize);max_button=chrome(Action::Maximize,xp::Skin::Maximize);close_button=chrome(Action::Close,xp::Skin::Close);
+    auto menubar=panel(app_window,3,30,1234,22,xp::face);
     auto file=button(menubar,"文件(F)",file_menu);lv_obj_set_pos(file,0,0);lv_obj_set_size(file,66,23);lv_obj_set_style_bg_opa(file,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(file,0,0);lv_group_remove_obj(file);
     auto view=button(menubar,"查看(V)",view_menu);lv_obj_set_pos(view,66,0);lv_obj_set_size(view,66,23);lv_obj_set_style_bg_opa(view,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(view,0,0);lv_group_remove_obj(view);
-    toolbar=panel(app_window,8,58,1224,38,0xece9d8);lv_obj_set_style_border_width(toolbar,1,0);lv_obj_set_style_border_color(toolbar,lv_color_hex(0xd4d0c8),0);
+    auto tools=button(menubar,"系统",[](lv_event_t*){perform(Action::Manage);});lv_obj_set_pos(tools,132,0);lv_obj_set_size(tools,66,23);lv_obj_set_style_bg_opa(tools,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(tools,0,0);lv_group_remove_obj(tools);
+    for(auto item:{file,view,tools}){xp::skin(item,xp::Skin::MenuBar);lv_obj_set_style_bg_opa(item,LV_OPA_COVER,LV_STATE_HOVERED);lv_obj_set_style_bg_color(item,lv_color_hex(0x316ac5),LV_STATE_HOVERED);lv_obj_set_style_text_color(item,lv_color_white(),LV_STATE_HOVERED);}
+    toolbar=panel(app_window,3,52,1234,38,xp::face);lv_obj_set_style_border_width(toolbar,1,0);lv_obj_set_style_border_color(toolbar,lv_color_hex(0xd4d0c8),0);
     panel(toolbar,3,7,1,24,0xaca899);panel(toolbar,5,7,1,24,0xffffff);caption(toolbar,"作业",14,9,36);
-    job_select=lv_dropdown_create(toolbar);lv_dropdown_set_options(job_select,"");lv_obj_set_pos(job_select,54,4);lv_obj_set_size(job_select,370,28);bevel(job_select);lv_obj_set_style_radius(job_select,0,0);
+    job_select=lv_dropdown_create(toolbar);lv_dropdown_set_options(job_select,"");lv_obj_set_pos(job_select,54,4);lv_obj_set_size(job_select,370,23);bevel(job_select);lv_obj_set_style_radius(job_select,0,0);
     lv_obj_set_style_bg_color(job_select,lv_color_white(),0);lv_obj_set_style_text_color(job_select,lv_color_black(),0);lv_obj_set_style_pad_ver(job_select,3,0);
     auto list=lv_dropdown_get_list(job_select);lv_obj_set_style_text_font(list,ui_font,0);lv_obj_set_style_text_color(list,lv_color_black(),0);lv_obj_set_style_bg_color(list,lv_color_white(),0);bevel(list);lv_obj_set_style_radius(list,0,0);
-    lv_obj_set_style_bg_color(list,lv_color_hex(0x316ac5),LV_PART_SELECTED);lv_obj_set_style_text_color(list,lv_color_white(),LV_PART_SELECTED);lv_group_add_obj(focus_group,job_select);
-    lv_obj_set_pos(button(toolbar,"选择作业",select_job),436,4);lv_obj_set_pos(button(toolbar,"检查一件",check),534,4);pause_button=button(toolbar,"暂停检测",pause);lv_obj_set_pos(pause_button,632,4);
+    lv_obj_set_style_bg_color(list,lv_color_hex(0x316ac5),LV_PART_SELECTED);lv_obj_set_style_text_color(list,lv_color_white(),LV_PART_SELECTED);lv_group_add_obj(focus_group,job_select);xp::combo(job_select,ui_font);
+    select_button=button(toolbar,"启用作业",select_job);lv_obj_set_pos(select_button,436,4);lv_obj_set_size(select_button,96,23);
+    xp::icon(select_button,xp::Icon::Jobs,16,4,3);
+    lv_obj_align(lv_obj_get_child(select_button,0),LV_ALIGN_LEFT_MID,24,0);
+    check_button=button(toolbar,"检查一件",check);lv_obj_set_pos(check_button,542,4);lv_obj_set_size(check_button,96,23);
+    auto check_icon=panel(check_button,4,3,16,16,0xffffff);bevel(check_icon,0x7f9db9);
+    static lv_point_precise_t check_mark[]={{0,4},{3,7},{9,0}};
+    auto check_line=lv_line_create(check_button);lv_obj_set_pos(check_line,7,6);lv_obj_set_size(check_line,10,10);lv_line_set_points(check_line,check_mark,3);lv_obj_set_style_line_color(check_line,lv_color_hex(0x008d00),0);lv_obj_set_style_line_width(check_line,2,0);lv_obj_remove_flag(check_line,LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_align(lv_obj_get_child(check_button,0),LV_ALIGN_LEFT_MID,24,0);
+    pause_button=button(toolbar,"暂停检测",pause);lv_obj_set_pos(pause_button,648,4);lv_obj_set_size(pause_button,96,23);
+    panel(pause_button,6,4,4,12,0x1548ad);panel(pause_button,12,4,4,12,0x1548ad);
+    lv_obj_align(lv_obj_get_child(pause_button,0),LV_ALIGN_LEFT_MID,24,0);
+    auto manage_jobs=button(toolbar,"作业管理",[](lv_event_t*){terminal::show_management_tab(7);});lv_obj_set_pos(manage_jobs,756,4);lv_obj_set_width(manage_jobs,96);
+    login_button=button(toolbar,"管理员登录",[](lv_event_t*){terminal::show_management_tab(8);if(!terminal::is_administrator())terminal::show_login();});lv_obj_set_pos(login_button,864,4);lv_obj_set_width(login_button,124);
     job_label=caption(app_window,"作业：—",14,100,1208);lv_label_set_long_mode(job_label,LV_LABEL_LONG_DOT);
     const char* initial[]={"已检查   0","合格   0","不合格   0","待复核   0","待同步   0"};
     const uint32_t colors[]={0x000000,0x006400,0x9c0000,0x805000,0x000000};
@@ -280,28 +388,46 @@ int main(int argc,char** argv) {
     preview=panel(workspace,0,0,432,464,0xffffff);bevel(preview,0x7f9db9);lv_obj_set_style_radius(preview,0,0);caption(preview,"图像",8,2,416);
     image.header.magic=LV_IMAGE_HEADER_MAGIC;image.header.cf=LV_COLOR_FORMAT_RGB565;image.header.w=416;image.header.h=416;image.header.stride=416*2;image.data_size=pixels.size();image.data=pixels.data();
     picture=lv_image_create(preview);lv_obj_set_pos(picture,7,24);lv_image_set_src(picture,&image);
+    empty_label=label(preview,"未启用作业\n管理员登录 → 平台 → 领取并启用");lv_obj_set_pos(empty_label,7,200);lv_obj_set_width(empty_label,416);
+    lv_obj_set_style_text_align(empty_label,LV_TEXT_ALIGN_CENTER,0);lv_obj_set_style_text_color(empty_label,lv_color_hex(0x9a9a9a),0);
     results=panel(workspace,448,0,768,464,0xffffff);bevel(results,0x7f9db9);lv_obj_set_style_radius(results,0,0);
     auto result_title=panel(results,0,0,766,24,0xece9d8);caption(result_title,"检测结果",8,2,400);
     result_badge=caption(results,"—",14,34,738);lv_obj_set_style_text_font(result_badge,result_font,0);
     report=panel(results,10,72,744,362,0xffffff);vertical_scroll(report);result_label=caption(report,"",4,0,720);lv_obj_set_style_text_line_space(result_label,6,0);
     notices=panel(results,10,366,744,84,0xffffff);vertical_scroll(notices);error_label=caption(notices,"",4,0,720,0xb3261e);
-    statusbar=panel(app_window,8,632,1224,22,0xece9d8);bevel(statusbar,0xaca899);lv_obj_set_style_radius(statusbar,0,0);
-    fresh_label=caption(statusbar,"",6,1,800);run_label=caption(statusbar,"",1010,1,190);
-    auto taskbar=panel(root,0,690,1280,30,0x245edb);lv_obj_set_style_bg_grad_color(taskbar,lv_color_hex(0x1744b0),0);lv_obj_set_style_bg_grad_dir(taskbar,LV_GRAD_DIR_VER,0);panel(taskbar,0,0,1280,2,0x4993ed);
-    start_button=button(taskbar,"",start_menu);lv_obj_set_pos(start_button,-2,0);lv_obj_set_size(start_button,100,30);lv_obj_set_style_radius(start_button,9,0);lv_obj_set_style_border_width(start_button,0,0);
-    lv_obj_set_style_bg_color(start_button,lv_color_hex(0x60b04d),0);lv_obj_set_style_bg_grad_color(start_button,lv_color_hex(0x247329),0);lv_group_remove_obj(start_button);
-    const uint32_t flag_colors[]={0xf25022,0x7fba00,0x00a4ef,0xffb900};
-    for(unsigned i=0;i<4;++i)panel(start_button,15+int(i%2)*9,7+int(i/2)*9,8,8,flag_colors[i]);
-    auto start_title=caption(start_button,"开始",40,1,54,0xffffff);lv_obj_set_style_text_font(start_title,start_font,0);
-    task_button=button(taskbar,"视觉检测",task_click);lv_obj_set_pos(task_button,112,3);lv_obj_set_size(task_button,200,25);lv_group_remove_obj(task_button);lv_obj_set_style_border_color(task_button,lv_color_hex(0x0c3997),0);
+    statusbar=panel(app_window,8,632,1224,22,0xece9d8);xp::skin(statusbar,xp::Skin::Status);
+    fresh_label=caption(statusbar,"",16,1,790);run_label=caption(statusbar,"",1010,1,190);
+    auto grip=panel(statusbar,0,0,14,16,0xece9d8);lv_obj_align(grip,LV_ALIGN_BOTTOM_RIGHT,-2,-2);
+    panel(grip,10,2,2,2,0xb8b4a3);panel(grip,7,5,2,2,0xb8b4a3);panel(grip,4,8,2,2,0xb8b4a3);
+    panel(grip,9,2,2,2,0xffffff);panel(grip,6,5,2,2,0xffffff);panel(grip,3,8,2,2,0xffffff);
+    auto taskbar=panel(root,0,690,1280,30,0x245edb);xp::skin(taskbar,xp::Skin::Taskbar);
+    start_button=button(taskbar,"",start_menu);lv_obj_set_pos(start_button,0,0);lv_obj_set_size(start_button,98,30);xp::skin(start_button,xp::Skin::Start);lv_group_remove_obj(start_button);
+    auto start_shadow=caption(start_button,"开始",37,8,52,0x245b1b);lv_obj_set_style_text_font(start_shadow,start_font,0);
+    auto start_title=caption(start_button,"开始",36,7,52,0xffffff);lv_obj_set_style_text_font(start_title,start_font,0);
+    panel(taskbar,100,4,1,22,0x0c3997);
+    auto show_desktop=button(taskbar,"",[](lv_event_t*){perform(Action::ShowDesktop);});
+    lv_obj_set_pos(show_desktop,104,4);lv_obj_set_size(show_desktop,22,22);lv_group_remove_obj(show_desktop);
+    xp::skin(show_desktop,xp::Skin::MenuBar);lv_obj_set_style_bg_opa(show_desktop,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(show_desktop,0,0);lv_obj_set_style_shadow_width(show_desktop,0,0);
+    lv_obj_set_style_bg_opa(show_desktop,LV_OPA_30,LV_STATE_HOVERED);lv_obj_set_style_bg_color(show_desktop,lv_color_white(),LV_STATE_HOVERED);
+    xp::icon(show_desktop,xp::Icon::Computer,16,3,3);
+    panel(taskbar,128,4,1,22,0x0c3997);
+    task_button=button(taskbar,"视觉检测",task_click);lv_obj_set_pos(task_button,136,4);lv_obj_set_size(task_button,200,22);lv_group_remove_obj(task_button);lv_obj_set_style_border_color(task_button,lv_color_hex(0x0c3997),0);
     lv_obj_set_style_bg_color(task_button,lv_color_hex(0x3c80f3),0);lv_obj_set_style_bg_grad_color(task_button,lv_color_hex(0x2a65d3),0);lv_obj_set_style_text_color(task_button,lv_color_white(),0);
     lv_obj_set_style_bg_color(task_button,lv_color_hex(0x1951b9),LV_STATE_CHECKED);lv_obj_set_style_bg_grad_color(task_button,lv_color_hex(0x1648a5),LV_STATE_CHECKED);lv_obj_add_state(task_button,LV_STATE_CHECKED);
-    lv_obj_align(lv_obj_get_child(task_button,0),LV_ALIGN_LEFT_MID,12,0);
-    auto tray=panel(taskbar,1176,1,104,29,0x0e96e9);lv_obj_set_style_border_width(tray,1,0);lv_obj_set_style_border_color(tray,lv_color_hex(0x19a6f7),0);
-    clock_label=caption(tray,"",12,4,80,0xffffff);lv_obj_set_style_text_align(clock_label,LV_TEXT_ALIGN_CENTER,0);update_clock(nullptr);lv_timer_create(update_clock,1000,nullptr);
+    lv_obj_set_style_bg_color(task_button,lv_color_hex(0x4a8ff5),LV_STATE_HOVERED);lv_obj_set_style_bg_grad_color(task_button,lv_color_hex(0x3a7be0),LV_STATE_HOVERED);
+    lv_obj_set_style_bg_color(task_button,lv_color_hex(0x12408f),LV_STATE_PRESSED);lv_obj_set_style_bg_grad_color(task_button,lv_color_hex(0x0e3578),LV_STATE_PRESSED);
+    lv_obj_align(lv_obj_get_child(task_button,0),LV_ALIGN_LEFT_MID,28,0);
+    xp::skin(task_button,xp::Skin::Task);xp::icon(task_button,xp::Icon::Computer,16,6,3);
+    auto tray=panel(taskbar,1176,0,104,30,0x0e96e9);xp::skin(tray,xp::Skin::Tray);
+    auto socket=panel(tray,4,8,12,12,0x0b5fa5);bevel(socket,0x073f7a);health_dot=panel(socket,3,3,6,6,0x2bdf50);
+    clock_label=caption(tray,"",20,4,76,0xffffff);lv_obj_set_style_text_align(clock_label,LV_TEXT_ALIGN_CENTER,0);update_clock(nullptr);lv_timer_create(update_clock,1000,nullptr);
+    xp::bind_window(app_window,titlebar,task_button,min_button,max_button,close_button,focus_group);
+    lv_obj_add_event_cb(app_window,[](lv_event_t*){terminal::blur_management();xp::activate_window(app_window);},LV_EVENT_PRESSED,nullptr);
+    terminal::create_management(root,taskbar,ui_font,title_font,task_button,focus_group);
+    xp::watch_activation(app_window);xp::activate_window(app_window);
     layout_window();lv_group_focus_obj(job_select);
     lv_evdev_discovery_start(discover,nullptr);
     engine.set_connection_timeout(0,300000);engine.set_read_timeout(0,600000);engine.set_write_timeout(0,600000);
-    jobs(nullptr);lv_timer_create(jobs,2000,nullptr);lv_timer_create(refresh,100,nullptr);
+    unconfirmed=!pending.empty();std::thread(inspection_worker).detach();lv_timer_create(jobs,300,nullptr);lv_timer_create(refresh,16,nullptr);
     for(;;){lv_timer_handler();std::this_thread::sleep_for(std::chrono::milliseconds(5));}
 }

@@ -1,0 +1,33 @@
+{
+  "theme": "Windows XP Luna Blue, Simplified Chinese, 96 DPI",
+  "references": [
+    {
+      "title": "Creating Windows XP Icons (Microsoft, July 2001)",
+      "url": "https://learn.microsoft.com/en-us/previous-versions/ms997636(v=msdn.10)"
+    },
+    {
+      "title": "Windows XP Visual Guidelines (Microsoft, archived transcription)",
+      "url": "https://doczz.net/doc/1057735/welcome-to-the-windows-xp-visual-guidelines"
+    }
+  ],
+  "assets": [
+    {
+      "project": "XP.css",
+      "url": "https://github.com/botoxparty/XP.css",
+      "license": "XP.css-LICENSE.txt",
+      "source": "themes/XP/icon/{minimize,maximize,restore,close}*.svg",
+      "use": "Native 21x21 caption controls; title and push-button colour profiles"
+    },
+    {
+      "project": "winXP",
+      "url": "https://github.com/ShizukuIchi/winXP",
+      "license": "winXP-LICENSE.txt",
+      "source": "src/assets/windowsIcons and src/WinXP/Footer/index.js",
+      "use": "16/32px icons, user portrait, Start-button profile and taskbar colour stops"
+    }
+  ],
+  "font": {
+    "source": "User-supplied SimSun TTC via package.ps1 -UiFont",
+    "rendering": "FreeType monochrome, 12px body and caption, 16px Start, 20px inspection result"
+  }
+}

@@ -11,7 +11,7 @@
 
 #define WIDTH 1280
 #define HEIGHT 720
-#define STRIDE (WIDTH*4)
+#define STRIDE (WIDTH*2)
 #define PAGE_BYTES (HEIGHT*STRIDE)
 struct vision_fb { struct device *dev; void __iomem *vdma; void *buffer; dma_addr_t bus; struct fb_info *info; };
 static int vision_pan(struct fb_var_screeninfo *var,struct fb_info *info)
@@ -26,7 +26,7 @@ static int vision_pan(struct fb_var_screeninfo *var,struct fb_info *info)
 }
 static int vision_check_var(struct fb_var_screeninfo *var,struct fb_info *info)
 {
-    if(var->xres!=WIDTH || var->yres!=HEIGHT || var->xres_virtual!=WIDTH || var->yres_virtual!=2*HEIGHT || var->bits_per_pixel!=32 || var->xoffset || (var->yoffset!=0 && var->yoffset!=HEIGHT))return -EINVAL;
+    if(var->xres!=WIDTH || var->yres!=HEIGHT || var->xres_virtual!=WIDTH || var->yres_virtual!=2*HEIGHT || var->bits_per_pixel!=16 || var->xoffset || (var->yoffset!=0 && var->yoffset!=HEIGHT))return -EINVAL;
     return 0;
 }
 static int vision_fb_mmap(struct fb_info *info,struct vm_area_struct *area)
@@ -54,7 +54,7 @@ static int vision_fb_probe(struct platform_device *pdev)
     memset(v->buffer,0,2*PAGE_BYTES);
     strscpy(info->fix.id,"vision-720p",sizeof(info->fix.id));info->fix.type=FB_TYPE_PACKED_PIXELS;info->fix.visual=FB_VISUAL_TRUECOLOR;
     info->fix.smem_start=v->bus;info->fix.smem_len=2*PAGE_BYTES;info->fix.line_length=STRIDE;info->fix.ypanstep=HEIGHT;
-    info->var=(struct fb_var_screeninfo){.xres=WIDTH,.yres=HEIGHT,.xres_virtual=WIDTH,.yres_virtual=2*HEIGHT,.bits_per_pixel=32,.red={16,8,0},.green={8,8,0},.blue={0,8,0},.pixclock=13468,.left_margin=220,.right_margin=110,.upper_margin=20,.lower_margin=5,.hsync_len=40,.vsync_len=5,.sync=FB_SYNC_HOR_HIGH_ACT|FB_SYNC_VERT_HIGH_ACT,.vmode=FB_VMODE_NONINTERLACED};
+    info->var=(struct fb_var_screeninfo){.xres=WIDTH,.yres=HEIGHT,.xres_virtual=WIDTH,.yres_virtual=2*HEIGHT,.bits_per_pixel=16,.red={11,5,0},.green={5,6,0},.blue={0,5,0},.pixclock=13468,.left_margin=220,.right_margin=110,.upper_margin=20,.lower_margin=5,.hsync_len=40,.vsync_len=5,.sync=FB_SYNC_HOR_HIGH_ACT|FB_SYNC_VERT_HIGH_ACT,.vmode=FB_VMODE_NONINTERLACED};
     info->screen_base=v->buffer;info->screen_size=2*PAGE_BYTES;info->fbops=&vision_fb_ops;info->flags=0;
     info->pseudo_palette=devm_kcalloc(v->dev,16,sizeof(u32),GFP_KERNEL);if(!info->pseudo_palette){error=-ENOMEM;goto free_dma;}
     writel(4,v->vdma);error=readl_poll_timeout(v->vdma,control,!(control&4),100,100000);if(error)goto free_dma;
@@ -76,4 +76,4 @@ MODULE_DEVICE_TABLE(of,vision_fb_matches);
 static struct platform_driver vision_fb_driver={.probe=vision_fb_probe,.remove=vision_fb_remove,.driver={.name="vision-fb",.of_match_table=vision_fb_matches,.suppress_bind_attrs=true}};
 module_platform_driver(vision_fb_driver);
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Fixed 720p XRGB8888 double-buffer VDMA framebuffer for vision terminal");
+MODULE_DESCRIPTION("Fixed 720p RGB565 double-buffer VDMA framebuffer for vision terminal");
