@@ -18,6 +18,14 @@ const verdict = ref(""),
   appending = ref(false);
 const finalResult = ref("");
 const decision = computed(() => props.inspection.metadata?.decision);
+const positionedRegions = computed(() => {
+  const rules = props.inspection.metadata?.snapshot?.rules;
+  return (rules?.checks ?? []).flatMap((check) =>
+    check.region
+      ? [{ ...check.region, label: rules!.classes[check.classId]! }]
+      : [],
+  );
+});
 const resolved = computed(() =>
   props.inspection.reviews.find((r) => r.finalResult),
 );
@@ -55,10 +63,15 @@ async function save(next = false) {
     notices.add(
       reviewed.value
         ? "追加意见已提交"
-        : "复核意见已提交；样本接纳由管理员审核",
+        : "复核意见已提交；样本取舍与标注在样本库处理",
     );
+    const advance =
+      next && !!finalResult.value && finalResult.value !== "REVIEW";
     appending.value = false;
-    emit("saved", next);
+    verdict.value = "";
+    note.value = "";
+    finalResult.value = "";
+    emit("saved", advance);
   } catch (e) {
     notices.error(e);
   } finally {
@@ -77,7 +90,9 @@ async function raw() {
 </script>
 <template>
   <div class="toolbar">
-    <span class="muted">本件检测结果</span
+    <span class="muted">机器原判</span
+    ><Status :value="inspection.metadata?.localResult || inspection.result" />
+    <span class="muted">平台核验</span
     ><Status :value="inspection.result" /><span
       v-if="inspection.reviews.length"
       class="tag ok"
@@ -102,8 +117,18 @@ async function raw() {
         :assets="inspection.sample.assets"
         :boxes="inspection.detections"
         :region="inspection.metadata?.snapshot?.rules.region"
+        :regions="positionedRegions"
       />
       <p class="note">{{ reasonLabel(inspection.reason) }}</p>
+      <RouterLink
+        v-if="auth.engineer"
+        :to="{
+          name: 'data',
+          params: { tab: 'annotation' },
+          query: { sampleId: inspection.sampleId },
+        }"
+        >用本件证据继续标注与训练 →</RouterLink
+      >
       <div v-if="decision?.findings.length" class="table-wrap">
         <table aria-label="逐项判定依据">
           <thead>
@@ -132,8 +157,8 @@ async function raw() {
           </tbody>
         </table>
       </div>
-      <p v-if="inspection.batchId" class="note">
-        本记录属于作业批次，机器原判保留。人工最终结论：<Status
+      <p class="note">
+        机器原判保留。人工最终结论：<Status
           v-if="resolved?.finalResult"
           :value="resolved.finalResult"
         /><span v-else>尚未给出</span>
@@ -184,9 +209,7 @@ async function raw() {
       <template v-else>
         <label
           >最终处理结论<select v-model="finalResult" aria-label="最终处理结论">
-            <option value="">
-              {{ inspection.batchId ? "请选择最终结论" : "仅记录复核意见" }}
-            </option>
+            <option value="">仅追加意见，保持原处理状态</option>
             <option value="PASS">符合要求</option>
             <option value="FAIL">不符合要求</option>
             <option value="REVIEW">仍待复核</option>
@@ -213,9 +236,7 @@ async function raw() {
           <button
             class="primary"
             @click="save(queue)"
-            :disabled="
-              busy || !verdict || (!!inspection.batchId && !finalResult)
-            "
+            :disabled="busy || !verdict"
           >
             {{
               queue

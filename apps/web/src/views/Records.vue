@@ -73,7 +73,7 @@ applyTab();
               :order="list.order.value"
               @sort="list.sortBy"
             />
-            <th>检测结果</th>
+            <th>机器原判 / 平台核验</th>
             <th>人工复核</th>
             <th>操作</th>
           </tr>
@@ -83,7 +83,8 @@ applyTab();
             <td v-if="auth.engineer" class="mono">{{ i.id.slice(-10) }}</td>
             <td>{{ new Date(i.createdAt).toLocaleString() }}</td>
             <td>
-              <Status chip :value="i.result" />
+              <Status chip :value="i.metadata?.localResult || i.result" /> /
+              <Status :value="i.result" />
               <span v-if="i.source === 'SIMULATION'" class="tag simulated"
                 >模拟</span
               >
@@ -92,7 +93,9 @@ applyTab();
               {{
                 i.reviewResult === "PASS" || i.reviewResult === "FAIL"
                   ? "已复核"
-                  : i.result === "REVIEW" || i.reviewResult === "REVIEW"
+                  : i.result === "REVIEW" ||
+                      i.result === "ERROR" ||
+                      i.reviewResult === "REVIEW"
                     ? "待复核"
                     : "—"
               }}

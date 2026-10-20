@@ -73,7 +73,7 @@ class DevicesModule {}
 @Module({
   imports: [DevicesModule],
   providers: [SamplesService, DatasetsService, FileJobsService],
-  exports: [FileJobsService],
+  exports: [FileJobsService, DatasetsService],
   controllers: [
     SamplesController,
     AssetsController,
@@ -86,7 +86,7 @@ class DevicesModule {}
 })
 class DataModule {}
 @Module({
-  imports: [DevicesModule],
+  imports: [DevicesModule, DataModule],
   providers: [ModelsService, TrainingService],
   exports: [ModelsService, TrainingService],
   controllers: [ModelsController, TrainingsController, DeploymentsController],

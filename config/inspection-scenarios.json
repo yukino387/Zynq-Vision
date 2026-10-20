@@ -1,0 +1,62 @@
+[
+  {
+    "id": "appearance",
+    "name": "外观缺陷",
+    "description": "确认产品存在，再检查污渍、破损等已训练缺陷；正常产品不应检出缺陷。",
+    "rules": {
+      "product": "外观检查产品",
+      "purpose": "APPEARANCE",
+      "classes": ["产品", "污渍", "破损"],
+      "instructions": "固定产品姿态与光照，单件通过；采集正常、污渍、破损及空场景，按实际可见对象标注。",
+      "conditions": "需使用按这些类别及顺序训练的模型；缺陷尺寸必须在当前成像条件下可分辨。",
+      "coordinateSpace": "NORMALIZED_FRAME",
+      "region": { "x": 0, "y": 0, "width": 1, "height": 1 },
+      "checks": [
+        { "classId": 0, "min": 1, "max": 1 },
+        { "classId": 1, "min": 0, "max": 0 },
+        { "classId": 2, "min": 0, "max": 0 }
+      ]
+    }
+  },
+  {
+    "id": "liquid-level",
+    "name": "液面位置",
+    "description": "识别瓶体与液面线，检查液面框中心是否位于可编辑的合格位置带内。",
+    "rules": {
+      "product": "液面检查容器",
+      "purpose": "POSITION",
+      "classes": ["瓶体", "液面"],
+      "instructions": "固定相机正视透明容器，将液面线框为液面类别。分别采集合格、过高、过低与空瓶样本；根据实际标准调整液面位置带。",
+      "conditions": "需能可靠识别液面线的配套模型和稳定背光；位置按原图归一化坐标判断。",
+      "coordinateSpace": "NORMALIZED_FRAME",
+      "region": { "x": 0, "y": 0, "width": 1, "height": 1 },
+      "checks": [
+        { "classId": 0, "min": 1, "max": 1 },
+        {
+          "classId": 1,
+          "min": 1,
+          "max": 1,
+          "region": { "x": 0.15, "y": 0.35, "width": 0.7, "height": 0.1 }
+        }
+      ]
+    }
+  },
+  {
+    "id": "count",
+    "name": "计数与配装",
+    "description": "一件容器内检查目标物的数量，可编辑为精确数量或允许范围。",
+    "rules": {
+      "product": "数量检查托盘",
+      "purpose": "COUNT",
+      "classes": ["托盘", "目标物"],
+      "instructions": "一个托盘作为一件，完整进入后离开视野。采集齐套、少件、多件与空托盘样本，目标物需要分别标框。",
+      "conditions": "目标需可分离、避免严重遮挡；默认要求每托盘三个目标，可按实际配装要求调整。",
+      "coordinateSpace": "NORMALIZED_FRAME",
+      "region": { "x": 0, "y": 0, "width": 1, "height": 1 },
+      "checks": [
+        { "classId": 0, "min": 1, "max": 1 },
+        { "classId": 1, "min": 3, "max": 3 }
+      ]
+    }
+  }
+]

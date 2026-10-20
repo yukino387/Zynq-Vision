@@ -13,7 +13,12 @@ import { Prisma } from "@prisma/client";
 import { createHash, randomBytes } from "node:crypto";
 import sharp from "sharp";
 import { z } from "zod";
-import { type BatchSnapshot } from "@vision/contracts";
+import {
+  acceptanceSchema,
+  inspectionRegionSchema,
+  planPurposeSchema,
+  type BatchSnapshot,
+} from "@vision/contracts";
 import {
   canonical,
   assessInspectionImage,
@@ -21,29 +26,68 @@ import {
 } from "@vision/shared";
 import { detect, decodeRgb565 } from "@vision/device-protocol";
 import { Public, Roles, type Request } from "../core/auth.js";
-import { terminalStatus } from "../devices/terminal-state.js";
 import { Db } from "../core/db.js";
 import { Events } from "../core/events.js";
 import { parse, DomainError } from "../core/errors.js";
 import { AssetsService } from "../assets/assets.service.js";
 import { serverAddresses, mobileServerUrl } from "../system/network.js";
 import { config } from "../config.js";
+import { batchModel } from "./batch-package.js";
+import {
+  buildAssignmentSnapshot,
+  ensureBatchForRecord,
+  reconcileProductionBatch,
+} from "./terminal-batch.js";
+
+const acceptance = acceptanceSchema;
+const runCountsSchema = z
+  .object({
+    PASS: z.number().int().min(0),
+    FAIL: z.number().int().min(0),
+    REVIEW: z.number().int().min(0),
+    ERROR: z.number().int().min(0),
+  })
+  .strict();
 
 const recordSchema = z
   .object({
     formatVersion: z.literal(1),
-    batchId: z.string().min(1),
+    planId: z.string().min(1),
+    planVersion: z.number().int().min(1),
+    planName: z.string().min(1).max(120),
+    product: z.string().min(1).max(120),
+    modelId: z.string().min(1),
+    modelVersion: z.string().min(1).max(128),
+    modelPayloadSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    acceptance,
     bootId: z.string().uuid(),
     sequence: z.number().int().min(1).max(2147483647),
     frameId: z.number().int().min(0).max(4294967295),
     monotonicNs: z.string().regex(/^\d{1,20}$/),
     capturedAt: z.string().datetime().nullable(),
-    modelPayloadSha256: z.string().regex(/^[a-f0-9]{64}$/),
     raw: z.string().length(461484),
     out0: z.string().length(2156),
     out1: z.string().length(8624),
     rawSha256: z.string().regex(/^[a-f0-9]{64}$/),
     localResult: z.enum(["PASS", "FAIL", "REVIEW", "ERROR"]),
+    productionRunId: z.string().uuid().nullable().optional(),
+    passage: z
+      .object({
+        samples: z.number().int().min(1).max(2147483647),
+        votes: z.tuple([
+          z.number().int().nonnegative(),
+          z.number().int().nonnegative(),
+          z.number().int().nonnegative(),
+          z.number().int().nonnegative(),
+        ]),
+        interrupted: z.boolean(),
+      })
+      .strict()
+      .refine(
+        (value) => value.votes.reduce((a, b) => a + b, 0) === value.samples,
+        "过件帧数不一致",
+      )
+      .optional(),
   })
   .strict();
 
@@ -51,12 +95,100 @@ const heartbeatSchema = z
   .object({
     bootId: z.string().uuid(),
     uptime: z.number().finite().nonnegative(),
-    jobId: z.string().min(1).max(80).nullable(),
+    model: z
+      .object({
+        id: z.string().min(1),
+        version: z.string().min(1).max(128),
+        payloadSha256: z.string().regex(/^[a-f0-9]{64}$/),
+        weightsSha256: z.string().regex(/^[a-f0-9]{64}$/),
+        classes: z.array(z.string().min(1)).min(1),
+      })
+      .strict()
+      .nullable(),
+    product: z
+      .object({
+        id: z.string().min(1),
+        name: z.string().min(1).max(120),
+        version: z.number().int().min(1),
+        product: z.string().max(120).optional(),
+        instructions: z.string().max(2000).optional(),
+        purpose: planPurposeSchema.optional(),
+        region: inspectionRegionSchema.optional(),
+        checks: z
+          .array(
+            z
+              .object({
+                classId: z.number().int().min(0).max(5),
+                label: z.string().min(1).max(40),
+                min: z.number().int().min(0).max(100),
+                max: z.number().int().min(0).max(100),
+                region: inspectionRegionSchema.optional(),
+              })
+              .strict(),
+          )
+          .max(6)
+          .optional(),
+        acceptance,
+      })
+      .strict()
+      .nullable(),
+    total: z.number().int().min(0).max(2147483647),
+    counts: runCountsSchema,
+    runTotal: z.number().int().min(0).max(2147483647),
+    runCounts: runCountsSchema,
+    production: z.boolean(),
+    productionRunId: z.string().uuid().nullable(),
+    passagePhase: z.enum([
+      "STOPPED",
+      "CLEARING",
+      "WAITING",
+      "INSPECTING",
+      "SAVING",
+    ]),
+    fps: z.number().finite().nonnegative().max(1000).nullable().optional(),
+    timing: z
+      .object({
+        frameId: z.number().int().min(0),
+        captureMs: z.number().finite().nonnegative(),
+        prepareMs: z.number().finite().nonnegative(),
+        convMs: z.number().finite().nonnegative(),
+        forwardMs: z.number().finite().nonnegative(),
+        postMs: z.number().finite().nonnegative(),
+        extractMs: z.number().finite().nonnegative(),
+      })
+      .strict()
+      .nullable()
+      .optional(),
     paused: z.boolean(),
     fresh: z.boolean(),
-    modelVersion: z.string().max(128).nullable(),
-    total: z.number().int().min(0).max(2147483647),
     pendingSync: z.number().int().min(0).max(2147483647),
+    pendingRequestId: z.string().uuid().nullable(),
+    last: z
+      .object({
+        sequence: z.number().int().min(0),
+        result: z.enum(["PASS", "FAIL", "REVIEW", "ERROR"]),
+        bootId: z.string().uuid().optional(),
+        productionRunId: z.string().uuid().nullable().optional(),
+        reason: z.string().max(1000).optional(),
+        findings: z
+          .array(
+            z
+              .object({
+                classId: z.number().int().min(0).max(5),
+                label: z.string().max(40),
+                min: z.number().int().nonnegative(),
+                max: z.number().int().nonnegative(),
+                count: z.number().int().nonnegative(),
+                uncertain: z.number().int().nonnegative(),
+                result: z.enum(["PASS", "FAIL", "REVIEW", "ERROR"]),
+              })
+              .strict(),
+          )
+          .max(6)
+          .optional(),
+      })
+      .strict()
+      .nullable(),
     error: z.string().max(1000),
     syncError: z.string().max(1000),
     cpuPercent: z.number().finite().min(0).max(100).nullable(),
@@ -98,23 +230,11 @@ export class TerminalController {
     const device = await this.db.device.findUniqueOrThrow({
       where: { id: credential.deviceId, type: "ZYNQ" },
     });
-    const batch = dto.jobId
-      ? await this.db.inspectionBatch.findUniqueOrThrow({
-          where: { id: dto.jobId },
-        })
-      : null;
-    if (
-      batch &&
-      (batch.deviceId !== device.id || batch.execution !== "TERMINAL")
-    )
-      throw new DomainError("FORBIDDEN", "当前作业不属于此终端", 403);
     const metadata = device.metadata as Record<string, Prisma.InputJsonValue>;
     const receivedAt = new Date().toISOString();
     const address = (req.ip ?? "").replace(/^::ffff:/, "");
     const state = {
       ...dto,
-      jobName: batch?.name ?? null,
-      batchStatus: batch?.status ?? null,
       receivedAt,
       credentialId: credential.id,
     };
@@ -124,25 +244,115 @@ export class TerminalController {
         metadata: {
           ...metadata,
           runtimeProfile: "LINUX_TERMINAL",
-          terminal: state,
+          terminal: state as unknown as Prisma.InputJsonValue,
           ...(address ? { terminalAddress: address } : {}),
         },
       },
     });
-    return {
+    await reconcileProductionBatch(this.db, this.events, this.assets, device, {
+      ...dto,
       receivedAt,
-      jobId: batch?.id ?? null,
-      batchStatus: batch?.status ?? null,
-    };
+    });
+    {
+      const pending = await this.db.deployment.findMany({
+        where: {
+          deviceId: device.id,
+          status: { in: ["DOWNLOADING", "VERIFYING"] },
+        },
+      });
+      for (const deployment of pending) {
+        const receipt = deployment.receipt as Prisma.JsonObject;
+        if (
+          !dto.model ||
+          receipt.modelId !== dto.model.id ||
+          receipt.modelPayloadSha256 !== dto.model.payloadSha256
+        ) {
+          // A fresh heartbeat still reporting another model resolves an expired request.
+          if (Date.now() - deployment.createdAt.getTime() > 90000) {
+            await this.db.deployment.update({
+              where: { id: deployment.id },
+              data: {
+                status: "FAILED",
+                error: "下发超时，设备仍运行其他模型；请核对设备后重新下发",
+              },
+            });
+            this.events.emit(
+              "deployment.failed",
+              deployment.id,
+              { status: "FAILED" },
+              "BOARD",
+            );
+          }
+          continue;
+        }
+        await this.db.$transaction([
+          this.db.deployment.updateMany({
+            where: {
+              deviceId: device.id,
+              id: { not: deployment.id },
+              status: "ACTIVE",
+            },
+            data: { status: "SUPERSEDED" },
+          }),
+          this.db.deployment.update({
+            where: { id: deployment.id },
+            data: {
+              status: "ACTIVE",
+              progress: 100,
+              receipt: {
+                ...receipt,
+                modelVersion: dto.model.version,
+                verified: true,
+                loaded: true,
+                active: true,
+                confirmedAt: receivedAt,
+              },
+            },
+          }),
+        ]);
+        this.events.emit(
+          "deployment.completed",
+          deployment.id,
+          { status: "ACTIVE" },
+          "BOARD",
+        );
+      }
+    }
+    this.events.emit(
+      "device.status.changed",
+      device.id,
+      { id: device.id, receivedAt },
+      "BOARD",
+    );
+    return { receivedAt };
   }
 
-  @Get(":deviceId/status") async terminalStatus(
-    @Param("deviceId") deviceId: string,
+  /** 终端凭据下载已批准模型制品；只允许该设备存在对应部署记录。 */
+  @Public()
+  @Get("model/:modelId")
+  async downloadModel(
+    @Param("modelId") modelId: string,
+    @Req() req: Request,
+    @Res() reply: FastifyReply,
   ) {
-    const device = await this.db.device.findUniqueOrThrow({
-      where: { id: deviceId, type: "ZYNQ" },
+    const credential = await this.terminalCredential(req);
+    const deployment = await this.db.deployment.findFirst({
+      where: {
+        deviceId: credential.deviceId,
+        modelId,
+        status: { in: ["DOWNLOADING", "VERIFYING", "ACTIVE", "ROLLBACK"] },
+      },
     });
-    return terminalStatus(this.db, device);
+    if (!deployment)
+      throw new DomainError("FORBIDDEN", "此模型未下发给当前终端", 403);
+    const artifact = await batchModel(this.db, this.assets, modelId);
+    return reply
+      .type("application/octet-stream")
+      .header("Cache-Control", "no-store")
+      .header("x-model-version", artifact.model.version)
+      .header("x-model-payload-sha256", artifact.payloadSha256)
+      .header("x-weights-sha256", artifact.manifest.weights.sha256)
+      .send(artifact.weights);
   }
 
   @Roles("ADMIN", "ENGINEER") @Post(":deviceId/credential") async credential(
@@ -200,55 +410,6 @@ export class TerminalController {
     };
   }
 
-  @Get(":deviceId/frame")
-  async frame(
-    @Param("deviceId") deviceId: string,
-    @Res({ passthrough: true }) reply: FastifyReply,
-  ): Promise<Buffer> {
-    const device = await this.db.device.findUniqueOrThrow({
-      where: { id: deviceId, type: "ZYNQ" },
-    });
-    const metadata = device.metadata as Record<string, unknown>;
-    const host =
-      typeof metadata.terminalAddress === "string" && metadata.terminalAddress
-        ? metadata.terminalAddress
-        : config.ZYNQ_HOST;
-    let response: Response;
-    try {
-      response = await fetch(`http://${host}:8879/frame`, {
-        signal: AbortSignal.timeout(1500),
-      });
-    } catch {
-      throw new DomainError("UNAVAILABLE", "板端预览不可达", 503);
-    }
-    if (!response.ok) {
-      if (response.status === 409)
-        throw new DomainError(
-          "NO_FRAME",
-          "板端尚未启用检测作业或暂无画面",
-          409,
-        );
-      throw new DomainError("UNAVAILABLE", "板端预览不可达", 503);
-    }
-    const raw = Buffer.from(await response.arrayBuffer());
-    const pixels = 416 * 416 * 2;
-    const frame =
-      raw.length === pixels
-        ? raw
-        : raw.length >= 4 && 4 + raw.readUInt32LE(0) + pixels === raw.length
-          ? raw.subarray(4 + raw.readUInt32LE(0))
-          : null;
-    if (!frame)
-      throw new DomainError("INVALID_FRAME", "板端画面格式异常", 502);
-    const jpeg = await sharp(decodeRgb565(frame), {
-      raw: { width: 416, height: 416, channels: 3 },
-    })
-      .jpeg({ quality: 80 })
-      .toBuffer();
-    reply.type("image/jpeg").header("Cache-Control", "no-store");
-    return jpeg;
-  }
-
   @Roles("ADMIN", "ENGINEER") @Get("addresses") addresses() {
     return serverAddresses(config.SERVER_PORT);
   }
@@ -289,22 +450,40 @@ export class TerminalController {
     };
     const previous = await existing();
     if (previous) return previous;
-    const batch = await this.db.inspectionBatch.findUniqueOrThrow({
-      where: { id: dto.batchId },
-    });
-    if (batch.deviceId !== credential.deviceId)
-      throw new DomainError("FORBIDDEN", "终端不能提交其他设备的记录", 403);
-    if (batch.execution !== "TERMINAL")
-      throw new DomainError(
-        "INVALID_STATE",
-        "此批次由平台采集执行，不能接收板端离线记件",
-        409,
-      );
-    const snapshot = batch.snapshot as unknown as BatchSnapshot;
-    if (snapshot.modelPayloadSha256 !== dto.modelPayloadSha256)
+    const matched = await ensureBatchForRecord(
+      this.db,
+      this.events,
+      this.assets,
+      credential.deviceId,
+      {
+        productionRunId: dto.productionRunId ?? undefined,
+        planId: dto.planId,
+        modelId: dto.modelId,
+        modelPayloadSha256: dto.modelPayloadSha256,
+        acceptance: dto.acceptance,
+        capturedAt: dto.capturedAt,
+      },
+    );
+    const batch = matched?.batch ?? null;
+    const snapshot =
+      (batch?.snapshot as unknown as BatchSnapshot | undefined) ??
+      (await buildAssignmentSnapshot(
+        this.db,
+        this.assets,
+        dto.modelId,
+        dto.planId,
+        dto.acceptance,
+      ));
+    if (
+      snapshot.modelId !== dto.modelId ||
+      snapshot.modelVersion !== dto.modelVersion ||
+      snapshot.modelPayloadSha256 !== dto.modelPayloadSha256 ||
+      snapshot.planVersion !== dto.planVersion ||
+      canonical(snapshot.acceptance) !== canonical(dto.acceptance)
+    )
       throw new DomainError(
         "MODEL_INCOMPATIBLE",
-        "离线记录的模型与批次不一致",
+        "记录的方案、模型或验收条件与快照不一致",
         422,
       );
     const decode = (text: string, size: number) => {
@@ -336,12 +515,22 @@ export class TerminalController {
         quality: quality.status,
       });
     // Local data is evidence, not authority. Recompute decisions and flag disagreement or late arrivals.
-    if (decision.result !== dto.localResult || batch.status === "CLOSED") {
+    const late = matched?.late ?? false;
+    if (decision.result !== dto.localResult || late) {
       decision.result = "REVIEW";
-      decision.reason =
-        batch.status === "CLOSED"
-          ? "离线记录在批次结束后到达，请核对实际作业时间"
-          : "板端与平台判定不一致，请核对原始证据";
+      decision.reason = late
+        ? "离线记录在批次结束后到达，请核对实际作业时间"
+        : "板端与平台判定不一致，请核对原始证据";
+    }
+    if (
+      !late &&
+      dto.passage &&
+      (dto.passage.interrupted ||
+        dto.passage.samples < 3 ||
+        Math.max(...dto.passage.votes) * 5 < dto.passage.samples * 3)
+    ) {
+      decision.result = "REVIEW";
+      decision.reason = "过件证据不足或检测中断，请人工复核";
     }
     const preview = await sharp(decodeRgb565(raw), {
       raw: { width: 416, height: 416, channels: 3 },
@@ -382,6 +571,7 @@ export class TerminalController {
         "application/octet-stream",
       ),
     ]);
+    stored[0]!.format = "RGB565_LE";
     try {
       const sample = await this.db.$transaction(async (tx) => {
         const created = await tx.sample.create({
@@ -391,7 +581,8 @@ export class TerminalController {
             clientId,
             localSequence: dto.sequence,
             idempotencyKey: key,
-            taskId: batch.taskId,
+            taskId: batch?.taskId ?? null,
+            planId: dto.planId,
             capturedAt: dto.capturedAt ? new Date(dto.capturedAt) : new Date(),
             metadata: {
               uploadedBy: `terminal:${credential.deviceId}`,
@@ -410,12 +601,12 @@ export class TerminalController {
           data: {
             sampleId: created.id,
             deviceId: credential.deviceId,
-            taskId: batch.taskId,
-            batchId: batch.id,
+            taskId: batch?.taskId ?? null,
+            batchId: batch?.id ?? null,
             source: "BOARD",
-            modelId: snapshot.modelId,
-            modelVersion: snapshot.modelVersion,
-            planVersion: `${snapshot.planId}@${snapshot.planVersion}`,
+            modelId: dto.modelId,
+            modelVersion: dto.modelVersion,
+            planVersion: `${dto.planId}@${dto.planVersion}`,
             frameId: dto.frameId,
             acquisitionId: `${dto.bootId}:${dto.monotonicNs}`,
             startedAt: dto.capturedAt ? new Date(dto.capturedAt) : new Date(),
@@ -428,6 +619,11 @@ export class TerminalController {
               bootId: dto.bootId,
               monotonicNs: dto.monotonicNs,
               localResult: dto.localResult,
+              manual: !dto.productionRunId,
+              ...(dto.productionRunId
+                ? { productionRunId: dto.productionRunId }
+                : {}),
+              ...(dto.passage ? { passage: dto.passage } : {}),
               offline: true,
             },
             detections: { create: boxes },

@@ -21,13 +21,13 @@
 using json=nlohmann::json;
 namespace {
 httplib::Client engine("http://127.0.0.1:8877");
-lv_obj_t *job_label,*result_label,*result_badge,*error_label,*fresh_label,*job_select,*picture,*empty_label,*pause_button,*run_label;
+lv_obj_t *job_label,*result_label,*result_badge,*error_label,*fresh_label,*job_select,*picture,*empty_label,*run_label;
 lv_obj_t* counters[5];
 lv_obj_t *app_window,*titlebar,*toolbar,*workspace,*preview,*results,*report,*notices,*statusbar,*task_button,*start_button,*clock_label,*health_dot,*popup_layer=nullptr,*mouse_cursor=nullptr;
-lv_obj_t *min_button,*max_button,*close_button,*check_button,*select_button,*login_button;
+lv_obj_t *min_button,*max_button,*close_button,*check_button,*production_button,*login_button;
 std::mutex inspection_mailbox;
-json polled_state,polled_jobs,inspection_command;
-std::string polled_frame,poll_error,command_error,active_job_ui;
+json polled_state,inspection_command;
+std::string polled_frame,poll_error,command_error;
 std::atomic<bool> inspection_busy{false},unconfirmed{false};
 uint32_t poll_revision=0,painted_revision=0,polled_at=0;
 void submit_inspection(const char* action,json payload=json::object()){
@@ -38,14 +38,13 @@ const lv_font_t *ui_font,*title_font,*menu_title_font;
 bool maximized=false;
 int window_x=20,window_y=16;
 lv_point_t drag_point;
-enum class Action { Show,Minimize,Maximize,Close,Select,Check,Pause,Manage,ShowDesktop };
+enum class Action { Show,Minimize,Maximize,Close,Check,Production,Manage,ShowDesktop };
 lv_group_t* focus_group;
 lv_image_dsc_t image{};
 std::vector<uint8_t> pixels(416*416*2);
 std::vector<lv_obj_t*> rectangles;
-std::vector<std::string> job_ids;
-std::string pending,options_cache;
-bool paused=false,picture_valid=false,jobs_loaded=false;
+std::string pending,selector_cache;
+bool paused=false,production=false,picture_valid=false;
 uint32_t displayed_frame=0;
 const char* pending_file="/var/lib/vision/panel-request";
 void store_pending(const std::string& value) {
@@ -102,15 +101,15 @@ lv_obj_t* button(lv_obj_t* parent,const char* value,lv_event_cb_t action) {
     auto title=label(object,value);lv_obj_center(title);lv_obj_add_event_cb(object,action,LV_EVENT_CLICKED,nullptr);lv_group_add_obj(focus_group,object);return object;
 }
 void check(lv_event_t*) {submit_inspection("/check");}
-void select_job(lv_event_t*) {
-    if(unconfirmed){text(error_label,"请先再次点击检查，核对上一次操作");return;}
-    const auto selected=lv_dropdown_get_selected(job_select);
-    if(selected>=job_ids.size()){terminal::show_management_tab(8);if(!terminal::is_administrator())terminal::show_login();return;}
-    terminal::request_job_activation(job_ids[selected]);
+void production_toggle(lv_event_t*) {
+    if(!production && unconfirmed){text(error_label,"请先再次点击检查，核对上一次操作");return;}
+    submit_inspection("/production",{{"enabled",!production}});
 }
-void pause(lv_event_t*) {submit_inspection("/pause",{{"paused",!paused}});}
+void notify_refresh() {
+    try {httplib::Client manager("http://127.0.0.1:8878");manager.set_connection_timeout(0,300000);manager.Post("/refresh","","application/json");}catch(const std::exception&){}
+}
 void inspection_worker(){
-    uint32_t last_jobs=0,last_frame=0;
+    uint32_t last_frame=0;
     for(;;){
         const auto poll_started=tick();
         json command;{std::lock_guard<std::mutex> lock(inspection_mailbox);command=std::move(inspection_command);inspection_command=nullptr;}
@@ -122,16 +121,18 @@ void inspection_worker(){
                     if(pending.empty()){std::ifstream file("/proc/sys/kernel/random/uuid");std::getline(file,pending);if(pending.size()!=36)throw std::runtime_error("无法建立检查编号");}
                     unconfirmed=true;store_pending(pending);post(path,{{"requestId",pending}});store_pending("");pending.clear();unconfirmed=false;
                 }else post(path,command.at("payload"));
+                notify_refresh();
             }catch(const std::exception& e){message=e.what();}
             {std::lock_guard<std::mutex> lock(inspection_mailbox);command_error=message;}
             inspection_busy=false;
         }
         try{
-            auto state=get("/state");json list;
-            if(!last_jobs || tick()-last_jobs>2000){list=get("/jobs");last_jobs=tick();}
+            auto state=get("/state");
+            const auto unresolved=(state.contains("pendingRequestId") && state["pendingRequestId"].is_string())?state["pendingRequestId"].get<std::string>():std::string();
+            if(pending.empty() && !unresolved.empty()){pending=unresolved;store_pending(pending);unconfirmed=true;}
             const auto frame=engine.Get("/frame?after="+std::to_string(last_frame));std::string data=frame && frame->status==200?std::move(frame->body):std::string();
             if(data.size()>=4){uint32_t size=0;std::memcpy(&size,data.data(),4);if(size<=100000 && data.size()>=4+size)last_frame=json::parse(data.substr(4,size)).at("frameId").get<uint32_t>();}
-            {std::lock_guard<std::mutex> lock(inspection_mailbox);polled_state=std::move(state);if(!list.is_null())polled_jobs=std::move(list);polled_frame=std::move(data);poll_error.clear();polled_at=tick();++poll_revision;}
+            {std::lock_guard<std::mutex> lock(inspection_mailbox);polled_state=std::move(state);polled_frame=std::move(data);poll_error.clear();polled_at=tick();++poll_revision;}
         }catch(const std::exception& e){std::lock_guard<std::mutex> lock(inspection_mailbox);poll_error=e.what();polled_frame.clear();++poll_revision;}
         if(tick()-poll_started<10)std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
@@ -163,9 +164,8 @@ void perform(Action action) {
     if(action==Action::Show){terminal::blur_management();lv_obj_remove_flag(app_window,LV_OBJ_FLAG_HIDDEN);lv_obj_move_foreground(app_window);lv_obj_remove_flag(task_button,LV_OBJ_FLAG_HIDDEN);lv_obj_add_state(task_button,LV_STATE_CHECKED);xp::activate_window(app_window);lv_group_focus_obj(job_select);}
     else if(action==Action::Minimize || action==Action::Close){lv_obj_add_flag(app_window,LV_OBJ_FLAG_HIDDEN);xp::deactivate_window(app_window);lv_obj_remove_state(task_button,LV_STATE_CHECKED);if(action==Action::Close)lv_obj_add_flag(task_button,LV_OBJ_FLAG_HIDDEN);}
     else if(action==Action::Maximize){maximized=!maximized;layout_window();}
-    else if(action==Action::Select)select_job(nullptr);
     else if(action==Action::Check)check(nullptr);
-    else if(action==Action::Pause)pause(nullptr);
+    else if(action==Action::Production)production_toggle(nullptr);
     else if(action==Action::Manage)terminal::show_management();
     else if(action==Action::ShowDesktop){perform(Action::Minimize);terminal::hide_management();}
 }
@@ -239,7 +239,7 @@ void start_menu(lv_event_t*) {
     auto right=panel(menu,190,63,189,337,0xd3e5fa);panel(menu,189,63,1,337,0x95bdee);
     start_left_item(left,"视觉检测",8,Action::Show);start_left_item(left,"系统管理",48,Action::Manage);start_left_item(left,"显示桌面",88,Action::ShowDesktop);
     panel(left,8,128,173,1,0x808080);
-    start_tab_item(left,"进程监视",136,1,false);start_tab_item(left,"网络状态",176,2,false);start_tab_item(left,"记录浏览",216,6,false);start_tab_item(left,"作业管理",256,7,false);
+    start_tab_item(left,"进程监视",136,1,false);start_tab_item(left,"网络状态",176,2,false);start_tab_item(left,"记录浏览",216,6,false);start_tab_item(left,"设备管理",256,4,false);
     start_tab_item(right,"系统概览",8,0,true);start_tab_item(right,"存储管理",48,3,true);start_tab_item(right,"设备管理",88,4,true);start_tab_item(right,"日志查看",128,5,true);
     panel(right,8,172,173,1,0x9ebfe5);
     auto footer=panel(menu,1,400,378,43,0x0062ea);lv_obj_set_style_bg_grad_color(footer,lv_color_hex(0x081bcb),0);lv_obj_set_style_bg_grad_dir(footer,LV_GRAD_DIR_VER,0);panel(footer,0,0,378,1,0x5db3ff);
@@ -251,8 +251,8 @@ void start_menu(lv_event_t*) {
 }
 void file_menu(lv_event_t*) {
     lv_area_t area;lv_obj_get_coords(toolbar,&area);auto menu=popup(area.x1,area.y1-1,186,143);
-    menu_item(menu,"选择作业",4,Action::Select);menu_item(menu,"检查一件",36,Action::Check);menu_item(menu,paused?"继续检测":"暂停检测",68,Action::Pause);
-    panel(menu,8,102,170,1,0x808080);menu_item(menu,"关闭",107,Action::Close);
+    menu_item(menu,"调试：手动检查",4,Action::Check);menu_item(menu,production?"停止自动检测":"开始自动检测",36,Action::Production);
+    panel(menu,8,70,170,1,0x808080);menu_item(menu,"关闭",75,Action::Close);
 }
 void view_menu(lv_event_t*) {
     lv_area_t area;lv_obj_get_coords(toolbar,&area);auto menu=popup(area.x1+66,area.y1-1,186,74);
@@ -274,42 +274,55 @@ void discover(lv_indev_t* input,lv_evdev_type_t type,void*) {
         lv_indev_set_cursor(input,mouse_cursor);
     }
 }
-void jobs(lv_timer_t*) {
-    try {
-        json list;{std::lock_guard<std::mutex> lock(inspection_mailbox);list=polled_jobs;}if(!list.is_array())return;std::string options;std::vector<std::string> ids;
-        for(const auto& job:list){if(!options.empty())options+='\n';options+=job.at("name").get<std::string>();ids.push_back(job.at("id"));}
-        if(!jobs_loaded || options!=options_cache || ids!=job_ids){jobs_loaded=true;options_cache=options;job_ids=std::move(ids);lv_dropdown_set_options(job_select,options.empty()?"":options.c_str());}
-    }catch(const std::exception&){ }
-}
 void refresh(lv_timer_t*) {
     if(terminal::take_inspection_focus())perform(Action::Show);
     text(lv_obj_get_child(login_button,0),terminal::is_administrator()?"管理员已登录":"管理员登录");
-    if(inspection_busy){lv_obj_add_state(check_button,LV_STATE_DISABLED);lv_obj_add_state(pause_button,LV_STATE_DISABLED);}else if(unconfirmed)lv_obj_remove_state(check_button,LV_STATE_DISABLED);
+    if(inspection_busy){lv_obj_add_state(check_button,LV_STATE_DISABLED);lv_obj_add_state(production_button,LV_STATE_DISABLED);}else if(unconfirmed)lv_obj_remove_state(check_button,LV_STATE_DISABLED);
     try {
         json state;std::string frame_data,error,action_error;uint32_t age;
         {std::lock_guard<std::mutex> lock(inspection_mailbox);if(painted_revision==poll_revision && tick()-polled_at<1500)return;painted_revision=poll_revision;state=polled_state;frame_data=polled_frame;error=poll_error;action_error=command_error;age=tick()-polled_at;}
-        if(!error.empty() || state.is_null() || age>1500){clear_picture();lv_obj_add_state(check_button,LV_STATE_DISABLED);if(unconfirmed && !inspection_busy)lv_obj_remove_state(check_button,LV_STATE_DISABLED);lv_obj_add_state(pause_button,LV_STATE_DISABLED);throw std::runtime_error(error.empty()?"等待检测服务…":error);}
+        if(!error.empty() || state.is_null() || age>1500){clear_picture();lv_obj_add_state(check_button,LV_STATE_DISABLED);if(unconfirmed && !inspection_busy)lv_obj_remove_state(check_button,LV_STATE_DISABLED);lv_obj_add_state(production_button,LV_STATE_DISABLED);throw std::runtime_error(error.empty()?"等待检测服务…":error);}
         lv_obj_set_style_bg_color(health_dot,lv_color_hex(0x2bdf50),0);
-        paused=state.at("paused");text(lv_obj_get_child(pause_button,0),paused?"继续检测":"暂停检测");
-        const bool has_job=!state.at("job").is_null();
-        text(run_label,!has_job?"未选择作业":paused?"已暂停":"运行中");
-        const bool can_check=!inspection_busy && (unconfirmed || (has_job && !paused && state.value("fresh",false)));
+        paused=state.at("paused");production=state.value("production",false);
+        text(lv_obj_get_child(production_button,0),production?"停止自动检测":"开始自动检测");
+        const bool has_model=!state.at("model").is_null();
+        const bool has_product=!state.at("product").is_null();
+        const std::string phase=state.value("passagePhase",std::string());
+        const bool pending=state.contains("pendingRequestId") && state["pendingRequestId"].is_string();
+        const bool ready=has_model && has_product && !paused && state.at("error").get<std::string>().empty() && !pending && !unconfirmed && state.value("fresh",false);
+        text(run_label,pending?"上次记录尚未确认":!state.at("error").get<std::string>().empty()?"检测异常":!has_model?"未部署模型":!has_product?"未分配产品方案":paused?"检测服务已暂停":!state.value("fresh",false)?"等待有效图像":production?(phase=="CLEARING"?"请移走当前产品，等待空场景":phase=="INSPECTING"?"正在检查 · 离开后自动保存":phase=="SAVING"?"正在保存单件记录":"自动检测 · 等待产品"):"已停止自动检测");
+        const bool can_check=!inspection_busy && (unconfirmed || pending || (ready && !production));
         if(can_check)lv_obj_remove_state(check_button,LV_STATE_DISABLED);else lv_obj_add_state(check_button,LV_STATE_DISABLED);
-        if(has_job && !inspection_busy)lv_obj_remove_state(pause_button,LV_STATE_DISABLED);else lv_obj_add_state(pause_button,LV_STATE_DISABLED);
+        if((production || ready) && !inspection_busy)lv_obj_remove_state(production_button,LV_STATE_DISABLED);else lv_obj_add_state(production_button,LV_STATE_DISABLED);
         text(lv_obj_get_child(check_button,0),unconfirmed?"核对上次":"检查一件");
-        if(has_job && active_job_ui!=state["job"].value("id",std::string())){active_job_ui=state["job"].value("id",std::string());const auto found=std::find(job_ids.begin(),job_ids.end(),active_job_ui);if(found!=job_ids.end())lv_dropdown_set_selected(job_select,found-job_ids.begin());}
-        text(job_label,!has_job?(job_ids.empty()?"作业：未安装":"作业：—"):"作业："+state["job"].at("name").get<std::string>()+"    操作要求："+state["job"].value("instructions",std::string()));
-        text(empty_label,!has_job?"未启用作业\n管理员登录 → 平台 → 领取并启用":"等待画面…");
-        const unsigned values[]={state.at("total").get<unsigned>(),state["counts"]["PASS"].get<unsigned>(),state["counts"]["FAIL"].get<unsigned>(),state["counts"]["REVIEW"].get<unsigned>(),state["pendingSync"].get<unsigned>()};
-        const char* names[]={"已检查","合格","不合格","待复核","待同步"};
+        const std::string model_text=has_model?state["model"].value("version",std::string()):"未部署";
+        const std::string product_text=has_product?state["product"].value("product",state["product"].value("name",std::string())):"未分配";
+        const std::string plan_text=has_product?state["product"].at("name").get<std::string>()+" / V"+std::to_string(state["product"].at("version").get<unsigned>()):"未分配";
+        const std::string run=state["productionRunId"].is_string()?state["productionRunId"].get<std::string>():"";
+        const std::string selector="产品："+product_text+"    方案："+plan_text+"    模型："+model_text+"    批次："+(run.empty()?"尚未开始":run.substr(0,8)+(production?"（进行中）":"（已停止）"));
+        if(plan_text!=selector_cache){selector_cache=plan_text;lv_dropdown_set_text(job_select,selector_cache.c_str());lv_obj_invalidate(job_select);}
+        lv_obj_add_state(job_select,LV_STATE_DISABLED);
+        text(job_label,selector);
+        text(empty_label,!has_model?"未部署模型\n请在平台下发模型":!has_product?"未分配产品\n请在平台分配产品":"等待画面…");
+        const bool has_run=state.contains("productionRunId") && state["productionRunId"].is_string() && !state["productionRunId"].get<std::string>().empty();
+        const auto& counts=has_run?state.at("runCounts"):state.at("counts");
+        const unsigned values[]={state.at(has_run?"runTotal":"total").get<unsigned>(),counts["PASS"].get<unsigned>(),counts["FAIL"].get<unsigned>(),counts["REVIEW"].get<unsigned>()+counts["ERROR"].get<unsigned>(),state["pendingSync"].get<unsigned>()};
+        const char* names[]={has_run?"本批次原判":"本机累计原判","合格","不合格","待处理（含错误）","全机待同步"};
         for(unsigned i=0;i<5;++i)text(counters[i],std::string(names[i])+"   "+std::to_string(values[i]));
+        std::string requirements=has_product?"当前方案要求":"请在 Web 配置并分配产品方案";
+        if(has_product && state["product"].contains("checks"))for(const auto& check:state["product"]["checks"]) {
+            requirements+='\n'+check.at("label").get<std::string>()+"："+std::to_string(check.at("min").get<unsigned>())+"–"+std::to_string(check.at("max").get<unsigned>())+" 个";
+            if(check.contains("region")){const auto& r=check["region"];requirements+="；中心 X "+std::to_string(int(r["x"].get<double>()*100))+"–"+std::to_string(int((r["x"].get<double>()+r["width"].get<double>())*100))+"%，Y "+std::to_string(int(r["y"].get<double>()*100))+"–"+std::to_string(int((r["y"].get<double>()+r["height"].get<double>())*100))+"%";}
+        }
+        if(has_product)requirements+="\n\n"+state["product"].value("instructions",std::string());
         if(!state.at("last").is_null()) {
-            const auto& last=state.at("last");std::string report="最近检查：第 "+std::to_string(last.at("sequence").get<unsigned>())+" 件 · "+translated(last.at("result"));
+            const auto& last=state.at("last");std::string report="最近已保存单件：第 "+std::to_string(last.at("sequence").get<unsigned>())+" 件 · 机器原判 "+translated(last.at("result"))+"\n人工复核与最终结论请到 Web 检测记录处理";
             const std::string result=last.at("result");text(result_badge,translated(result));
+            if(last.contains("reason"))report+='\n'+last.at("reason").get<std::string>();
             lv_obj_set_style_text_color(result_badge,lv_color_hex(result=="PASS"?0x22712b:result=="FAIL"?0xb3261e:0x925b00),0);
             if(last.contains("findings"))for(const auto& finding:last["findings"])report+='\n'+finding.at("label").get<std::string>()+"：确认 "+std::to_string(finding.at("count").get<unsigned>())+"，待确认 "+std::to_string(finding.at("uncertain").get<unsigned>())+"，要求 "+std::to_string(finding.at("min").get<unsigned>())+"–"+std::to_string(finding.at("max").get<unsigned>());
-            text(result_label,report);
-        }else {text(result_label,"");text(result_badge,"—");lv_obj_set_style_text_color(result_badge,lv_color_black(),0);}
+            text(result_label,report+"\n\n"+requirements);
+        }else {text(result_label,requirements);text(result_badge,"待检查");lv_obj_set_style_text_color(result_badge,lv_color_black(),0);}
         text(error_label,action_error+(!action_error.empty()?"\n":"")+state.at("error").get<std::string>()+(!state.at("syncError").get<std::string>().empty()?"\n同步失败":""));
         if(frame_data.size()<4){clear_picture();text(fresh_label,"无图像");return;}
         uint32_t size=0;std::memcpy(&size,frame_data.data(),4);
@@ -321,6 +334,12 @@ void refresh(lv_timer_t*) {
         lv_image_set_src(picture,&image);lv_obj_invalidate(picture);picture_valid=true;lv_obj_add_flag(empty_label,LV_OBJ_FLAG_HIDDEN);
         text(fresh_label,(frame.at("fresh").get<bool>()?"实时画面":"画面已超时")+std::string(" · #")+std::to_string(frame.at("frameId").get<unsigned>()));
         for(auto object:rectangles)lv_obj_delete(object);rectangles.clear();
+        if(has_product && frame.at("planId")==state["product"].at("id") && frame.at("planVersion")==state["product"].at("version") && state["product"].contains("checks"))for(const auto& check:state["product"]["checks"])if(check.contains("region")) {
+            const auto& r=check["region"];auto rectangle=lv_obj_create(picture);lv_obj_remove_style_all(rectangle);
+            lv_obj_set_pos(rectangle,int(r["x"].get<double>()*416),int(r["y"].get<double>()*416));lv_obj_set_size(rectangle,int(r["width"].get<double>()*416),int(r["height"].get<double>()*416));
+            lv_obj_set_style_border_width(rectangle,2,0);lv_obj_set_style_border_color(rectangle,lv_color_hex(0xe6ad39),0);rectangles.push_back(rectangle);
+            caption(rectangle,(check.at("label").get<std::string>()+" 合格中心范围").c_str(),3,2,200,0xe6ad39);
+        }
         if(frame.at("fresh").get<bool>())for(const auto& box:frame.at("boxes")) {
             auto rectangle=lv_obj_create(picture);lv_obj_remove_style_all(rectangle);
             lv_obj_set_pos(rectangle,int(box["x1"].get<double>()),int(box["y1"].get<double>()));lv_obj_set_size(rectangle,int(box["x2"].get<double>()-box["x1"].get<double>()),int(box["y2"].get<double>()-box["y1"].get<double>()));lv_obj_set_style_border_width(rectangle,2,0);lv_obj_set_style_border_color(rectangle,lv_color_hex(0xd8e5dc),0);rectangles.push_back(rectangle);
@@ -362,36 +381,33 @@ int main(int argc,char** argv) {
     auto tools=button(menubar,"系统",[](lv_event_t*){perform(Action::Manage);});lv_obj_set_pos(tools,132,0);lv_obj_set_size(tools,66,23);lv_obj_set_style_bg_opa(tools,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(tools,0,0);lv_group_remove_obj(tools);
     for(auto item:{file,view,tools}){xp::skin(item,xp::Skin::MenuBar);lv_obj_set_style_bg_opa(item,LV_OPA_COVER,LV_STATE_HOVERED);lv_obj_set_style_bg_color(item,lv_color_hex(0x316ac5),LV_STATE_HOVERED);lv_obj_set_style_text_color(item,lv_color_white(),LV_STATE_HOVERED);}
     toolbar=panel(app_window,3,52,1234,38,xp::face);lv_obj_set_style_border_width(toolbar,1,0);lv_obj_set_style_border_color(toolbar,lv_color_hex(0xd4d0c8),0);
-    panel(toolbar,3,7,1,24,0xaca899);panel(toolbar,5,7,1,24,0xffffff);caption(toolbar,"作业",14,9,36);
+    panel(toolbar,3,7,1,24,0xaca899);panel(toolbar,5,7,1,24,0xffffff);caption(toolbar,"配置",14,9,36);
     job_select=lv_dropdown_create(toolbar);lv_dropdown_set_options(job_select,"");lv_obj_set_pos(job_select,54,4);lv_obj_set_size(job_select,370,23);bevel(job_select);lv_obj_set_style_radius(job_select,0,0);
     lv_obj_set_style_bg_color(job_select,lv_color_white(),0);lv_obj_set_style_text_color(job_select,lv_color_black(),0);lv_obj_set_style_pad_ver(job_select,3,0);
     auto list=lv_dropdown_get_list(job_select);lv_obj_set_style_text_font(list,ui_font,0);lv_obj_set_style_text_color(list,lv_color_black(),0);lv_obj_set_style_bg_color(list,lv_color_white(),0);bevel(list);lv_obj_set_style_radius(list,0,0);
     lv_obj_set_style_bg_color(list,lv_color_hex(0x316ac5),LV_PART_SELECTED);lv_obj_set_style_text_color(list,lv_color_white(),LV_PART_SELECTED);lv_group_add_obj(focus_group,job_select);xp::combo(job_select,ui_font);
-    select_button=button(toolbar,"启用作业",select_job);lv_obj_set_pos(select_button,436,4);lv_obj_set_size(select_button,96,23);
-    xp::icon(select_button,xp::Icon::Jobs,16,4,3);
-    lv_obj_align(lv_obj_get_child(select_button,0),LV_ALIGN_LEFT_MID,24,0);
-    check_button=button(toolbar,"检查一件",check);lv_obj_set_pos(check_button,542,4);lv_obj_set_size(check_button,96,23);
+    production_button=button(toolbar,"开始自动检测",production_toggle);lv_obj_set_pos(production_button,436,4);lv_obj_set_size(production_button,120,23);
+    panel(production_button,6,4,4,12,0x1548ad);panel(production_button,12,4,4,12,0x1548ad);
+    lv_obj_align(lv_obj_get_child(production_button,0),LV_ALIGN_LEFT_MID,24,0);
+    check_button=button(toolbar,"检查一件",check);lv_obj_set_pos(check_button,562,4);lv_obj_set_size(check_button,96,23);
     auto check_icon=panel(check_button,4,3,16,16,0xffffff);bevel(check_icon,0x7f9db9);
     static lv_point_precise_t check_mark[]={{0,4},{3,7},{9,0}};
     auto check_line=lv_line_create(check_button);lv_obj_set_pos(check_line,7,6);lv_obj_set_size(check_line,10,10);lv_line_set_points(check_line,check_mark,3);lv_obj_set_style_line_color(check_line,lv_color_hex(0x008d00),0);lv_obj_set_style_line_width(check_line,2,0);lv_obj_remove_flag(check_line,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_align(lv_obj_get_child(check_button,0),LV_ALIGN_LEFT_MID,24,0);
-    pause_button=button(toolbar,"暂停检测",pause);lv_obj_set_pos(pause_button,648,4);lv_obj_set_size(pause_button,96,23);
-    panel(pause_button,6,4,4,12,0x1548ad);panel(pause_button,12,4,4,12,0x1548ad);
-    lv_obj_align(lv_obj_get_child(pause_button,0),LV_ALIGN_LEFT_MID,24,0);
-    auto manage_jobs=button(toolbar,"作业管理",[](lv_event_t*){terminal::show_management_tab(7);});lv_obj_set_pos(manage_jobs,756,4);lv_obj_set_width(manage_jobs,96);
-    login_button=button(toolbar,"管理员登录",[](lv_event_t*){terminal::show_management_tab(8);if(!terminal::is_administrator())terminal::show_login();});lv_obj_set_pos(login_button,864,4);lv_obj_set_width(login_button,124);
-    job_label=caption(app_window,"作业：—",14,100,1208);lv_label_set_long_mode(job_label,LV_LABEL_LONG_DOT);
-    const char* initial[]={"已检查   0","合格   0","不合格   0","待复核   0","待同步   0"};
+    auto manage_jobs=button(toolbar,"系统管理",[](lv_event_t*){terminal::show_management_tab(0);});lv_obj_set_pos(manage_jobs,664,4);lv_obj_set_width(manage_jobs,96);
+    login_button=button(toolbar,"管理员登录",[](lv_event_t*){terminal::show_management_tab(8);if(!terminal::is_administrator())terminal::show_login();});lv_obj_set_pos(login_button,770,4);lv_obj_set_width(login_button,124);
+    job_label=caption(app_window,"模型：—    产品：—",14,100,1208);lv_label_set_long_mode(job_label,LV_LABEL_LONG_DOT);
+    const char* initial[]={"本机累计原判   0","合格   0","不合格   0","待处理（含错误）   0","全机待同步   0"};
     const uint32_t colors[]={0x000000,0x006400,0x9c0000,0x805000,0x000000};
     for(unsigned i=0;i<5;++i){auto cell=panel(app_window,12+int(i)*243,124,239,28,0xece9d8);bevel(cell,0xaca899);lv_obj_set_style_radius(cell,0,0);counters[i]=caption(cell,initial[i],7,3,224,colors[i]);}
     workspace=panel(app_window,12,164,1216,464,0xece9d8);
     preview=panel(workspace,0,0,432,464,0xffffff);bevel(preview,0x7f9db9);lv_obj_set_style_radius(preview,0,0);caption(preview,"图像",8,2,416);
     image.header.magic=LV_IMAGE_HEADER_MAGIC;image.header.cf=LV_COLOR_FORMAT_RGB565;image.header.w=416;image.header.h=416;image.header.stride=416*2;image.data_size=pixels.size();image.data=pixels.data();
     picture=lv_image_create(preview);lv_obj_set_pos(picture,7,24);lv_image_set_src(picture,&image);
-    empty_label=label(preview,"未启用作业\n管理员登录 → 平台 → 领取并启用");lv_obj_set_pos(empty_label,7,200);lv_obj_set_width(empty_label,416);
+    empty_label=label(preview,"未部署模型\n请在平台下发模型并分配产品");lv_obj_set_pos(empty_label,7,200);lv_obj_set_width(empty_label,416);
     lv_obj_set_style_text_align(empty_label,LV_TEXT_ALIGN_CENTER,0);lv_obj_set_style_text_color(empty_label,lv_color_hex(0x9a9a9a),0);
     results=panel(workspace,448,0,768,464,0xffffff);bevel(results,0x7f9db9);lv_obj_set_style_radius(results,0,0);
-    auto result_title=panel(results,0,0,766,24,0xece9d8);caption(result_title,"检测结果",8,2,400);
+    auto result_title=panel(results,0,0,766,24,0xece9d8);caption(result_title,"当前方案与单件结果",8,2,400);
     result_badge=caption(results,"—",14,34,738);lv_obj_set_style_text_font(result_badge,result_font,0);
     report=panel(results,10,72,744,362,0xffffff);vertical_scroll(report);result_label=caption(report,"",4,0,720);lv_obj_set_style_text_line_space(result_label,6,0);
     notices=panel(results,10,366,744,84,0xffffff);vertical_scroll(notices);error_label=caption(notices,"",4,0,720,0xb3261e);
@@ -402,8 +418,8 @@ int main(int argc,char** argv) {
     panel(grip,9,2,2,2,0xffffff);panel(grip,6,5,2,2,0xffffff);panel(grip,3,8,2,2,0xffffff);
     auto taskbar=panel(root,0,690,1280,30,0x245edb);xp::skin(taskbar,xp::Skin::Taskbar);
     start_button=button(taskbar,"",start_menu);lv_obj_set_pos(start_button,0,0);lv_obj_set_size(start_button,98,30);xp::skin(start_button,xp::Skin::Start);lv_group_remove_obj(start_button);
-    auto start_shadow=caption(start_button,"开始",37,8,52,0x245b1b);lv_obj_set_style_text_font(start_shadow,start_font,0);
-    auto start_title=caption(start_button,"开始",36,7,52,0xffffff);lv_obj_set_style_text_font(start_title,start_font,0);
+    auto start_shadow=caption(start_button,"应用",29,8,60,0x245b1b);lv_obj_set_style_text_font(start_shadow,start_font,0);
+    auto start_title=caption(start_button,"应用",28,7,60,0xffffff);lv_obj_set_style_text_font(start_title,start_font,0);
     panel(taskbar,100,4,1,22,0x0c3997);
     auto show_desktop=button(taskbar,"",[](lv_event_t*){perform(Action::ShowDesktop);});
     lv_obj_set_pos(show_desktop,104,4);lv_obj_set_size(show_desktop,22,22);lv_group_remove_obj(show_desktop);
@@ -428,6 +444,6 @@ int main(int argc,char** argv) {
     layout_window();lv_group_focus_obj(job_select);
     lv_evdev_discovery_start(discover,nullptr);
     engine.set_connection_timeout(0,300000);engine.set_read_timeout(0,600000);engine.set_write_timeout(0,600000);
-    unconfirmed=!pending.empty();std::thread(inspection_worker).detach();lv_timer_create(jobs,300,nullptr);lv_timer_create(refresh,16,nullptr);
+    unconfirmed=!pending.empty();std::thread(inspection_worker).detach();lv_timer_create(refresh,16,nullptr);
     for(;;){lv_timer_handler();std::this_thread::sleep_for(std::chrono::milliseconds(5));}
 }

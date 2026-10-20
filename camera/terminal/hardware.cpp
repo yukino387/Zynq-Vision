@@ -128,6 +128,8 @@ Frame Hardware::capture() {
         std::atomic_thread_fence(std::memory_order_seq_cst);conv[0]=1;
         while(!(conv[0]&2)){
             if(clock_ns()>inference_deadline)throw std::runtime_error("PL inference timeout");
+            // ap_done remains latched until read; let Linux run while the PL works.
+            delay(50);
         }
     }
     conv_ns.store(clock_ns()-conv_begin);

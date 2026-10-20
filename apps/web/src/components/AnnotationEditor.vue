@@ -11,7 +11,7 @@ const props = defineProps<{
     total?: number;
     advancing?: boolean;
   }>(),
-  emit = defineEmits<{ saved: [next: boolean]; skip: [] }>(),
+  emit = defineEmits<{ saved: [next: boolean]; skip: []; discard: [] }>(),
   notices = useNotificationStore();
 const image = ref(""),
   boxes = ref<DetectionBox[]>([]),
@@ -40,8 +40,8 @@ const asset = computed(() =>
   props.sample.assets.find((a) => a.kind === "PREVIEW"),
 );
 const classes = computed<string[]>(() =>
-  Array.isArray(props.sample.task?.plan?.rules?.classes)
-    ? props.sample.task.plan.rules.classes
+  Array.isArray(props.sample.plan?.rules?.classes)
+    ? props.sample.plan.rules.classes
     : [],
 );
 const canAnnotate = computed(() => classes.value.length > 0);
@@ -147,7 +147,7 @@ function readDraft() {
   }
 }
 watch(
-  () => [props.sample.id, props.sample.task?.plan?.id],
+  () => [props.sample.id, props.sample.plan?.id],
   async () => {
     const sampleId = props.sample.id;
     loadingSample.value = true;
@@ -516,9 +516,9 @@ onUnmounted(() => {
     <div class="annotation-topbar">
       <span v-if="position && total" class="mono"
         >第 {{ position }} / {{ total }} 张</span
-      ><span v-if="sample.task?.plan"
-        >{{ sample.task.plan.rules.product }} ·
-        {{ sample.task.plan.name }}</span
+      ><span v-if="sample.plan"
+        >{{ sample.plan.rules.product }} · {{ sample.plan.name }}</span
+      ><button :disabled="locked" @click="emit('discard')">弃用图片</button
       ><span v-if="savedLocal" class="tag ok">本机草稿已保存</span>
       <button
         class="right"

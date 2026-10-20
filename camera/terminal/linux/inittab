@@ -1,6 +1,6 @@
 ::sysinit:/etc/init.d/rcS
 ttyPS0::respawn:/bin/sh
-::respawn:/usr/local/bin/vision-engine /var/lib/vision /var/lib/vision/jobs
+::respawn:/usr/local/bin/vision-engine /var/lib/vision
 ::respawn:/usr/bin/python3 /usr/local/bin/vision-manager.py
 ::respawn:/usr/local/bin/vision-panel /usr/share/vision/simsun.ttc
 ::ctrlaltdel:/sbin/reboot

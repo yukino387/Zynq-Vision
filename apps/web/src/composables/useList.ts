@@ -17,6 +17,7 @@ export function useList<T>(endpoint: Ref<string>) {
     qualityStatus = ref(""),
     source = ref(""),
     taskId = ref(""),
+    planId = ref(""),
     from = ref(""),
     to = ref(""),
     /** 排序字段必须在该路由的 sort 白名单里，否则接口返回 400 */
@@ -42,6 +43,7 @@ export function useList<T>(endpoint: Ref<string>) {
         qualityStatus: qualityStatus.value,
         source: source.value,
         taskId: taskId.value,
+        planId: planId.value,
         from: from.value ? new Date(from.value).toISOString() : "",
         to: to.value ? new Date(to.value).toISOString() : "",
         sort: sort.value,
@@ -110,6 +112,7 @@ export function useList<T>(endpoint: Ref<string>) {
     qualityStatus,
     source,
     taskId,
+    planId,
     from,
     to,
     sort,

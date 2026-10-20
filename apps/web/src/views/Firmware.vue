@@ -96,14 +96,14 @@ const currentFile = computed(() =>
       {{
         devices.current.executionMode === "LINUX_TERMINAL"
           ? "状态来自板端心跳"
-          : devices.current.executionMode === "BARE_METAL"
-            ? "当前连接为旧裸机设备"
-            : "尚未确认运行环境，请在板端登录并绑定设备"
+          : "模拟设备"
       }}
     </p>
     <p v-if="state">
-      最近上报作业：{{ state.jobName || "未启用" }} · 模型
-      {{ state.modelVersion || "未上报" }} · 待上传 {{ state.pendingSync }}
+      当前模型：{{ state.model?.version || "未下发" }} · 当前产品：{{
+        state.product?.name || "未分配"
+      }}
+      · 待上传 {{ state.pendingSync }}
     </p>
     <div class="table-wrap">
       <table>

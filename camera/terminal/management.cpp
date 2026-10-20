@@ -120,7 +120,7 @@ void login_dialog() {
     auto dialog=box(modal,390,185,500,350);xp::skin(dialog,xp::Skin::Window);
     auto title=box(dialog,0,0,500,30,0x0054e3);xp::skin(title,xp::Skin::Title);
     auto caption=label(title,"登录到 CNN Studio",10,7,470);lv_obj_set_style_text_color(caption,lv_color_white(),0);
-    label(dialog,"使用平台管理员账号管理作业和终端。",26,49,448);
+    label(dialog,"使用平台管理员账号管理终端。",26,49,448);
     auto field=[&](int y,int limit,bool secret){auto object=lv_textarea_create(dialog);lv_obj_set_pos(object,112,y);lv_obj_set_size(object,356,26);lv_obj_set_style_text_font(object,font,0);lv_obj_set_style_pad_all(object,4,0);lv_obj_set_style_radius(object,0,0);lv_obj_set_style_border_width(object,1,0);lv_obj_set_style_border_color(object,lv_color_hex(0x7f9db9),0);lv_textarea_set_one_line(object,true);lv_textarea_set_max_length(object,limit);lv_textarea_set_password_mode(object,secret);lv_textarea_set_password_show_time(object,0);lv_textarea_set_text(object,"");return object;};
     label(dialog,"平台地址：",26,91,80);login_server=field(84,200,false);lv_textarea_set_text(login_server,session_info.value("server",std::string()).c_str());lv_textarea_set_placeholder_text(login_server,"http://平台 IP:端口");if(session_info.value("configured",false))enabled(login_server,false);
     label(dialog,"用户名：",26,135,80);login_username=field(128,80,false);
@@ -239,8 +239,8 @@ void render(lv_timer_t*) {
         }
         else if(tab==6 && !page.is_null()){
             const unsigned total=page.value("total",0u),last_page=total?(total-1)/20:0;enabled(history_previous,history_page>0);enabled(history_next,history_page<last_page);if(history_page>last_page){history_page=last_page;return;}
-            history_rows=page["items"];std::vector<std::vector<std::string>> data={{"序号","作业","结果","帧号","同步","启动编号"}};
-            for(const auto& p:history_rows)data.push_back({p.contains("sequence")?std::to_string(p["sequence"].get<unsigned>()):"—",p.value("jobName",p.value("batchId","")),decision(p.value("result","ERROR")),p.contains("frameId")?std::to_string(p["frameId"].get<unsigned>()):"—",p.value("synced",false)?"已同步":"待同步",p.value("bootId","")});rows(history_table,data);text(history_count,"第 "+std::to_string(history_page+1)+" 页    共 "+std::to_string(page["total"].get<unsigned>())+" 条");
+            history_rows=page["items"];std::vector<std::vector<std::string>> data={{"序号","生产批次 / 单件","机器原判","帧号","证据同步","产品方案 / 模型"}};
+            for(const auto& p:history_rows)data.push_back({p.contains("sequence")?std::to_string(p["sequence"].get<unsigned>()):"—",p.value("productionRunId",std::string("单件检查")),decision(p.value("result","ERROR")),p.contains("frameId")?std::to_string(p["frameId"].get<unsigned>()):"—",p.value("synced",false)?"已同步":"待同步",p.value("planName",std::string())+" / V"+std::to_string(p.value("planVersion",0))+" · "+p.value("modelVersion",std::string())});rows(history_table,data);text(history_count,"第 "+std::to_string(history_page+1)+" 页    共 "+std::to_string(page["total"].get<unsigned>())+" 条");
         }else if(tab==7 && !page.is_null()){
             job_rows=page["items"];std::vector<std::vector<std::string>> data={{"状态 / 作业编号","名称","模型版本","大小"}};std::vector<std::string> names,ids,pnames,pids;
             for(const auto& p:page["items"]){data.push_back({(p.value("active",false)?"[当前] ":!p.value("ready",false)?"[不可用] ":"[待启用] ")+p.at("id").get<std::string>(),p["name"],p.value("model",p.value("error","")),bytes(p.value("bytes",0.0))});names.push_back(p["name"]);ids.push_back(p["id"]);}rows(job_table,data);options(job_select,names,ids,job_ids);
@@ -250,7 +250,7 @@ void render(lv_timer_t*) {
             const bool allowed=administrator && !op.value("busy",false) && !command_busy;
             std::vector<std::string> cnames,cids;for(const auto& item:page.value("connections",json::array())){cnames.push_back(item["name"]);cids.push_back(item["path"]);}options(connection_select,cnames,cids,connection_ids);enabled(connect_action,allowed && !connection_ids.empty());
             enabled(verify_job,allowed && !job_ids.empty());enabled(import_job,allowed && !package_ids.empty());enabled(activate_job_button,allowed && ready);
-            std::string description=chosen<job_rows.size()?"要求："+job_rows[chosen].value("instructions",std::string())+"    "+job_rows[chosen].value("error",std::string()):"从平台下载本终端的作业包，放入 U 盘后导入。";
+            std::string description=chosen<job_rows.size()?"要求："+job_rows[chosen].value("instructions",std::string())+"    "+job_rows[chosen].value("error",std::string()):"模型和产品由平台下发；开始/停止自动检测与检查一件请在检测台操作。";
             text(job_description,description+(!administrator?"\n请使用平台管理员账号登录后管理作业。":""));
         }
         if(tab==8 && !page.is_null()){
@@ -261,7 +261,7 @@ void render(lv_timer_t*) {
             for(const auto& item:page["jobs"]){jids.push_back(item["id"]);jnames.push_back(item["name"]);data.push_back({item["id"],item["name"],item["model"],std::to_string(item["target"].get<unsigned>())});}rows(online_table,data);options(online_jobs,jnames,jids,online_job_ids);
             const bool allowed=administrator && !op.value("busy",false) && !command_busy;
             enabled(bind_online_button,allowed && !dids.empty());enabled(fetch_job_button,allowed && !jids.empty());enabled(apply_job_button,allowed && !jids.empty());
-            const auto selected=lv_dropdown_get_selected(online_jobs);text(online_description,selected<page["jobs"].size()?"作业要求："+page["jobs"][selected].value("instructions",std::string()):administrator?"暂无开放给本终端的作业。请在平台创建“板端执行”的作业批次。":"请使用平台管理员账号登录，绑定设备并领取在线作业。");
+            const auto selected=lv_dropdown_get_selected(online_jobs);text(online_description,selected<page["jobs"].size()?"作业要求："+page["jobs"][selected].value("instructions",std::string()):administrator?"暂无待处理作业；模型和产品请在设备配置中下发。":"请使用平台管理员账号登录并绑定设备。");
         }
 
     }catch(const std::exception& e){text(footer,std::string("数据读取失败：")+e.what());}
@@ -293,7 +293,7 @@ void create_management(lv_obj_t* root,lv_obj_t* taskbar,const lv_font_t* ui_font
     xp::skin(minimize,xp::Skin::Minimize);xp::skin(maximize,xp::Skin::Maximize);xp::skin(close_button,xp::Skin::Close);
     tabs=lv_tabview_create(window);lv_obj_set_pos(tabs,8,38);lv_obj_set_size(tabs,1180,552);lv_tabview_set_tab_bar_size(tabs,26);lv_obj_set_style_bg_color(tabs,lv_color_hex(0xece9d8),0);
     lv_obj_add_event_cb(tabs,[](lv_event_t*){selected_tab=lv_tabview_get_tab_active(tabs);},LV_EVENT_VALUE_CHANGED,nullptr);
-    const char* names[]={"概览","进程","网络","存储","设备","日志","记录","作业","平台"};lv_obj_t* pages[9];
+    const char* names[]={"概览","进程","网络","存储","设备","日志","记录","运行","平台"};lv_obj_t* pages[9];
     for(unsigned i=0;i<9;++i){pages[i]=lv_tabview_add_tab(tabs,names[i]);lv_obj_set_style_text_font(pages[i],font,0);lv_obj_set_style_pad_all(pages[i],0,0);lv_obj_set_style_bg_color(pages[i],lv_color_hex(0xece9d8),0);lv_obj_remove_flag(pages[i],LV_OBJ_FLAG_SCROLLABLE);auto tab=lv_tabview_get_tab_button(tabs,i);lv_obj_set_style_text_font(tab,font,0);lv_obj_set_style_text_color(tab,lv_color_black(),0);lv_obj_set_style_bg_color(tab,lv_color_hex(0xece9d8),0);lv_obj_set_style_bg_color(tab,lv_color_white(),LV_STATE_CHECKED);lv_obj_set_style_bg_opa(tab,LV_OPA_COVER,0);lv_obj_set_style_border_width(tab,1,0);lv_obj_set_style_border_width(tab,1,LV_STATE_CHECKED);lv_obj_set_style_border_side(tab,LV_BORDER_SIDE_FULL,0);lv_obj_set_style_border_side(tab,LV_BORDER_SIDE_FULL,LV_STATE_CHECKED);lv_obj_set_style_border_color(tab,lv_color_hex(0xaca899),0);lv_obj_set_style_border_color(tab,lv_color_hex(0xaca899),LV_STATE_CHECKED);lv_obj_set_style_text_color(tab,lv_color_black(),LV_STATE_CHECKED);lv_obj_set_style_radius(tab,3,0);xp::skin(tab,xp::Skin::Tab);lv_obj_set_flex_grow(tab,0);lv_obj_set_size(tab,76,26);}
     auto tab_bar=lv_tabview_get_tab_bar(tabs);lv_obj_set_style_pad_all(tab_bar,0,0);lv_obj_set_style_pad_column(tab_bar,1,0);lv_obj_set_style_bg_color(tab_bar,lv_color_hex(xp::face),0);
     auto content=lv_tabview_get_content(tabs);lv_obj_set_style_border_width(content,1,0);lv_obj_set_style_border_color(content,lv_color_hex(0x919b9c),0);
@@ -324,14 +324,14 @@ void create_management(lv_obj_t* root,lv_obj_t* taskbar,const lv_font_t* ui_font
     history_filter=dropdown(pages[6],16,10,170);lv_dropdown_set_options(history_filter,"全部\n合格\n不合格\n待复核\n错误");lv_obj_add_event_cb(history_filter,[](lv_event_t*){filter_index=lv_dropdown_get_selected(history_filter);history_page=0;},LV_EVENT_VALUE_CHANGED,nullptr);
     history_previous=button(pages[6],"上一页",208,10,88,[](lv_event_t*){if(history_page>0)--history_page;});history_next=button(pages[6],"下一页",312,10,88,[](lv_event_t*){++history_page;});history_count=label(pages[6],"",430,16,700);
     history_table=table(pages[6],16,52,300,{90,260,100,100,100,490});history_detail=label(pages[6],"",18,372,1114);lv_obj_set_style_text_line_space(history_detail,5,0);
-    lv_obj_add_event_cb(history_table,[](lv_event_t*){uint32_t row,col;lv_table_get_selected_cell(history_table,&row,&col);if(!row || row>history_rows.size())return;const auto& item=history_rows[row-1];std::string content=item.value("file","");for(const auto& finding:item.value("findings",json::array()))content+="\n"+finding.at("label").get<std::string>()+"  "+std::to_string(finding.at("count").get<unsigned>())+" / "+std::to_string(finding.at("min").get<unsigned>())+"–"+std::to_string(finding.at("max").get<unsigned>());text(history_detail,content);},LV_EVENT_VALUE_CHANGED,nullptr);
-    job_table=table(pages[7],16,14,240,{280,380,330,150});job_select=dropdown(pages[7],16,276,700);verify_job=button(pages[7],"校验模型",732,276,110,[](lv_event_t*){const auto i=lv_dropdown_get_selected(job_select);if(i>=job_ids.size()){text(footer,"未选择作业");return;}queue("verify",{{"id",job_ids[i]}});});
-    activate_job_button=button(pages[7],"校验并启用 → 检测",858,276,280,[](lv_event_t*){const auto i=lv_dropdown_get_selected(job_select);if(i<job_ids.size())queue("activate",{{"id",job_ids[i]}});});
+    lv_obj_add_event_cb(history_table,[](lv_event_t*){uint32_t row,col;lv_table_get_selected_cell(history_table,&row,&col);if(!row || row>history_rows.size())return;const auto& item=history_rows[row-1];std::string content="本机记录："+item.value("file","")+"\nWeb 记录："+item.value("inspectionId",std::string("待同步"))+"    平台核验："+(item.contains("platformResult")?decision(item["platformResult"]):"待同步")+"\n机器原判保留；证据同步不代表已人工复核，请到 Web 检测记录处理。";for(const auto& finding:item.value("findings",json::array()))content+="\n"+finding.at("label").get<std::string>()+"  "+std::to_string(finding.at("count").get<unsigned>())+" / "+std::to_string(finding.at("min").get<unsigned>())+"–"+std::to_string(finding.at("max").get<unsigned>());text(history_detail,content);},LV_EVENT_VALUE_CHANGED,nullptr);
+    job_table=table(pages[7],16,14,240,{280,380,330,150});job_select=dropdown(pages[7],16,276,700);verify_job=button(pages[7],"模型由平台下发",732,276,110,[](lv_event_t*){const auto i=lv_dropdown_get_selected(job_select);if(i>=job_ids.size()){text(footer,"未选择作业");return;}queue("verify",{{"id",job_ids[i]}});});
+    activate_job_button=button(pages[7],"请在检测台操作",858,276,280,[](lv_event_t*){const auto i=lv_dropdown_get_selected(job_select);if(i<job_ids.size())queue("activate",{{"id",job_ids[i]}});});
     job_description=label(pages[7],"",18,423,1114);lv_obj_set_style_text_line_space(job_description,6,0);
-    button(pages[7],"在线领取作业",18,474,140,[](lv_event_t*){show_management_tab(8);if(!administrator)login_dialog();});label(pages[7],"联网时从平台直接领取；离线时可使用 U 盘导入。",180,480,900);
+    button(pages[7],"平台连接",18,474,140,[](lv_event_t*){show_management_tab(8);if(!administrator)login_dialog();});label(pages[7],"模型和产品由平台下发；检测记录自动同步。",180,480,900);
     package_select=dropdown(pages[7],16,332,830);import_job=button(pages[7],"导入作业",866,332,110,[](lv_event_t*){const auto i=lv_dropdown_get_selected(package_select);if(i>=package_ids.size()){text(footer,"未选择作业包");return;}queue("import",{{"package",package_ids[i]}});});
     connection_select=dropdown(pages[7],16,378,830);connect_action=button(pages[7],"连接平台",866,378,110,[](lv_event_t*){const auto i=lv_dropdown_get_selected(connection_select);if(i<connection_ids.size())queue("connect",{{"path",connection_ids[i]}});});
-    label(pages[7],"作业包",16,312,200);label(pages[7],"平台下载的 connection.json",16,358,400);
+    label(pages[7],"模型与产品由平台下发",16,312,300);label(pages[7],"平台下载的 connection.json",16,358,400);
     platform_text=label(pages[8],"请登录平台管理员账号",18,12,1114);lv_obj_set_style_text_line_space(platform_text,5,0);
     online_devices=dropdown(pages[8],16,86,820);bind_online_button=button(pages[8],"绑定 / 更新本机凭据",858,86,280,[](lv_event_t*){const auto selected=lv_dropdown_get_selected(online_devices);if(selected<online_device_ids.size())queue("bind_online",{{"deviceId",online_device_ids[selected]}});});
     label(pages[8],"按机身编号选择本机；更新绑定将刷新该设备的同步凭据。",18,120,1114);
@@ -340,7 +340,8 @@ void create_management(lv_obj_t* root,lv_obj_t* taskbar,const lv_font_t* ui_font
     apply_job_button=button(pages[8],"领取并启用 → 检测",858,370,280,[](lv_event_t*){const auto selected=lv_dropdown_get_selected(online_jobs);if(selected<online_job_ids.size())queue("online_apply",{{"id",online_job_ids[selected]}});});
     lv_obj_add_event_cb(online_table,[](lv_event_t*){uint32_t row,col;lv_table_get_selected_cell(online_table,&row,&col);if(row && row<=online_job_ids.size())lv_dropdown_set_selected(online_jobs,row-1);},LV_EVENT_VALUE_CHANGED,nullptr);
     auto detail_scroll=box(pages[8],16,410,1120,45);lv_obj_add_flag(detail_scroll,LV_OBJ_FLAG_SCROLLABLE);lv_obj_set_scroll_dir(detail_scroll,LV_DIR_VER);xp::scrollbar(detail_scroll);online_description=label(detail_scroll,"",2,2,1090);
-    button(pages[8],"本机作业",18,474,100,[](lv_event_t*){show_management_tab(7);});button(pages[8],"平台登录",132,474,100,[](lv_event_t*){if(!administrator)login_dialog();});button(pages[8],"同步记录",246,474,100,[](lv_event_t*){queue("sync");});
+    button(pages[8],"运行状态",18,474,100,[](lv_event_t*){show_management_tab(7);});button(pages[8],"平台登录",132,474,100,[](lv_event_t*){if(!administrator)login_dialog();});button(pages[8],"同步记录",246,474,100,[](lv_event_t*){queue("sync");});
+    for(auto object:{job_table,job_select,verify_job,activate_job_button,package_select,import_job,online_table,online_jobs,fetch_job_button,apply_job_button})lv_obj_add_flag(object,LV_OBJ_FLAG_HIDDEN);
     for(auto control:{mount_action,unmount_action,export_records,export_diagnostics,verify_job,import_job,activate_job_button,connect_action,bind_online_button,fetch_job_button,apply_job_button})enabled(control,false);
     footer_panel=box(window,12,596,1172,26,0xece9d8);lv_obj_set_style_border_width(footer_panel,1,0);lv_obj_set_style_border_side(footer_panel,LV_BORDER_SIDE_TOP,0);lv_obj_set_style_border_color(footer_panel,lv_color_hex(0xc7c5b2),0);
     footer=label(footer_panel,"",6,4,1150);lv_label_set_long_mode(footer,LV_LABEL_LONG_DOT);

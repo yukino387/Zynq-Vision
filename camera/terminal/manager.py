@@ -5,7 +5,6 @@ import concurrent.futures
 import fcntl
 import hashlib
 import http.server
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -35,6 +34,7 @@ HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 PREVIEW_PORT = 8879
 PREVIEW_CACHE = {'at': 0.0, 'body': b''}
 PREVIEW_LOCK = threading.Lock()
+REFRESH = threading.Event()
 
 
 def read(path, default='', limit=65536):
@@ -45,12 +45,20 @@ def read(path, default='', limit=65536):
         return default
 
 
+def sync_directory(path):
+    if os.name != 'posix':
+        return
+    descriptor = os.open(path, os.O_RDONLY|os.O_DIRECTORY)
+    try:os.fsync(descriptor)
+    finally:os.close(descriptor)
+
+
 def engine(path='/state', payload=None, token=''):
     data = None if payload is None else json.dumps(payload).encode()
     request = urllib.request.Request('http://127.0.0.1:8877'+path, data,
                                      {'Content-Type': 'application/json', 'Authorization': 'Bearer '+token})
     try:
-        with HTTP.open(request, timeout=5 if path == "/select" else 1) as response:
+        with HTTP.open(request, timeout=30 if path == "/model" else 3) as response:
             return json.loads(response.read(1024*1024))
     except urllib.error.HTTPError as exc:
         raise ValueError(json.loads(exc.read()).get('error', '检测服务操作失败')) from exc
@@ -117,27 +125,13 @@ def packages():
 
 
 def jobs():
-    rows = []
-    with LOCK:
-        inspection = SNAPSHOT.get('inspection', {})
-    active = (inspection.get('job') or {}).get('id', '')
+    try:
+        inspection = engine()
+    except Exception:
+        inspection = {}
     connection = json.loads(read(STATE/'connection.json', '{}'))
-    for path in sorted((STATE/'jobs').glob('*/job.json')):
-        try:
-            job = json.loads(read(path, limit=1024*1024))
-            manifest = job['manifest']
-            compatible = (job['id'] == path.parent.name and job.get('formatVersion') == 1
-                          and manifest.get('networkTemplate') == 'ZYNQ7020_NEU_INT8_V1'
-                          and manifest.get('classCount') == 6 and len(manifest.get('classes', [])) == 6
-                          and (not connection.get('deviceId') or job.get('deviceId') == connection['deviceId']))
-            rows.append({'id': job['id'], 'name': job['name'], 'model': job['snapshot']['modelVersion'],
-                         'bytes': (path.parent/'model.bin').stat().st_size,
-                         'classes': manifest['classes'], 'active': job['id'] == active,
-                         'ready': compatible, 'instructions': job['snapshot']['rules'].get('instructions', ''),
-                         'error': '' if compatible else '作业与本终端不匹配'})
-        except (ValueError, KeyError, OSError, TypeError):
-            rows.append({'id': path.parent.name, 'name': path.parent.name, 'ready': False, 'error': '作业文件损坏'})
-    return {'items': rows, 'packages': packages(), 'activeId': active,
+    return {'items': [], 'packages': packages(), 'activeId': '',
+            'model': inspection.get('model'), 'product': inspection.get('product'),
             'connections': [{'path':str(path),'name':str(path)} for root in media_roots()+[Path('/boot/vision')] for path in [root/'connection.json',root/'vision'/'connection.json'] if path.is_file() and not path.is_symlink()],
             'deviceId': connection.get('deviceId', ''), 'linked': bool(connection.get('server'))}
 
@@ -148,9 +142,7 @@ def save_json(path, document):
     with os.fdopen(fd, 'w') as stream:
         json.dump(document, stream);stream.flush();os.fsync(stream.fileno())
     os.replace(temporary, path)
-    fd = os.open(path.parent, os.O_DIRECTORY)
-    try:os.fsync(fd)
-    finally:os.close(fd)
+    sync_directory(path.parent)
 
 
 def platform_page(token):
@@ -162,9 +154,6 @@ def platform_page(token):
         return document
     devices = AUTH.platform_request(token, '/api/devices?pageSize=100')
     document['devices'] = [{'id': item['id'], 'name': item['name'], 'serialNumber': item['serialNumber']} for item in devices['items'] if item['type'] == 'ZYNQ']
-    if connection.get('deviceId'):
-        batches = AUTH.platform_request(token, '/api/batches?'+urllib.parse.urlencode({'pageSize':100,'deviceId':connection['deviceId'],'status':'OPEN'}))
-        document['jobs'] = [{'id':item['id'],'name':item['name'],'target':item['target'],'model':item['snapshot']['modelVersion'],'instructions':item['snapshot']['rules']['instructions']} for item in batches['items'] if item['execution']=='TERMINAL' and item['deviceId']==connection['deviceId'] and item['status']=='OPEN']
     return document
 
 
@@ -178,23 +167,35 @@ def heartbeat_once():
         with LOCK:sample = dict(SNAPSHOT)
         memory = sample.get('memory', {})
         total = memory.get('MemTotal', 0)
-        job = inspection.get('job') or {}
+        pending_request = inspection.get('pendingRequestId') or None
+        diagnostics = inspection.get('diagnostics', {})
+        timing = ({'frameId': inspection.get('frameId', 0),
+                   'captureMs': diagnostics.get('lastCaptureMs') or 0,
+                   'prepareMs': diagnostics.get('hwPrepareMs') or 0,
+                   'convMs': diagnostics.get('hwConvMs') or 0,
+                   'forwardMs': diagnostics.get('hwForwardMs') or 0,
+                   'postMs': diagnostics.get('hwPostMs') or 0,
+                   'extractMs': diagnostics.get('hwExtractMs') or 0}
+                  if diagnostics.get('lastCaptureMs') else None)
         payload = {'bootId': read('/proc/sys/kernel/random/boot_id'), 'uptime': float(read('/proc/uptime', '0').split()[0]),
-                   'jobId': job.get('id'), 'modelVersion': inspection.get('diagnostics',{}).get('modelVersion'),
-                   'paused': inspection.get('paused',True), 'fresh': inspection.get('fresh',False),
-                   'total': inspection.get('total',0), 'pendingSync': inspection.get('pendingSync',0),
-                   'error': inspection.get('error','')[:1000], 'syncError':inspection.get('syncError','')[:1000],
-                   'cpuPercent': sample.get('cpus',[{}])[0].get('percent') if sample.get('cpus') else None,
-                   'memoryUsed': max(0,total-memory.get('MemAvailable',total)), 'memoryTotal':total}
+                   'model': inspection.get('model'), 'product': inspection.get('product'),
+                   'total': inspection.get('total', 0), 'counts': inspection.get('counts', {}),
+                   'runTotal': inspection.get('runTotal', 0), 'runCounts': inspection.get('runCounts', {}),
+                   'production': inspection.get('production', False),
+                   'productionRunId': inspection.get('productionRunId') or None,
+                   'passagePhase': inspection.get('passagePhase', 'STOPPED'),
+                   'fps': (1000.0/diagnostics.get('lastCaptureMs'))
+                          if diagnostics.get('lastCaptureMs') else None,
+                   'timing': timing,
+                   'paused': inspection.get('paused', True), 'fresh': inspection.get('fresh', False),
+                   'pendingSync': inspection.get('pendingSync', 0), 'pendingRequestId': pending_request,
+                   'last': inspection.get('last'), 'error': inspection.get('error', '')[:1000],
+                   'syncError': inspection.get('syncError', '')[:1000],
+                   'cpuPercent': sample.get('cpus', [{}])[0].get('percent') if sample.get('cpus') else None,
+                   'memoryUsed': max(0, total-memory.get('MemAvailable', total)), 'memoryTotal': total}
         request = urllib.request.Request(connection['server']+'/api/terminal/heartbeat',json.dumps(payload).encode(),{'Content-Type':'application/json','Authorization':'Bearer '+connection['token']})
         with HTTP.open(request,timeout=3) as response:receipt=json.load(response)
-        if receipt.get('jobId') != job.get('id'):
-            raise ValueError('平台状态回执与当前作业不一致')
-        # A received close decision survives a network outage and board restart.
-        if receipt.get('jobId') and receipt.get('batchStatus') == 'CLOSED':
-            closed={'jobId':receipt['jobId'],'status':'CLOSED'}
-            if json.loads(read(STATE/'platform-job.json','{}')) != closed:save_json(STATE/'platform-job.json',closed)
-        with LOCK:PLATFORM.update(online=True,error='',lastSuccess=receipt['receivedAt'],deviceId=connection['deviceId'],batchStatus=receipt.get('batchStatus'))
+        with LOCK:PLATFORM.update(online=True,error='',lastSuccess=receipt['receivedAt'],deviceId=connection['deviceId'])
     except Exception as exc:
         with LOCK:PLATFORM.update(online=False,error='平台连接或凭据异常：'+str(exc)[:180],deviceId=connection.get('deviceId',''))
 
@@ -204,17 +205,12 @@ def platform_sync():
         try:heartbeat_once()
         except Exception as exc:
             with LOCK:PLATFORM.update(online=False,error='平台配置无效：'+str(exc)[:180])
-        time.sleep(5)
+        REFRESH.wait(5)
+        REFRESH.clear()
 
 
 def records(page=0, result=''):
-    document = engine('/records?'+urllib.parse.urlencode({'page': page, 'result': result}))
-    for item in document['items']:
-        identifier = item.get('batchId', '')
-        if re.fullmatch(r'[A-Za-z0-9_-]{1,80}', identifier):
-            try:item['jobName'] = json.loads(read(STATE/'jobs'/identifier/'job.json'))['name']
-            except (ValueError, KeyError, OSError):pass
-    return document
+    return engine('/records?'+urllib.parse.urlencode({'page': page, 'result': result}))
 
 
 class Sampler:
@@ -363,7 +359,6 @@ def write_archive(destination, diagnostic=False):
         files = []
     else:
         files = [p for p in (STATE/'records').glob('*') if p.is_file() and not p.is_symlink() and (p.suffix == '.json' or p.name.endswith('.json.ack'))]
-        files += [p for p in (STATE/'jobs').glob('*/job.json') if not p.is_symlink()]
     required = sum(p.stat().st_size for p in files)+16*1024*1024
     if shutil.disk_usage(destination).free < required:
         raise ValueError('U 盘剩余空间不足')
@@ -384,11 +379,7 @@ def write_archive(destination, diagnostic=False):
                         archive.write(path, str(path.relative_to(STATE)))
             stream.flush();os.fsync(stream.fileno())
         temporary.rename(target)
-        fd = os.open(destination, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
+        sync_directory(destination)
     except Exception:
         temporary.unlink(missing_ok=True)
         raise
@@ -421,36 +412,12 @@ def action(name, payload, token=''):
         previous = json.loads(read(STATE/'connection.json', '{}'))
         if previous.get('deviceId') and previous['deviceId'] != identifier:raise ValueError('本机已绑定其他设备，不能在检测现场切换设备身份')
         if read(STATE/'panel-request'):raise ValueError('请先核对上一次检查')
-        current = engine()
-        if current.get('job'):
-            job = json.loads(read(STATE/'jobs'/current['job']['id']/'job.json'))
-            if job['deviceId'] != identifier:raise ValueError('已启用作业属于其他终端')
         server = AUTH.status(token)['server']
         document = AUTH.platform_request(token, '/api/terminal/'+identifier+'/credential', {'confirm': True, 'server': server})
         if document.get('deviceId') != identifier or document.get('server') != server or not re.fullmatch(r'[a-f0-9]{64}',document.get('token','')):raise ValueError('平台绑定响应无效')
         save_json(STATE/'connection.json',document)
         heartbeat_once()
-        return '设备已绑定平台；现在可以直接领取在线作业'
-    if name in ('fetch_job', 'online_apply'):
-        if read(STATE/'panel-request'):raise ValueError('请先核对上一次检查')
-        identifier = payload['id']
-        connection = json.loads(read(STATE/'connection.json','{}'))
-        if not re.fullmatch(r'[A-Za-z0-9_-]{1,80}',identifier) or not connection.get('deviceId'):raise ValueError('请先绑定本终端')
-        job = AUTH.platform_request(token,'/api/batches/'+identifier)
-        if job['deviceId'] != connection['deviceId'] or job['status'] != 'OPEN' or job['execution'] != 'TERMINAL':raise ValueError('此作业未开放给本终端')
-        data = AUTH.platform_request(token,'/api/batches/'+identifier+'/package',binary=True)
-        package = STATE/('.platform-'+identifier+'.zip')
-        try:
-            with package.open('wb') as stream:stream.write(data)
-            package.chmod(0o600)
-            with zipfile.ZipFile(package) as archive:descriptor=json.loads(archive.read('job.json'))
-            if descriptor['id'] != identifier or descriptor['deviceId'] != connection['deviceId']:raise ValueError('下载的作业身份不一致')
-            spec=importlib.util.spec_from_file_location('vision_install',Path(__file__).with_name('vision-install-job.py'))
-            importer=importlib.util.module_from_spec(spec);spec.loader.exec_module(importer)
-            importer.install(package,STATE)
-        finally:package.unlink(missing_ok=True)
-        if name == 'online_apply':return action('activate',{'id':identifier},token)
-        return {'message':'平台作业已下载并校验，请启用后开始检测','jobId':identifier}
+        return '设备已绑定平台'
     if name == 'connect':
         path = allowed_path(payload['path'])
         if path.name != 'connection.json' or path.stat().st_size > 4096:
@@ -462,44 +429,13 @@ def action(name, payload, token=''):
         if previous.get('deviceId') and previous['deviceId'] != document['deviceId']:
             raise ValueError('连接配置属于其他终端')
         AUTH.platform_device(token, document['server'], document['deviceId'])
-        current = engine()
-        if current.get('job'):
-            descriptor = json.loads(read(STATE/'jobs'/current['job']['id']/'job.json'))
-            if descriptor.get('deviceId') != document['deviceId']:
-                raise ValueError('已启用作业与连接配置的设备不一致')
         temporary = STATE/'connection.json.next'
         descriptor = os.open(temporary, os.O_WRONLY|os.O_CREAT|os.O_TRUNC, 0o600)
         with os.fdopen(descriptor, 'w') as stream:
             json.dump(document, stream);stream.flush();os.fsync(stream.fileno())
         os.replace(temporary, STATE/'connection.json')
-        descriptor = os.open(STATE, os.O_DIRECTORY)
-        try:os.fsync(descriptor)
-        finally:os.close(descriptor)
+        sync_directory(STATE)
         return '平台连接配置已安装；检测记录将使用设备凭据同步'
-    if name == 'import':
-        package = allowed_path(payload['package'])
-        if package.suffix.lower() != '.zip' or not package.is_file() or package.stat().st_size > 16*1024*1024:
-            raise ValueError('不是有效的作业包')
-        spec = importlib.util.spec_from_file_location('vision_install', Path(__file__).with_name('vision-install-job.py'))
-        importer = importlib.util.module_from_spec(spec);spec.loader.exec_module(importer)
-        installed = importer.install(package, STATE)
-        return {'message': '作业已导入；请选择并启用后开始检测', 'jobId': installed.name}
-    if name in ('verify', 'activate'):
-        identifier = payload['id']
-        if not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', identifier):
-            raise ValueError('作业编号无效')
-        path = STATE/'jobs'/identifier
-        document = json.loads(read(path/'job.json', limit=1024*1024))
-        with (path/'model.bin').open('rb') as stream:
-            digest = hashlib.file_digest(stream, 'sha256').hexdigest()
-        if digest != document['modelSha256']:
-            raise ValueError('模型校验失败')
-        if name == 'activate':
-            if read(STATE/'panel-request'):
-                raise ValueError('请先在检测台确认上一次检查，再切换作业')
-            selected = engine('/select', {'id': identifier}, token)
-            return {'message': '作业已启用，正在返回检测台', 'jobId': selected['job']['id']}
-        return {'message': '模型校验通过，可启用检测', 'jobId': identifier}
     if name in ('export', 'diagnostics'):
         return write_archive(payload['path'], name == 'diagnostics')
     if name == 'sync':
@@ -528,7 +464,7 @@ def action(name, payload, token=''):
 def submit(name, payload, token=''):
     if name != 'sync':
         AUTH.require(token)
-    if name not in {'mount', 'unmount', 'bind_online', 'fetch_job', 'online_apply', 'connect', 'import', 'verify', 'activate', 'export', 'diagnostics', 'sync', 'reboot', 'poweroff'}:
+    if name not in {'mount', 'unmount', 'bind_online', 'connect', 'export', 'diagnostics', 'sync', 'reboot', 'poweroff'}:
         raise ValueError('未知操作')
     with LOCK:
         if OPERATION['busy']:
@@ -626,6 +562,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
+            if self.path == '/refresh':
+                REFRESH.set();self.reply(200, {'queued': True});return
             length = int(self.headers.get('Content-Length', '0'))
             if length < 2 or length > 4096 or self.path not in {'/action', '/auth/login', '/auth/logout'}:
                 raise ValueError('请求无效')
@@ -641,15 +579,143 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.reply(409, {'error': str(exc)})
 
 
-class PreviewHandler(http.server.BaseHTTPRequestHandler):
-    """Read-only live preview for the platform workbench.
+def write_bytes(path, data):
+    temporary = path.with_name(path.name+'.next')
+    fd = os.open(temporary, os.O_WRONLY|os.O_CREAT|os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'wb') as stream:
+        stream.write(data);stream.flush();os.fsync(stream.fileno())
+    os.replace(temporary, path)
+    sync_directory(path.parent)
 
-    The engine only listens on loopback, so this port exposes the current
-    frame and nothing else. Keep it on the trusted terminal network.
-    """
+
+def install_model(command):
+    connection = json.loads(read(STATE/'connection.json', '{}'))
+    if not connection.get('server'):
+        raise ValueError('请先绑定平台')
+    current = engine()
+    if current.get('production') and command.get('confirm') is not True:
+        raise ValueError('请先停止自动检测并确认当前件已处理')
+    if current.get('pendingRequestId') or read(STATE/'panel-request'):
+        raise ValueError('请先核对未确认保存的记录')
+    if current.get('production'):
+        engine('/production', {'enabled': False})
+    identifier = command.get('modelId')
+    if not isinstance(identifier, str) or not identifier:
+        raise ValueError('模型编号无效')
+    request = urllib.request.Request(connection['server']+'/api/terminal/model/'+urllib.parse.quote(identifier),
+                                     headers={'Authorization': 'Bearer '+connection['token']})
+    with HTTP.open(request, timeout=60) as response:
+        data = response.read()
+    if len(data) != 6416360:
+        raise ValueError('模型文件大小不正确')
+    if hashlib.sha256(data).hexdigest() != command.get('weightsSha256'):
+        raise ValueError('模型文件摘要不匹配')
+    directory = STATE/'model'
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory/'model.bin'
+    backup = target.read_bytes() if target.exists() else None
+    descriptor = {'formatVersion': 1, 'id': identifier,
+                  'version': command.get('modelVersion'),
+                  'payloadSha256': command.get('modelPayloadSha256'),
+                  'weightsSha256': command.get('weightsSha256'),
+                  'manifest': command.get('manifest'),
+                  'classes': command.get('classes'),
+                  'installedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
+    try:
+        write_bytes(target, data)
+        return engine('/model', descriptor)
+    except Exception:
+        if backup is not None:
+            write_bytes(target, backup)
+        else:
+            target.unlink(missing_ok=True)
+        raise
+
+
+def install_product(command):
+    current = engine()
+    if current.get('production') and command.get('confirm') is not True:
+        raise ValueError('请先停止自动检测并确认当前件已处理')
+    if current.get('pendingRequestId') or read(STATE/'panel-request'):
+        raise ValueError('请先核对未确认保存的记录')
+    if current.get('production'):
+        engine('/production', {'enabled': False})
+    descriptor = {'id': command.get('planId'), 'name': command.get('planName'),
+                  'version': command.get('planVersion'), 'rules': command.get('rules'),
+                  'acceptance': command.get('acceptance'),
+                  'assignedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
+    return engine('/product', descriptor)
+
+
+class PreviewHandler(http.server.BaseHTTPRequestHandler):
+    """Workbench bridge; control and sampling validate the bound platform session."""
+
+    def platform_actor(self):
+        connection = json.loads(read(STATE/'connection.json', '{}'))
+        authorization = self.headers.get('Authorization', '')
+        if not authorization.startswith('Bearer ') or not connection.get('server'):
+            raise ValueError('请先登录平台')
+        request = urllib.request.Request(connection['server']+'/api/auth/me', headers={'Authorization': authorization})
+        with HTTP.open(request, timeout=3) as response:actor = json.load(response)
+        return actor
+
+    def do_POST(self):
+        path = urllib.parse.urlsplit(self.path).path
+        try:
+            actor = self.platform_actor()
+            role = actor.get('role')
+            length = int(self.headers.get('Content-Length', '0'))
+            if length < 2 or length > 1048576:raise ValueError('请求无效')
+            command = json.loads(self.rfile.read(length))
+            if path == '/control':
+                if role not in ('ADMIN', 'ENGINEER', 'OPERATOR'):
+                    self.reply(403, b'Forbidden');return
+                kind = command.get('type')
+                if kind == 'START_INSPECTION':result = engine('/production', {'enabled': True})
+                elif kind == 'STOP_INSPECTION':result = engine('/production', {'enabled': False})
+                elif kind == 'CHECK_ONE':
+                    identifier = command.get('requestId')
+                    if not isinstance(identifier, str) or not re.fullmatch(r'[0-9a-f-]{36}', identifier):
+                        raise ValueError('检查编号无效')
+                    result = engine('/check', {'requestId': identifier})
+                elif kind in ('GET_STATUS', 'CONNECT'):result = engine()
+                else:raise ValueError('当前设备不支持该控制操作')
+                if kind in ('START_INSPECTION', 'STOP_INSPECTION', 'CHECK_ONE'):
+                    REFRESH.set()
+                self.reply(200, json.dumps(result).encode());return
+            if path == '/runtime/model':
+                if role != 'ADMIN':
+                    self.reply(403, b'Forbidden');return
+                result = install_model(command)
+                REFRESH.set()
+                self.reply(200, json.dumps(result).encode());return
+            if path == '/runtime/product':
+                if role not in ('ADMIN', 'ENGINEER'):
+                    self.reply(403, b'Forbidden');return
+                result = install_product(command)
+                REFRESH.set()
+                self.reply(200, json.dumps(result).encode());return
+            self.reply(404, b'Unknown command')
+        except urllib.error.HTTPError as exc:
+            self.reply(exc.code if exc.code in (401,403) else 409, b'Platform authorization failed')
+        except Exception as exc:
+            self.reply(409, json.dumps({'error': str(exc)}, ensure_ascii=False).encode())
 
     def do_GET(self):
-        if urllib.parse.urlsplit(self.path).path != '/frame':
+        path = urllib.parse.urlsplit(self.path).path
+        if path in ('/capture', '/preview'):
+            try:
+                if path == '/capture':self.platform_actor()
+                target = 'http://127.0.0.1:8877/frame'
+                if path == '/preview':
+                    after = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('after', [''])[0]
+                    if after.isdigit():target += '?after=' + after
+                with HTTP.open(target, timeout=2) as response:body = response.read()
+                self.reply(200, body)
+            except urllib.error.HTTPError as exc:self.reply(exc.code if exc.code in (401,403) else 409, b'Capture unavailable')
+            except Exception as exc:self.reply(409, json.dumps({'error': str(exc)}, ensure_ascii=False).encode())
+            return
+        if path != '/frame':
             self.send_error(404);return
         now = time.monotonic()
         with PREVIEW_LOCK:

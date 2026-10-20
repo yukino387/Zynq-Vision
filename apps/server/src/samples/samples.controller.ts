@@ -37,11 +37,13 @@ export class SamplesController {
       "status",
       "source",
       "taskId",
+      "planId",
       "createdAt",
       "updatedAt",
     ]);
     args.where.deletedAt = null;
     if (q.realOnly === "true") args.where.NOT = { source: "SIMULATION" };
+    if (q.annotation === "pending") args.where.status = { not: "REJECTED" };
     if (q.annotation) {
       const completed = await this.db.$queryRaw<
         Array<{ sampleId: string }>
@@ -86,6 +88,7 @@ export class SamplesController {
       parse(captureSchema, body),
       req.actor.id,
       req.id,
+      req.headers.authorization ?? "",
     );
   }
   @Roles("ADMIN", "ENGINEER") @Post(":id/process") async process(
@@ -100,7 +103,7 @@ export class SamplesController {
       },
     });
   }
-  @Roles("ADMIN") @Post(":id/review") async review(
+  @Roles("ADMIN", "ENGINEER") @Post(":id/review") async review(
     @Param("id") id: string,
     @Body() body: unknown,
     @Req() req: Request,
@@ -171,6 +174,7 @@ export class SamplesController {
       where: { id, deletedAt: null },
       include: {
         task: { include: { plan: true } },
+        plan: true,
         assets: true,
         quality: true,
         reviews: { orderBy: { createdAt: "desc" } },
@@ -199,11 +203,12 @@ export class SamplesController {
     });
     const sample = await this.db.sample.findUniqueOrThrow({
       where: { id, deletedAt: null },
-      include: { task: { include: { plan: true } } },
+      include: { plan: true },
     });
-    const classes = (
-      sample.task?.plan?.rules as { classes?: string[] } | undefined
-    )?.classes;
+    const classes = (sample.plan?.rules as { classes?: string[] } | undefined)
+      ?.classes;
+    if (!classes?.length)
+      throw new DomainError("INVALID_STATE", "请先为图片选择产品");
     if (classes?.length) {
       if (dto.boxes.some((box) => !classes[box.classId]))
         throw new DomainError(
@@ -231,7 +236,20 @@ export class SamplesController {
         where: { sampleId: id },
         orderBy: { version: "desc" },
       });
-      await tx.sample.update({ where: { id }, data: { status: "PENDING" } });
+      await tx.sample.update({
+        where: { id },
+        data: { status: dto.status === "COMPLETE" ? "REVIEWED" : "PENDING" },
+      });
+      if (dto.status === "COMPLETE")
+        await tx.review.create({
+          data: {
+            sampleId: id,
+            userId: req.actor.id,
+            verdict: "ACCEPT",
+            hard: sample.hard,
+            note: "标注完成并确认可用于训练",
+          },
+        });
       return tx.annotationSet.create({
         data: {
           sampleId: id,
@@ -241,6 +259,33 @@ export class SamplesController {
           boxes: { create: dto.boxes },
         },
         include: { boxes: true },
+      });
+    });
+  }
+  @Roles("ADMIN", "ENGINEER") @Post(":id/product") async assignProduct(
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    const { planId } = parse(
+      z.object({ planId: z.string().min(1) }).strict(),
+      body,
+    );
+    return this.db.$transaction(async (tx) => {
+      await tx.inspectionPlan.findUniqueOrThrow({
+        where: { id: planId, deletedAt: null },
+      });
+      const sample = await tx.sample.findUniqueOrThrow({
+        where: { id, deletedAt: null },
+        include: { _count: { select: { annotations: true } } },
+      });
+      if (sample._count.annotations && sample.planId !== planId)
+        throw new DomainError(
+          "INVALID_STATE",
+          "已有标注的图片不能更换产品类别",
+        );
+      return tx.sample.update({
+        where: { id },
+        data: { planId, taskId: null },
       });
     });
   }
@@ -268,12 +313,15 @@ export class SamplesController {
         where: { id, deletedAt: null },
         include: { task: true, _count: { select: { annotations: true } } },
       });
-      if (sample._count.annotations && sample.task?.planId !== task.planId)
+      if (sample._count.annotations && sample.planId !== task.planId)
         throw new DomainError(
           "INVALID_STATE",
           "此图片已有标注，不能更换到不同检查方案",
         );
-      return tx.sample.update({ where: { id }, data: { taskId } });
+      return tx.sample.update({
+        where: { id },
+        data: { taskId, planId: task.planId },
+      });
     });
   }
   @Roles("ADMIN") @Delete(":id") async remove(

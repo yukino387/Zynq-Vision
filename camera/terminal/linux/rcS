@@ -3,7 +3,7 @@ set -eu
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
-mkdir -p /dev/pts /dev/input /run /tmp /var/lib/vision/jobs /boot
+mkdir -p /dev/pts /dev/input /run /tmp /var/lib/vision/model /boot
 mount -t devpts devpts /dev/pts
 mount -t tmpfs -o mode=755,nosuid,nodev tmpfs /run
 mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /tmp
@@ -35,10 +35,6 @@ if ! ifconfig eth0 2>/dev/null | grep -Eq "inet addr:[1-9]"; then
 fi
 # The FAT boot partition is the PC-managed transfer area, mounted read-only.
 if mount -t vfat -o ro,nodev,nosuid,noexec /dev/mmcblk0p1 /boot; then
-    for package in /boot/vision/*.zip; do
-        [ -f "$package" ] || continue
-        python3 /usr/local/bin/vision-install-job.py "$package" || echo "Job import failed: $package" >&2
-    done
     if [ -f /boot/vision/connection.json ]; then
         cp /boot/vision/connection.json /var/lib/vision/connection.json
         chmod 600 /var/lib/vision/connection.json

@@ -4,6 +4,11 @@
 #include <cmath>
 
 namespace terminal {
+bool product_classes_match(const std::vector<std::string>& product, const std::vector<std::string>& model) {
+    if(product.empty() || product.size()>6 || model.size()!=6)return false;
+    for(size_t i=0;i<model.size();++i)if(model[i]!=(i<product.size()?product[i]:"_unused_"+std::to_string(i)))return false;
+    return true;
+}
 const char* name(Result result) {
     switch(result) { case Result::Pass:return "PASS"; case Result::Fail:return "FAIL"; case Result::Review:return "REVIEW"; default:return "ERROR"; }
 }
@@ -21,6 +26,10 @@ Decision evaluate(const Rules& rules, const std::vector<Box>& boxes, bool has_ou
     std::array<bool,6> configured{};
     for(const auto& c:rules.checks) {
         if(c.class_id>=rules.classes || configured[c.class_id] || c.maximum<c.minimum) return result;
+        if(c.positioned) {
+            for(auto v:c.region)if(!std::isfinite(v) || v<0 || v>1)return result;
+            if(c.region[2]<=0 || c.region[3]<=0 || c.region[0]+c.region[2]>1.000001 || c.region[1]+c.region[3]>1.000001)return result;
+        }
         configured[c.class_id]=true;
     }
     const auto& r=rules.region;
@@ -33,6 +42,8 @@ Decision evaluate(const Rules& rules, const std::vector<Box>& boxes, bool has_ou
         const double x=(b.x1+b.x2)/832.0,y=(b.y1+b.y2)/832.0;
         if(x<r[0] || y<r[1] || x>r[0]+r[2] || y>r[1]+r[3]) { ++result.outside;continue; }
         if(b.confidence<.35) continue;
+        const auto check=std::find_if(rules.checks.begin(),rules.checks.end(),[&](const Check& c){return c.class_id==b.class_id;});
+        if(check!=rules.checks.end() && check->positioned){const auto& p=check->region;if(x<p[0] || x>p[0]+p[2] || y<p[1] || y>p[1]+p[3])continue;}
         if(b.class_id>=rules.classes) { if(b.confidence>=rules.confidence) unexpected=true;else uncertain_extra=true; }
         else if(b.confidence>=rules.confidence) ++count[b.class_id];else ++uncertain[b.class_id];
     }
@@ -79,12 +90,14 @@ std::vector<Box> detect(const int8_t* out0,const int8_t* out1) {
 }
 // Conservative on-device quality gate. Server recalculates quality from stored evidence.
 bool quality(const uint16_t* pixels) {
-    double mean=0,lap=0,squares=0; unsigned n=0;
-    auto luma=[&](unsigned x,unsigned y){const unsigned p=pixels[y*416+x],r=p>>11,g=(p>>5)&63,b=p&31;return (19595*((r<<3)|(r>>2))+38470*((g<<2)|(g>>4))+7471*((b<<3)|(b>>2))+32768)>>16;};
+    unsigned mean=0,n=0;int lap=0;uint64_t squares=0;
+    auto luma=[&](unsigned x,unsigned y){const unsigned p=pixels[y*416+x],r=p>>11,g=(p>>5)&63,b=p&31;return int((19595*((r<<3)|(r>>2))+38470*((g<<2)|(g>>4))+7471*((b<<3)|(b>>2))+32768)>>16);};
     for(unsigned y=4;y<412;y+=4)for(unsigned x=4;x<412;x+=4) {
-        const double v=luma(x,y),d=4*v-luma(x-4,y)-luma(x+4,y)-luma(x,y-4)-luma(x,y+4);
-        mean+=v;lap+=d;squares+=d*d;++n;
+        const int v=luma(x,y),d=4*v-luma(x-4,y)-luma(x+4,y)-luma(x,y-4)-luma(x,y+4);
+        mean+=v;lap+=d;squares+=unsigned(d*d);++n;
     }
-    return mean/n>=30 && mean/n<=230 && squares/n-(lap/n)*(lap/n)>=20;
+    // Integer sums are exact here: |d| <= 1020, n = 10404; only squares needs 64 bits.
+    const double average=double(mean)/n,lap_average=double(lap)/n;
+    return average>=30 && average<=230 && double(squares)/n-lap_average*lap_average>=20;
 }
 }

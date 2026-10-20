@@ -120,6 +120,17 @@ export function evaluateInspection(input: {
       continue;
     }
     if (box.confidence < 0.35) continue;
+    const checkRegion = rules.checks.find(
+      (check) => check.classId === box.classId,
+    )?.region;
+    if (
+      checkRegion &&
+      (x < checkRegion.x ||
+        x > checkRegion.x + checkRegion.width ||
+        y < checkRegion.y ||
+        y > checkRegion.y + checkRegion.height)
+    )
+      continue;
     const count = counts[box.classId];
     if (!count) {
       if (box.confidence >= acceptance.confidence) unexpected = true;
@@ -136,7 +147,9 @@ export function evaluateInspection(input: {
           ? "REVIEW"
           : "PASS";
     return {
-      ...check,
+      classId: check.classId,
+      min: check.min,
+      max: check.max,
       label: rules.classes[check.classId]!,
       count,
       uncertain,
@@ -151,7 +164,7 @@ export function evaluateInspection(input: {
       failed
         .map(
           (f) =>
-            `${f.label}：确认 ${f.count} 个${f.uncertain ? `，待确认 ${f.uncertain} 个` : ""}，要求 ${f.min === f.max ? f.min : `${f.min}–${f.max}`} 个`,
+            `${f.label}：${rules.checks.find((c) => c.classId === f.classId)?.region ? "指定位置内" : ""}确认 ${f.count} 个${f.uncertain ? `，待确认 ${f.uncertain} 个` : ""}，要求 ${f.min === f.max ? f.min : `${f.min}–${f.max}`} 个`,
         )
         .join("；"),
     );

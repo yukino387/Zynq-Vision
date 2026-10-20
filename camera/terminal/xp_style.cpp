@@ -81,7 +81,6 @@ void draw(lv_event_t* event) {
         fill(layer,x,y,w,h,color,2);edge(layer,x+1,y+1,w-2,h-2,checked?0x153e8c:0x74a8f9,checked?0x17469e:0x1a53b0);
     }else if(kind==Skin::Start){
         for(int row=0;row<h;++row){int inset=row<4?4-row:row>h-7?(row-h+7)/2:0;uint32_t c=assets::start_profile[std::min(row,29)];if(pressed||checked)c=mix(c,0x123d0b,380,1000);else if(hover)c=mix(c,0xffffff,100,1000);fill(layer,x,y+row,w-inset,1,c);}
-        image(layer,assets::start_logo,x+8,y+3);
     }else if(kind==Skin::Menu || kind==Skin::MenuBar){
         if(hover || pressed || checked || (state&LV_STATE_FOCUSED)){fill(layer,x,y,w,h,selection);}
     }else if(kind==Skin::Combo){

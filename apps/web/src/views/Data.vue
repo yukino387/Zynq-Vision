@@ -58,22 +58,16 @@ const filterTask = ref(""),
   taskOptions = ref<Task[]>([]),
   batchNote = ref("");
 const importOpen = ref(false),
-  importTaskId = ref("");
+  importTaskId = ref(""),
+  importPlanId = ref("");
 const importInput = ref<HTMLInputElement | null>(null);
-const importTask = computed(() =>
-  taskOptions.value.find((t) => t.id === importTaskId.value),
-);
-const importTaskClasses = computed(() =>
-  Array.isArray(importTask.value?.plan?.rules?.classes)
-    ? importTask.value.plan.rules.classes
-    : [],
-);
 const deleteRequest = ref<{
   kind: "samples" | "datasets" | "tasks";
   rows: Named[];
 } | null>(null);
 const advancing = ref(false);
-const assignmentTaskId = ref("");
+const assignmentTaskId = ref(""),
+  assignmentPlanId = ref("");
 const annotationTasks = computed(() =>
   taskOptions.value.filter(
     (t) =>
@@ -242,13 +236,16 @@ watch(
   () => {
     creatingDataset.value = tab.value === "datasets";
     taskPlanId.value = String(route.query.planId ?? "");
+    list.planId.value = sampleTabs.includes(tab.value)
+      ? String(route.query.planId ?? "")
+      : "";
     if (auth.engineer)
       void api<{ items: Task[] }>("/tasks?realOnly=true&pageSize=100")
         .then((r) => {
           taskOptions.value = r.items;
         })
         .catch(notices.error);
-    if (auth.engineer && tab.value === "tasks")
+    if (auth.engineer)
       void api<{ items: InspectionPlan[] }>("/plans?pageSize=100")
         .then((r) => {
           plans.value = r.items.filter(
@@ -433,6 +430,7 @@ async function reviewRows(rows: Named[], verdict: string, note = "") {
 }
 async function openImport() {
   const preferredTask = filterTask.value || tasks.selected;
+  importPlanId.value = String(route.query.planId ?? "");
   importTaskId.value = annotationTasks.value.some((t) => t.id === preferredTask)
     ? preferredTask
     : "";
@@ -592,6 +590,17 @@ async function action(id: string, type: string) {
     busy.value = false;
   }
 }
+watch(
+  [() => route.query.sampleId, tab],
+  ([sampleId]) => {
+    if (typeof sampleId === "string" && sampleTabs.includes(tab.value))
+      void open(
+        { id: sampleId, name: "", createdAt: "" },
+        tab.value === "annotation",
+      );
+  },
+  { immediate: true },
+);
 async function selectDataset() {
   try {
     datasets.value = (
@@ -665,6 +674,7 @@ async function upload(e: Event) {
           JSON.stringify({
             source: "IMPORT",
             taskId: importTaskId.value || undefined,
+            planId: importPlanId.value || undefined,
             clientId: crypto.randomUUID(),
             idempotencyKey: crypto.randomUUID(),
             localSequence: 0,
@@ -767,13 +777,44 @@ async function nextAnnotation(saved = false) {
       notices.add(
         list.total.value
           ? "已到当前筛选末尾，可返回列表继续选择"
-          : "当前列表已全部处理，可切换筛选或整理数据集",
+          : "当前列表已全部处理，可选择产品开始训练",
       );
     }
   } catch (e) {
     notices.error(e);
   } finally {
     advancing.value = false;
+  }
+}
+async function assignProduct() {
+  if (!sample.value || !assignmentPlanId.value || busy.value) return;
+  busy.value = true;
+  try {
+    await post(`/samples/${sample.value.id}/product`, {
+      planId: assignmentPlanId.value,
+    });
+    sample.value = await api<Sample>(`/samples/${sample.value.id}`);
+    annotating.value = true;
+  } catch (e) {
+    notices.error(e);
+  } finally {
+    busy.value = false;
+  }
+}
+async function discardSample() {
+  if (!sample.value || busy.value) return;
+  busy.value = true;
+  try {
+    await post(`/samples/${sample.value.id}/review`, {
+      verdict: "REJECT",
+      note: "标注时弃用",
+      hard: sample.value.hard,
+    });
+    await nextAnnotation(true);
+  } catch (e) {
+    notices.error(e);
+  } finally {
+    busy.value = false;
   }
 }
 async function saveAnnotation(next = false) {
@@ -799,10 +840,10 @@ async function saveAnnotation(next = false) {
           tab === "annotation"
             ? "按方案中的对象类别框选标注。缺件由规则判断，不为不存在的部件画框。"
             : tab === "datasets"
-              ? "整理已标注样本，由管理员审核后冻结训练版本。"
+              ? "选择已完成标注的图片；训练时自动生成固定版本。"
               : tab === "samples"
                 ? auth.engineer
-                  ? "整理采集与导入的图片，完成标注并提交管理员审核。"
+                  ? "标注时完成图片筛选，完成后可直接用于训练。"
                   : "查看采样结果和审核状态；需要补充时按任务重新采集。"
                 : tab === "tasks"
                   ? "按产品方案安排采样；工人按任务中的摆放指引完成采集。"
@@ -918,6 +959,17 @@ async function saveAnnotation(next = false) {
     </div>
   </section>
   <form class="toolbar" @submit.prevent="list.filter">
+    <select
+      v-if="sampleTabs.includes(tab)"
+      v-model="list.planId.value"
+      aria-label="产品"
+      @change="list.filter"
+    >
+      <option value="">全部产品</option>
+      <option v-for="p in plans" :key="p.id" :value="p.id">
+        {{ p.rules.product }} · {{ p.name }}
+      </option>
+    </select>
     <input
       v-model="list.search.value"
       type="search"
@@ -925,7 +977,7 @@ async function saveAnnotation(next = false) {
       placeholder="搜索名称或编号…"
     />
     <select
-      v-if="sampleTabs.includes(tab)"
+      v-if="sampleTabs.includes(tab) && route.query.taskId"
       v-model="filterTask"
       aria-label="采样任务"
     >
@@ -1009,13 +1061,18 @@ async function saveAnnotation(next = false) {
     ><span class="right inline-count">{{ list.total.value }} 条记录</span>
   </form>
   <div v-if="tab === 'annotation'" class="data-next-action">
-    <span>默认展示待标注的真实图片；完成标注后可整理训练数据集。</span
-    ><RouterLink to="/data/samples?annotation=complete"
-      >整理已标注样本 →</RouterLink
+    <span>完成标注即可训练；不清晰或无用的图片可直接弃用。</span
+    ><RouterLink
+      :to="{
+        name: 'models',
+        params: { tab: 'training' },
+        query: { planId: list.planId.value || undefined },
+      }"
+      >开始训练 →</RouterLink
     >
   </div>
   <div
-    v-if="sampleTabs.includes(tab) && auth.engineer"
+    v-if="sampleTabs.includes(tab) && auth.engineer && route.query.datasetId"
     class="data-next-action"
   >
     <label class="check-row"
@@ -1053,58 +1110,67 @@ async function saveAnnotation(next = false) {
     >
       删除所选图片
     </button>
-    <select v-model="assignmentTaskId" aria-label="关联到采样任务">
-      <option value="">选择标注方案对应的任务</option>
-      <option v-for="t in annotationTasks" :key="t.id" :value="t.id">
-        {{ t.name }} · {{ t.plan?.rules.product }}
-      </option>
-    </select>
     <button
-      :disabled="busy || !assignmentTaskId"
-      @click="assignTask(checkedRows)"
+      :disabled="busy"
+      @click="reviewRows(checkedRows, 'REJECT', '标注时弃用')"
     >
-      关联采样任务
+      弃用所选图片
     </button>
-    <template v-if="auth.admin"
-      ><input
-        v-model="batchNote"
-        aria-label="批量审核备注"
-        placeholder="审核备注（可选）"
-        maxlength="2000"
-      /><button
-        v-for="[value, label] in reviewOptions"
-        :key="value"
-        :disabled="busy"
-        @click="reviewRows(checkedRows, value!, batchNote)"
-      >
-        批量{{ label }}
-      </button></template
-    >
-    <template v-if="tab === 'samples'"
-      ><template v-if="missingAnnotation"
-        ><span class="tone-warn">所选样本尚未完成标注</span
-        ><button @click="open(missingAnnotation, true)">
-          先完成标注
-        </button></template
-      ><select v-model="datasetId" aria-label="目标数据集">
-        <option value="">选择草稿数据集</option>
-        <option v-for="d in datasets" :key="d.id" :value="d.id">
-          {{ displayName(d.name) }} / V{{ d.version }}
-        </option></select
-      ><button
-        class="primary"
-        @click="addItems"
-        :disabled="busy || !datasetId || !!missingAnnotation"
-      >
-        加入数据集
-      </button>
+    <details>
+      <summary>高级整理</summary>
+      <select v-model="assignmentTaskId" aria-label="关联到采样任务">
+        <option value="">选择标注方案对应的任务</option>
+        <option v-for="t in annotationTasks" :key="t.id" :value="t.id">
+          {{ t.name }} · {{ t.plan?.rules.product }}
+        </option>
+      </select>
       <button
-        @click="openDatasetCreation"
-        :disabled="busy || !!missingAnnotation"
+        :disabled="busy || !assignmentTaskId"
+        @click="assignTask(checkedRows)"
       >
-        新建数据集并加入
-      </button></template
-    >
+        关联采样任务
+      </button>
+      <template v-if="auth.admin"
+        ><input
+          v-model="batchNote"
+          aria-label="批量审核备注"
+          placeholder="审核备注（可选）"
+          maxlength="2000"
+        /><button
+          v-for="[value, label] in reviewOptions"
+          :key="value"
+          :disabled="busy"
+          @click="reviewRows(checkedRows, value!, batchNote)"
+        >
+          批量{{ label }}
+        </button></template
+      >
+      <template v-if="tab === 'samples'"
+        ><template v-if="missingAnnotation"
+          ><span class="tone-warn">所选样本尚未完成标注</span
+          ><button @click="open(missingAnnotation, true)">
+            先完成标注
+          </button></template
+        ><select v-model="datasetId" aria-label="目标数据集">
+          <option value="">选择草稿数据集</option>
+          <option v-for="d in datasets" :key="d.id" :value="d.id">
+            {{ displayName(d.name) }} / V{{ d.version }}
+          </option></select
+        ><button
+          class="primary"
+          @click="addItems"
+          :disabled="busy || !datasetId || !!missingAnnotation"
+        >
+          加入数据集
+        </button>
+        <button
+          @click="openDatasetCreation"
+          :disabled="busy || !!missingAnnotation"
+        >
+          新建数据集并加入
+        </button></template
+      >
+    </details>
   </div>
   <AsyncState
     :loading="list.loading.value"
@@ -1191,7 +1257,10 @@ async function saveAnnotation(next = false) {
               >{{ chinese(r.source) }}</span
             >
           </div>
-          <p v-if="lastReview(r)" class="sample-review-note">
+          <p
+            v-if="lastReview(r) && r.status === 'REVIEWED'"
+            class="sample-review-note"
+          >
             <b>{{ chinese(lastReview(r)!.verdict) }}</b>
             {{ lastReview(r)!.note || "无备注" }}
           </p>
@@ -1564,17 +1633,14 @@ async function saveAnnotation(next = false) {
         删除图片
       </button>
     </div>
-    <div v-if="auth.engineer && !sample.task?.plan" class="toolbar">
+    <div v-if="auth.engineer && !sample.plan" class="toolbar">
       <span>先关联任务即可标注：</span
       ><select v-model="assignmentTaskId" aria-label="当前图片的采样任务">
         <option value="">选择任务与产品方案</option>
         <option v-for="t in annotationTasks" :key="t.id" :value="t.id">
           {{ t.name }} · {{ t.plan?.rules.product }}
         </option></select
-      ><button
-        :disabled="busy || !assignmentTaskId"
-        @click="assignTask([sample])"
-      >
+      ><button :disabled="busy || !assignmentPlanId" @click="assignProduct">
         关联并启用标注
       </button>
     </div>
@@ -1586,6 +1652,7 @@ async function saveAnnotation(next = false) {
       :advancing="advancing"
       @saved="saveAnnotation"
       @skip="nextAnnotation()"
+      @discard="discardSample"
     />
     <div v-else class="sample-review-workspace">
       <div>
@@ -1598,7 +1665,9 @@ async function saveAnnotation(next = false) {
           <dl class="key-values detail-fields">
             <template v-for="[key, label] in qualityFields" :key="key"
               ><dt>{{ label }}</dt>
-              <dd>{{ qualityValue(sample.quality.metrics[key]) }}</dd></template
+              <dd>
+                {{ qualityValue(sample.quality.metrics[key]) }}
+              </dd></template
             >
           </dl>
           <p class="note">亮度与清晰度仅供图片质量检查，不代表产品检查结论。</p>
@@ -1846,18 +1915,14 @@ async function saveAnnotation(next = false) {
     @close="!busy && (importOpen = false)"
   >
     <label
-      >图片所属采样任务<select v-model="importTaskId" :disabled="busy">
-        <option value="">不关联任务（仅入库，暂不能标注）</option>
-        <option v-for="t in annotationTasks" :key="t.id" :value="t.id">
-          {{ t.name
-          }}{{ t.plan ? ` · ${t.plan.rules.product}` : " · 未关联方案" }}
+      >图片所属产品<select v-model="importPlanId" :disabled="busy">
+        <option value="">暂不选择，标注前补选</option>
+        <option v-for="p in plans" :key="p.id" :value="p.id">
+          {{ p.rules.product }} · {{ p.name }}
         </option>
       </select></label
     >
-    <p v-if="importTaskClasses.length" class="note">
-      标注类别：{{ importTaskClasses.join("、") }}
-    </p>
-    <p v-else class="note">要继续框选标注，请选择已关联检查方案的采样任务。</p>
+    <p class="note">导入后即可标注，无需先创建采样任务。</p>
     <button class="primary" :disabled="busy" @click="importInput?.click()">
       {{
         importProgress.total

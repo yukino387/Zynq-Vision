@@ -1,9 +1,28 @@
 import { z } from "zod";
+export const planPurposeSchema = z.enum([
+  "PRESENCE",
+  "COUNT",
+  "APPEARANCE",
+  "POSITION",
+]);
+
+export const inspectionRegionSchema = z
+  .object({
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    width: z.number().positive().max(1),
+    height: z.number().positive().max(1),
+  })
+  .strict()
+  .refine(
+    (r) => r.x + r.width <= 1.000001 && r.y + r.height <= 1.000001,
+    "检查区域不能超出画面",
+  );
 
 export const planRulesSchema = z
   .object({
     product: z.string().trim().min(1).max(120),
-    purpose: z.enum(["PRESENCE", "COUNT", "APPEARANCE"]),
+    purpose: planPurposeSchema,
     classes: z
       .array(z.string().trim().min(1).max(40))
       .min(1)
@@ -25,18 +44,7 @@ export const planRulesSchema = z
         "参考图片使用 HTTP 或 HTTPS 地址",
       ),
     coordinateSpace: z.literal("NORMALIZED_FRAME"),
-    region: z
-      .object({
-        x: z.number().min(0).max(1),
-        y: z.number().min(0).max(1),
-        width: z.number().positive().max(1),
-        height: z.number().positive().max(1),
-      })
-      .strict()
-      .refine(
-        (r) => r.x + r.width <= 1.000001 && r.y + r.height <= 1.000001,
-        "检查区域不能超出画面",
-      ),
+    region: inspectionRegionSchema,
     checks: z
       .array(
         z
@@ -44,6 +52,7 @@ export const planRulesSchema = z
             classId: z.number().int().min(0).max(5),
             min: z.number().int().min(0).max(100),
             max: z.number().int().min(0).max(100),
+            region: inspectionRegionSchema.optional(),
           })
           .strict()
           .refine((r) => r.max >= r.min, "最大数量不能小于最小数量"),
@@ -71,6 +80,12 @@ export const createPlanSchema = z
   })
   .strict();
 export type PlanRules = z.infer<typeof planRulesSchema>;
+export interface InspectionScenario {
+  id: string;
+  name: string;
+  description: string;
+  rules: PlanRules;
+}
 export interface InspectionPlan {
   id: string;
   name: string;

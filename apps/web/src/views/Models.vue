@@ -3,6 +3,7 @@ import InfoFields from "../components/InfoFields.vue";
 import { chinese, displayName } from "@vision/shared";
 import { ref, computed, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import type { InspectionPlan } from "@vision/contracts";
 import type { Named, Dataset, Model } from "../types";
 import type { TrainingOptions } from "@vision/contracts";
 import { useAuthStore } from "../stores/auth";
@@ -15,8 +16,9 @@ import AsyncState from "../components/AsyncState.vue";
 import SortableTh from "../components/SortableTh.vue";
 import Pager from "../components/Pager.vue";
 import Drawer from "../components/Drawer.vue";
-const legacyTarget = (id: unknown) =>
-  devices.devices.some((d) => d.id === id && d.executionMode === "BARE_METAL");
+
+const canRollback = (id: unknown) =>
+  devices.devices.some((d) => d.id === id && d.capabilities.modelUpdate);
 const metricFps = (row: Named): number | null => {
   const value = (row.metrics as { fps?: unknown } | null)?.fps;
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -45,9 +47,12 @@ const form = ref(false),
   datasets = ref<Dataset[]>([]),
   models = ref<Model[]>([]),
   datasetId = ref(""),
+  productId = ref(""),
+  products = ref<InspectionPlan[]>([]),
   modelId = ref(""),
   deviceId = ref(""),
   name = ref(""),
+  confirmDeploy = ref(false),
   busy = ref(false),
   importing = ref(false),
   importClasses = ref(""),
@@ -62,13 +67,11 @@ const trainingOptions = ref<TrainingOptions>({
   amp: true,
   workers: 4,
 });
-const approvalNote = ref(""),
-  approvalConfirmed = ref(false);
+const approvalNote = ref("");
 watch(
   () => detail.value?.id,
   () => {
     approvalNote.value = "";
-    approvalConfirmed.value = false;
   },
 );
 async function approveModel() {
@@ -76,14 +79,13 @@ async function approveModel() {
   busy.value = true;
   try {
     await post(`/models/${detail.value.id}/approve`, {
-      confirm: approvalConfirmed.value,
-      note: approvalNote.value,
+      confirm: true,
+      note: approvalNote.value.trim() || "管理员确认可用于生产",
     });
     detail.value = await api<Named>(`/models/${detail.value.id}`);
     await list.load();
     approvalNote.value = "";
-    approvalConfirmed.value = false;
-    notices.add("管理员发布批准已记录，尚未激活到设备");
+    notices.add("模型已确认可用于生产，可在准备生产时选用");
   } catch (e) {
     notices.error(e);
   } finally {
@@ -93,15 +95,15 @@ async function approveModel() {
 const chosenDataset = computed(() =>
   datasets.value.find((d) => d.id === datasetId.value),
 );
-const trainableDataset = (dataset: Dataset) =>
-  dataset.status === "FROZEN" && dataset._count.items >= 2;
+const trainableDataset = (dataset: Dataset) => dataset._count.items >= 2;
 const trainingBlocker = computed(() => {
+  if (tab.value === "training") return productId.value ? "" : "请选择训练产品";
+  if (productId.value) return "";
   const dataset = chosenDataset.value;
   if (!dataset) return "还没有真实数据集。先选择已标注图片并加入数据集。";
   if (dataset._count.items < 2)
     return `“${dataset.name}”当前有 ${dataset._count.items} 张样本，训练至少需要 2 张已标注样本。`;
-  if (dataset.status !== "FROZEN")
-    return `“${dataset.name}”尚未锁定。请由管理员审核样本，再锁定数据集版本。`;
+
   return "";
 });
 function trainingError(value: unknown) {
@@ -164,16 +166,6 @@ const trainingSummary = (row: Named) => {
 /** 列表项是松散类型，收据里的 resident 表示这次是设备本地切换、没传字节。 */
 const switchedLocally = (r: Named) =>
   Boolean((r.receipt as { resident?: boolean } | null)?.resident);
-/** 所选设备上已经有这个版本的模型：提交后只切换，不传字节。 */
-const willSwitch = computed(() => {
-  const version = models.value.find((m) => m.id === modelId.value)?.version;
-  if (!version) return false;
-  return Boolean(
-    devices.devices
-      .find((d) => d.id === deviceId.value)
-      ?.reportedState.models?.some((m) => m.version === version),
-  );
-});
 watch(
   () => devices.recent[0],
   (e) => {
@@ -183,12 +175,21 @@ watch(
 );
 async function openForm() {
   try {
-    if (tab.value !== "deployments")
+    if (tab.value === "training") {
+      products.value = (
+        await api<{ items: InspectionPlan[] }>("/plans?pageSize=100")
+      ).items;
+      productId.value = String(
+        route.query.planId ??
+          (products.value.length === 1 ? products.value[0]!.id : ""),
+      );
+    }
+    if (tab.value !== "deployments" && tab.value !== "training")
       datasets.value = (
         await api<{ items: Dataset[] }>(
           tab.value === "training"
             ? "/datasets?realOnly=true&pageSize=100"
-            : "/datasets?status=FROZEN&realOnly=true&pageSize=100",
+            : "/datasets?realOnly=true&pageSize=100",
         )
       ).items;
     if (tab.value !== "training")
@@ -237,7 +238,9 @@ async function create() {
       tab.value === "training"
         ? {
             name: name.value,
-            datasetId: datasetId.value,
+            ...(productId.value
+              ? { planId: productId.value }
+              : { datasetId: datasetId.value }),
             options: trainingOptions.value,
           }
         : tab.value === "benchmarks"
@@ -247,7 +250,11 @@ async function create() {
               datasetId: datasetId.value,
               deviceId: deviceId.value,
             }
-          : { deviceId: deviceId.value, modelId: modelId.value };
+          : {
+              deviceId: deviceId.value,
+              modelId: modelId.value,
+              confirm: confirmDeploy.value,
+            };
     await post(endpoint.value, body);
     await list.load();
     closeForm();
@@ -261,7 +268,10 @@ async function create() {
 async function action(id: string, type: string) {
   busy.value = true;
   try {
-    await post(`${endpoint.value}/${id}/${type}`);
+    await post(
+      `${endpoint.value}/${id}/${type}`,
+      type === "rollback" ? { confirm: true } : undefined,
+    );
     await list.load();
     notices.add("操作已完成");
   } catch (e) {
@@ -332,11 +342,11 @@ watch(
       <p>
         {{
           tab === "training"
-            ? "选择已准备好的数据集，开始 GPU 训练；完成后可查看并下载模型。"
+            ? "选择产品，使用已完成标注的图片训练，数据版本自动留存。"
             : tab === "registry"
               ? "查看模型效果、下载模型包，并由管理员批准发布。"
               : tab === "deployments"
-                ? "Linux 板端通过检测作业领取已批准模型；此处保留旧裸机直接部署记录。"
+                ? "选择模型和设备后下发，设备确认生效后即可回到现场工作台检测。"
                 : "评估候选模型，确认效果后再发布到设备。"
         }}
       </p>
@@ -344,11 +354,7 @@ watch(
     <div class="heading-actions">
       <button v-if="tab === 'registry'" @click="importing = true">
         导入模型制品</button
-      ><button
-        v-else-if="tab !== 'deployments' || legacyTarget(devices.current?.id)"
-        class="primary"
-        @click="openForm"
-      >
+      ><button v-else class="primary" @click="openForm">
         {{
           tab === "training"
             ? "创建训练"
@@ -364,9 +370,9 @@ watch(
       <span class="workspace-index">06 / 实验工作区</span>
       <h2>训练实验</h2>
       <p class="banner-note">
-        先完成样本标注，再将数据集锁定为训练版本；训练完成后自动生成模型包。
+        完成图片标注后选择产品训练；系统自动固定图片与标注版本，完成后生成模型包。
         <RouterLink to="/data/annotation">去标注</RouterLink> ·
-        <RouterLink to="/data/datasets">查看数据集</RouterLink>
+        <RouterLink to="/data/datasets">查看训练快照</RouterLink>
       </p>
     </div>
     <div class="experiment-register">
@@ -441,13 +447,6 @@ watch(
         >评估完成后显示实际指标</small
       >
     </div>
-  </section>
-  <section v-if="tab === 'deployments'" class="panel terminal-model-guide">
-    <p>
-      当前 Linux
-      板端的模型和检查规则随作业包一起发布，启用时校验模型与作业身份。
-    </p>
-    <RouterLink to="/production" class="text-button">创建板端作业</RouterLink>
   </section>
   <form class="toolbar" @submit.prevent="list.filter">
     <input v-model="list.search.value" placeholder="搜索模型或任务…" /><select
@@ -638,7 +637,7 @@ watch(
             <button @click="open(r)">执行证据</button
             ><button
               v-if="
-                legacyTarget(r.deviceId) &&
+                canRollback(r.deviceId) &&
                 r.previousVersion &&
                 ['ACTIVE', 'FAILED'].includes(r.status ?? '')
               "
@@ -754,7 +753,7 @@ watch(
                 ><button
                   v-if="
                     tab === 'deployments' &&
-                    legacyTarget(r.deviceId) &&
+                    canRollback(r.deviceId) &&
                     r.previousVersion &&
                     ['ACTIVE', 'FAILED'].includes(r.status ?? '')
                   "
@@ -808,7 +807,18 @@ watch(
     ><form @submit.prevent="create">
       <label v-if="tab !== 'deployments'"
         >任务名称<input v-model="name" required /></label
-      ><label v-if="tab !== 'deployments'"
+      ><label v-if="tab === 'training'"
+        >训练产品<select v-model="productId" required>
+          <option value="" disabled>选择产品</option>
+          <option v-for="p in products" :key="p.id" :value="p.id">
+            {{ p.rules.product }} · {{ p.name }}
+          </option>
+        </select></label
+      >
+      <p v-if="tab === 'training'" class="note">
+        使用该产品已完成标注、未弃用的真实图片，自动生成本次训练的数据版本。
+      </p>
+      <label v-if="tab !== 'deployments' && tab !== 'training'"
         >{{ tab === "training" ? "训练数据集" : "评估数据集"
         }}<select v-model="datasetId" required>
           <option value="">选择数据集</option>
@@ -826,63 +836,8 @@ watch(
           </option>
         </select></label
       >
-      <div v-if="tab === 'training' && trainingBlocker" class="training-empty">
-        <b>需要先准备训练数据</b>
-        <p>{{ trainingBlocker }}</p>
-        <div class="row-actions">
-          <RouterLink
-            class="table-action"
-            :to="{
-              name: 'data',
-              params: { tab: 'samples' },
-              query: {
-                annotation: 'complete',
-                ...(chosenDataset?.status === 'DRAFT'
-                  ? { datasetId: chosenDataset.id }
-                  : {}),
-              },
-            }"
-            @click="form = false"
-            >添加已标注样本</RouterLink
-          >
-          <RouterLink
-            v-if="auth.admin"
-            class="table-action"
-            to="/data/review"
-            @click="form = false"
-            >审核样本</RouterLink
-          >
-          <RouterLink
-            v-if="chosenDataset"
-            class="table-action"
-            :to="{
-              name: 'data',
-              params: { tab: 'datasets' },
-              query: { open: chosenDataset.id },
-            }"
-            @click="form = false"
-            >检查并锁定数据集</RouterLink
-          >
-          <RouterLink
-            v-else
-            class="table-action"
-            to="/data/datasets?create=1"
-            @click="form = false"
-            >创建数据集</RouterLink
-          >
-        </div>
-      </div>
-      <p
-        v-if="
-          tab === 'training' &&
-          chosenDataset &&
-          datasetSources(chosenDataset)?.SIMULATION
-        "
-        class="note"
-      >
-        此数据集含
-        {{ datasetSources(chosenDataset).SIMULATION }}
-        张模拟样本，适合验证操作流程；效果评估请使用真实图片。
+      <p v-if="tab === 'training' && trainingBlocker" class="note">
+        {{ trainingBlocker }}
       </p>
       <template v-if="tab === 'training'">
         <fieldset class="training-modes">
@@ -976,7 +931,7 @@ watch(
           /></label>
         </details>
         <p class="note">
-          使用管理员审核后的冻结数据，类别沿用采样方案，当前硬件模板最多支持六类。没有验证集时按种子划分
+          使用已完成标注的真实数据，类别沿用产品配置，当前硬件模板最多支持六类。没有验证集时按种子划分
           20%
           留出验证，至少需要两张样本。训练完成后可下载模型包、训练记录和检查点。
         </p>
@@ -1000,23 +955,19 @@ watch(
             v-for="d in devices.devices"
             :key="d.id"
             :value="d.id"
-            :disabled="
-              d.executionMode !== 'BARE_METAL' || !d.capabilities.modelUpdate
-            "
+            :disabled="!d.capabilities.modelUpdate"
           >
             {{ displayName(d.name) }}
-            {{
-              d.executionMode !== "BARE_METAL"
-                ? "· 请通过检测作业领取模型"
-                : !d.capabilities.modelUpdate
-                  ? "· 不支持直接模型更新"
-                  : ""
-            }}
+            {{ !d.capabilities.modelUpdate ? "· 不支持模型更新" : "" }}
           </option>
         </select></label
       >
-      <p v-if="tab === 'deployments' && willSwitch" class="note">
-        该制品已经在所选设备的 SD 卡上：提交后板端跳过传输，直接切换。
+      <label v-if="tab === 'deployments'" class="confirm-line">
+        <input v-model="confirmDeploy" type="checkbox" />
+        设备正在生产或产品类别会变化时，确认停止当前生产、结束当前批次并重新开始
+      </label>
+      <p v-if="tab === 'deployments'" class="note">
+        下发模型只更新设备模型，不会创建或切换批次；产品规则请在设备页单独分配。
       </p>
       <p v-else-if="tab !== 'training'" class="note">
         请选择兼容的模型、数据集和设备。
@@ -1064,31 +1015,18 @@ watch(
       v-if="tab === 'registry' && detail.status !== 'APPROVED'"
       class="approval-gate"
     >
-      <h3>发布批准</h3>
-      <p>请由管理员核查训练结果与现场样本效果，填写验收意见后批准发布。</p>
+      <h3>确认用于生产</h3>
+      <p>请先核查训练结果与现场样本效果，再确认此版本可用于生产。</p>
       <form v-if="auth.admin" @submit.prevent="approveModel">
         <label
-          >现场验收意见<textarea
+          >验收说明（可选）<textarea
             v-model="approvalNote"
-            required
             maxlength="1000"
             rows="3"
             placeholder="记录已验证的产品、工位条件、效果及适用限制"
           />
         </label>
-        <label class="check-row"
-          ><input
-            v-model="approvalConfirmed"
-            type="checkbox"
-            required
-          />我已核查训练结果及现场效果，同意此版本进入发布流程</label
-        >
-        <button
-          class="primary"
-          :disabled="busy || !approvalConfirmed || !approvalNote.trim()"
-        >
-          批准发布资格
-        </button>
+        <button class="primary" :disabled="busy">确认可用于生产</button>
       </form>
       <p v-else>请由管理员完成发布批准。</p>
     </section>

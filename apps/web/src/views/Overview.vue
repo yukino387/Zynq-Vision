@@ -50,7 +50,7 @@ const next = computed(() => {
   if (!auth.admin)
     return {
       title: "设备、标注与模型验证",
-      body: "维护当前硬件模板，协助完成标注和训练。方案变更、数据审核与正式发布由管理员负责。",
+      body: "维护当前硬件模板，协助完成标注和训练。方案变更与正式发布由管理员负责。",
       label: "查看训练任务",
       to: "/models/training",
     };
@@ -64,9 +64,9 @@ const next = computed(() => {
   if (pendingReal.value)
     return {
       title: `${pendingReal.value} 张真实样本等待审核`,
-      body: "工人提交的数据与复核意见需要管理员确认。审核并完成标注后，才能冻结训练版本。",
+      body: "完成标注即确认图片可用于训练；不合适的图片可直接弃用。",
       label: "审核采样数据",
-      to: "/data/review",
+      to: "/data/annotation",
     };
   return {
     title: "按方案推进下一次换型",
@@ -86,16 +86,16 @@ const actions = computed(() => [
   {
     number: "02",
     title: "安排与采样",
-    body: "建立任务，工人按摆放指引采集",
-    to: "/data/tasks",
-    owner: "管理员安排 · 工人执行",
+    body: "按当前产品方案留样，不重复记为检测件数",
+    to: "/workbench",
+    owner: "现场人员留样",
   },
   {
     number: "03",
     title: "标注与审核",
     body: "标出对象，接纳或退回现场样本",
-    to: auth.admin ? "/data/review" : "/data/annotation",
-    owner: "管理员审核 · 维护人员协助",
+    to: auth.admin ? "/data/annotation" : "/data/annotation",
+    owner: "管理员 / 工程师",
   },
   {
     number: "04",
@@ -166,12 +166,12 @@ const actions = computed(() => [
       ><RouterLink to="/data/samples"
         ><Icon name="database" /><strong>{{ ready.realSamples }}</strong
         ><span>真实现场样本</span></RouterLink
-      ><RouterLink :to="auth.admin ? '/data/review' : '/data/annotation'"
+      ><RouterLink :to="auth.admin ? '/data/annotation' : '/data/annotation'"
         ><Icon name="audit" /><strong>{{
           auth.admin ? pendingReal : ready.annotatedReal
         }}</strong
         ><span>{{
-          auth.admin ? "真实样本待管理员审核" : "已完成标注"
+          auth.admin ? "真实样本待筛选与标注" : "已完成标注"
         }}</span></RouterLink
       ><RouterLink to="/models/registry"
         ><Icon name="layers" /><strong>{{ ready.candidateModels }}</strong

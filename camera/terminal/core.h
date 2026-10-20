@@ -7,8 +7,9 @@
 namespace terminal {
 enum class Result { Pass, Fail, Review, Error };
 const char* name(Result result);
+bool product_classes_match(const std::vector<std::string>& product, const std::vector<std::string>& model);
 struct Box { unsigned class_id; double confidence, x1, y1, x2, y2; };
-struct Check { unsigned class_id, minimum, maximum; };
+struct Check { unsigned class_id, minimum, maximum; bool positioned=false; std::array<double,4> region={0,0,1,1}; };
 struct Rules {
     unsigned classes = 0;
     std::array<double, 4> region = {0, 0, 1, 1};

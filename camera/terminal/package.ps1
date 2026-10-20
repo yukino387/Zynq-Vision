@@ -2,14 +2,13 @@ param([string]$UiFont = "C:/Windows/Fonts/simsun.ttc")
 $ErrorActionPreference = 'Stop'
 $output = Join-Path $PSScriptRoot 'build/delivery'
 $prefix = Join-Path $output 'rootfs'
-New-Item -ItemType Directory -Force (Join-Path $prefix 'usr/local/bin'),(Join-Path $prefix 'usr/share/vision'),(Join-Path $prefix 'etc/systemd/system'),(Join-Path $prefix 'var/lib/vision/jobs'),(Join-Path $output 'licenses'),(Join-Path $output 'kernel') | Out-Null
+New-Item -ItemType Directory -Force (Join-Path $prefix 'usr/local/bin'),(Join-Path $prefix 'usr/share/vision'),(Join-Path $prefix 'etc/systemd/system'),(Join-Path $prefix 'var/lib/vision/model'),(Join-Path $output 'licenses'),(Join-Path $output 'kernel') | Out-Null
 foreach ($name in @('vision-engine','vision-panel')) {
     $source = Join-Path $PSScriptRoot "build/arm/$name"
     $header = [System.IO.File]::ReadAllBytes($source)
     if ($header[0] -ne 127 -or $header[1] -ne 69 -or $header[2] -ne 76 -or $header[3] -ne 70 -or [BitConverter]::ToUInt16($header,18) -ne 40) { throw "Not an ARM ELF: $name" }
     Copy-Item -LiteralPath $source -Destination (Join-Path $prefix "usr/local/bin/$name")
 }
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'install_job.py') -Destination (Join-Path $prefix 'usr/local/bin/vision-install-job.py')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'manager.py') -Destination (Join-Path $prefix 'usr/local/bin/vision-manager.py')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'vision_auth.py') -Destination (Join-Path $prefix 'usr/local/bin/vision_auth.py')
 foreach ($name in @('vision-engine.service','vision-panel.service','vision-manager.service')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot "linux/$name") -Destination (Join-Path $prefix 'etc/systemd/system') }

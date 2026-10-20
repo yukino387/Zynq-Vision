@@ -12,7 +12,10 @@ import {
 } from "@nestjs/common";
 import { hash } from "bcryptjs";
 import { z } from "zod";
-import { roles, createPlanSchema } from "@vision/contracts";
+import { roles, createPlanSchema, planRulesSchema } from "@vision/contracts";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { root } from "../config.js";
 import { Prisma } from "@prisma/client";
 import { Db } from "../core/db.js";
 import { Events } from "../core/events.js";
@@ -250,6 +253,32 @@ export class TasksController {
 @Controller("api/plans")
 export class PlansController {
   constructor(@Inject(Db) private db: Db) {}
+  @Get("scenarios") async scenarios() {
+    // Reload editable server configuration; applying a template still creates a normal plan version.
+    const content = await readFile(
+      resolve(root, "config/inspection-scenarios.json"),
+      "utf8",
+    );
+    return parse(
+      z
+        .array(
+          z
+            .object({
+              id: z.string().min(1).max(64),
+              name: z.string().min(1).max(120),
+              description: z.string().max(1000),
+              rules: planRulesSchema,
+            })
+            .strict(),
+        )
+        .max(32)
+        .refine(
+          (items) =>
+            new Set(items.map((item) => item.id)).size === items.length,
+        ),
+      JSON.parse(content),
+    );
+  }
   @Get() async list(@Query() query: unknown) {
     const { q, args } = listing(query, ["name", "createdAt", "version"]);
     args.where.deletedAt = null;

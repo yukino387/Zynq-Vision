@@ -2,6 +2,7 @@ import type {
   ConnectionState,
   DeviceState,
   ModelManifest,
+  TerminalStatus,
 } from "@vision/contracts";
 export {
   defectClasses,
@@ -13,6 +14,54 @@ export {
 } from "./display.js";
 export { statusTone, type Tone } from "./status.js";
 export { evaluateInspection, assessInspectionImage } from "./acceptance.js";
+/** Business classes occupy the first slots; the fixed hardware head has six slots. */
+export function productClassesMatch(
+  product: string[],
+  model: string[],
+): boolean {
+  return (
+    product.length > 0 &&
+    product.length <= 6 &&
+    model.length === 6 &&
+    model.every((name, i) => name === (product[i] ?? `_unused_${i}`))
+  );
+}
+
+export function terminalActivity(
+  state: TerminalStatus["state"],
+  online: boolean,
+) {
+  const blocked =
+    !online || !state
+      ? "设备未连接"
+      : state.pendingRequestId
+        ? "上次记录尚未确认，请先核对保存结果"
+        : state.error
+          ? `检测异常：${state.error}`
+          : !state.model
+            ? "未部署模型"
+            : !state.product
+              ? "未分配产品方案"
+              : state.paused
+                ? "检测服务已暂停"
+                : !state.fresh
+                  ? "等待有效图像"
+                  : "";
+  const phase = {
+    STOPPED: "已停止自动检测",
+    CLEARING: "请移走当前产品，等待空场景",
+    WAITING: "自动检测 · 等待产品",
+    INSPECTING: "正在检查 · 离开后自动保存",
+    SAVING: "正在保存单件记录",
+  };
+  return {
+    label: blocked || phase[state!.passagePhase],
+    startBlocked: blocked,
+    checkBlocked:
+      blocked ||
+      (state?.production ? "自动检测进行中，请先停止后再检查一件" : ""),
+  };
+}
 export function connectionState(
   lastSeen: number | null,
   now: number,

@@ -44,7 +44,7 @@ export interface InspectionBatch {
   taskId: string;
   target: number;
   status: "OPEN" | "CLOSED";
-  execution: "HOST" | "TERMINAL";
+  productionRunId: string | null;
   snapshot: BatchSnapshot;
   createdAt: string;
   closedAt: string | null;

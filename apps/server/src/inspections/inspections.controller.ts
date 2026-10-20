@@ -30,17 +30,11 @@ export class InspectionsController {
     ]);
     if (q.reviewed) {
       if (q.reviewed === "true")
-        args.where.OR = [
-          { reviewResult: { in: ["PASS", "FAIL"] } },
-          { reviewResult: null, reviews: { some: {} } },
-        ];
+        args.where.OR = [{ reviewResult: { in: ["PASS", "FAIL"] } }];
       else
         args.where.AND = [
           {
-            OR: [
-              { reviewResult: null, reviews: { none: {} } },
-              { reviewResult: "REVIEW" },
-            ],
+            OR: [{ reviewResult: null }, { reviewResult: "REVIEW" }],
           },
         ];
     }
@@ -49,7 +43,7 @@ export class InspectionsController {
       args.where.AND = [
         {
           OR: [
-            { result: "REVIEW", reviewResult: null, reviews: { none: {} } },
+            { result: { in: ["REVIEW", "ERROR"] }, reviewResult: null },
             { reviewResult: "REVIEW" },
           ],
         },
@@ -129,12 +123,6 @@ export class ReviewsController {
       const inspection = await tx.inspection.findUniqueOrThrow({
         where: { id: dto.inspectionId },
       });
-      if (inspection.batchId && !dto.finalResult)
-        throw new DomainError(
-          "VALIDATION_ERROR",
-          "作业记录复核需要给出最终处理结论",
-          400,
-        );
       if (dto.finalResult === "REVIEW" && !dto.note.trim())
         throw new DomainError(
           "VALIDATION_ERROR",

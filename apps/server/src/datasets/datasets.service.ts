@@ -12,8 +12,12 @@ export class DatasetsService {
     @Inject(Db) private db: Db,
     @Inject(AssetsService) private assets: AssetsService,
   ) {}
-  async add(id: string, sampleIds: string[]) {
-    return this.db.$transaction(async (tx) => {
+  async add(
+    id: string,
+    sampleIds: string[],
+    transaction?: Prisma.TransactionClient,
+  ) {
+    const add = async (tx: Prisma.TransactionClient) => {
       const dataset = await tx.dataset.findUniqueOrThrow({ where: { id } });
       if (dataset.status !== "DRAFT")
         throw new DomainError(
@@ -35,7 +39,7 @@ export class DatasetsService {
         const sample = await tx.sample.findUniqueOrThrow({
           where: { id: sampleId, deletedAt: null },
           include: {
-            task: { include: { plan: true } },
+            plan: true,
             assets: true,
             annotations: {
               orderBy: { version: "desc" },
@@ -58,12 +62,11 @@ export class DatasetsService {
             404,
           );
         const snapshot = {
-          ...(sample.task?.plan
+          ...(sample.plan
             ? {
-                planId: sample.task.plan.id,
+                planId: sample.plan.id,
                 classes:
-                  (sample.task.plan.rules as { classes?: string[] }).classes ??
-                  [],
+                  (sample.plan.rules as { classes?: string[] }).classes ?? [],
               }
             : {}),
           source: sample.source,
@@ -102,10 +105,11 @@ export class DatasetsService {
         where: { id },
         include: { items: true },
       });
-    });
+    };
+    return transaction ? add(transaction) : this.db.$transaction(add);
   }
-  async freeze(id: string) {
-    return this.db.$transaction(async (tx) => {
+  async freeze(id: string, transaction?: Prisma.TransactionClient) {
+    const freeze = async (tx: Prisma.TransactionClient) => {
       const dataset = await tx.dataset.findUniqueOrThrow({
         where: { id },
         include: {
@@ -122,6 +126,61 @@ export class DatasetsService {
         },
       });
       if (dataset.status === "FROZEN") return dataset;
+      // Pin the latest completed annotations atomically when training starts.
+      for (const item of dataset.items) {
+        const sample = await tx.sample.findUniqueOrThrow({
+          where: { id: item.sampleId, deletedAt: null },
+          include: {
+            plan: true,
+            assets: true,
+            annotations: {
+              orderBy: { version: "desc" },
+              take: 1,
+              include: { boxes: true },
+            },
+          },
+        });
+        const annotation = sample.annotations[0];
+        if (
+          !annotation ||
+          annotation.status !== "COMPLETE" ||
+          ["REJECTED", "NEEDS_WORK"].includes(sample.status)
+        )
+          throw new DomainError(
+            "INVALID_STATE",
+            "请完成标注并移除弃用或待修改图片",
+          );
+        if (!sample.plan)
+          throw new DomainError("INVALID_STATE", "请为训练图片选择产品");
+        const preview = sample.assets.find((a) => a.kind === "PREVIEW");
+        if (!preview) throw new DomainError("ASSET_NOT_FOUND", "图片预览缺失");
+        const snapshot = {
+          planId: sample.plan.id,
+          classes: (sample.plan.rules as { classes?: string[] }).classes ?? [],
+          source: sample.source,
+          hard: sample.hard,
+          previewId: preview.id,
+          width: preview.width,
+          height: preview.height,
+          sha256: preview.sha256,
+          assets: sample.assets.map((a) => ({
+            id: a.id,
+            kind: a.kind,
+            sha256: a.sha256,
+          })),
+          boxes: annotation.boxes,
+        };
+        await tx.datasetItem.update({
+          where: { id: item.id },
+          data: {
+            annotationSetId: annotation.id,
+            snapshot: snapshot as unknown as Prisma.InputJsonValue,
+          },
+        });
+        item.annotationSetId = annotation.id;
+        item.snapshot = snapshot as unknown as Prisma.JsonValue;
+        item.sample.annotations = [annotation];
+      }
       if (!dataset.items.length)
         throw new DomainError("INVALID_STATE", "Cannot freeze empty dataset");
       if (
@@ -139,13 +198,12 @@ export class DatasetsService {
         );
       if (
         dataset.items.some(
-          (item) => item.sample.status !== "REVIEWED" || item.sample.deletedAt,
+          (item) =>
+            ["REJECTED", "NEEDS_WORK"].includes(item.sample.status) ||
+            item.sample.deletedAt,
         )
       )
-        throw new DomainError(
-          "INVALID_STATE",
-          "请先由管理员审核通过全部样本，再冻结训练版本",
-        );
+        throw new DomainError("INVALID_STATE", "请移除弃用或待修改的图片");
       if (
         dataset.items.some(
           (item) =>
@@ -176,7 +234,8 @@ export class DatasetsService {
         where: { id },
         data: { status: "FROZEN", checksum, frozenAt: new Date() },
       });
-    });
+    };
+    return transaction ? freeze(transaction) : this.db.$transaction(freeze);
   }
   async clone(id: string) {
     const old = await this.db.dataset.findUniqueOrThrow({

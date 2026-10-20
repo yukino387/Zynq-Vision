@@ -29,6 +29,7 @@ export function listing(
   for (const key of [
     "deviceId",
     "taskId",
+    "planId",
     "batchId",
     "stationId",
     "result",

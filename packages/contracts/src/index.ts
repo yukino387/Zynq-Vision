@@ -1,6 +1,11 @@
 import { z } from "zod";
-export { planRulesSchema, createPlanSchema } from "./plans.js";
-export type { PlanRules, InspectionPlan } from "./plans.js";
+export {
+  planRulesSchema,
+  createPlanSchema,
+  inspectionRegionSchema,
+  planPurposeSchema,
+} from "./plans.js";
+export type { PlanRules, InspectionPlan, InspectionScenario } from "./plans.js";
 export { acceptanceSchema } from "./inspection.js";
 export type {
   AcceptancePolicy,
@@ -94,6 +99,45 @@ export interface DetectionBox {
   x2: number;
   y2: number;
 }
+export interface TerminalModel {
+  id: string;
+  version: string;
+  payloadSha256: string;
+  weightsSha256: string;
+  classes: string[];
+  installedAt?: string;
+}
+export interface TerminalProduct {
+  id: string;
+  name: string;
+  version: number;
+  product?: string;
+  instructions?: string;
+  purpose?: import("./plans.js").PlanRules["purpose"];
+  region?: import("./plans.js").PlanRules["region"];
+  checks?: Array<
+    import("./plans.js").PlanRules["checks"][number] & { label: string }
+  >;
+  acceptance: { confidence: number; qualityGate: boolean };
+  assignedAt?: string;
+}
+export type PassagePhase =
+  "STOPPED" | "CLEARING" | "WAITING" | "INSPECTING" | "SAVING";
+export interface TerminalTiming {
+  frameId: number;
+  captureMs: number;
+  prepareMs: number;
+  convMs: number;
+  forwardMs: number;
+  postMs: number;
+  extractMs: number;
+}
+export interface TerminalRunCounts {
+  PASS: number;
+  FAIL: number;
+  REVIEW: number;
+  ERROR: number;
+}
 export interface TerminalStatus {
   bound: boolean;
   online: boolean;
@@ -101,14 +145,29 @@ export interface TerminalStatus {
   state: null | {
     bootId: string;
     uptime: number;
-    jobId: string | null;
-    jobName: string | null;
-    batchStatus: string | null;
+    model: TerminalModel | null;
+    product: TerminalProduct | null;
+    total: number;
+    counts: TerminalRunCounts;
+    runTotal: number;
+    runCounts: TerminalRunCounts;
+    production: boolean;
+    productionRunId: string | null;
+    passagePhase: PassagePhase;
+    fps?: number | null;
+    timing?: TerminalTiming | null;
     paused: boolean;
     fresh: boolean;
-    modelVersion: string | null;
-    total: number;
     pendingSync: number;
+    pendingRequestId: string | null;
+    last: null | {
+      sequence: number;
+      result: InspectionResult;
+      bootId?: string;
+      productionRunId?: string | null;
+      reason?: string;
+      findings?: import("./inspection.js").CheckFinding[];
+    };
     error: string;
     syncError: string;
     cpuPercent: number | null;
@@ -118,7 +177,7 @@ export interface TerminalStatus {
   };
 }
 export interface DeviceSnapshot {
-  executionMode: "LINUX_TERMINAL" | "BARE_METAL" | "UNCONFIRMED" | "SIMULATOR";
+  executionMode: "LINUX_TERMINAL" | "SIMULATOR";
   terminal: TerminalStatus | null;
   id: string;
   name: string;
@@ -237,6 +296,7 @@ export const listSchema = z.object({
   to: z.string().datetime().optional(),
   deviceId: z.string().optional(),
   taskId: z.string().optional(),
+  planId: z.string().optional(),
   batchId: z.string().optional(),
   stationId: z.string().optional(),
   result: z.enum(["PASS", "FAIL", "REVIEW", "ERROR"]).optional(),

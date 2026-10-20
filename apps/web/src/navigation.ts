@@ -61,7 +61,7 @@ export const routes: RouteRecordRaw[] = [
     path: "/production",
     name: "production",
     component: Production,
-    meta: { title: "检测作业", nav: true, order: 3.1, discipline: "hmi" },
+    meta: { title: "生产批次", nav: true, order: 3.2, discipline: "hmi" },
   },
   {
     path: "/account",
@@ -86,7 +86,7 @@ export const routes: RouteRecordRaw[] = [
     name: "plans",
     component: Plans,
     meta: {
-      title: "产品与检查方案",
+      title: "产品配置",
       nav: true,
       order: 2,
       roles: ENGINEER,
@@ -126,19 +126,16 @@ export const routes: RouteRecordRaw[] = [
     name: "data",
     component: Data,
     meta: {
-      title: "采样与数据",
+      title: "样本管理",
       nav: true,
       order: 5,
       roles: ENGINEER,
       discipline: "business",
-      defaultTab: "samples",
+      defaultTab: "annotation",
       tabs: [
-        { tab: "tasks", label: "采样任务" },
         { tab: "samples", label: "样本库" },
-        { tab: "review", label: "样本审核", roles: ["ADMIN"] },
-        { tab: "annotation", label: "样本标注", roles: ENGINEER },
-        { tab: "datasets", label: "数据集", roles: ENGINEER },
-        { tab: "quality", label: "数据质量", roles: ENGINEER },
+        { tab: "annotation", label: "标注与筛选", roles: ENGINEER },
+        { tab: "datasets", label: "训练快照", roles: ENGINEER },
       ],
     },
   },
@@ -156,7 +153,7 @@ export const routes: RouteRecordRaw[] = [
       tabs: [
         { tab: "registry", label: "模型仓库" },
         { tab: "training", label: "训练任务" },
-        { tab: "deployments", label: "批准发布与回退", roles: ["ADMIN"] },
+        { tab: "deployments", label: "模型下发", roles: ["ADMIN"] },
       ],
     },
   },
@@ -166,7 +163,7 @@ export const routes: RouteRecordRaw[] = [
     component: Firmware,
     meta: {
       title: "终端与更新",
-      nav: true,
+      nav: false,
       order: 7,
       roles: ENGINEER,
       discipline: "business",
@@ -249,8 +246,8 @@ export function canAccess(
 }
 
 /** 登录后的落地页：管理员看总览，操作工直接进板端检测作业。 */
-export function landingFor(role: Role | null | undefined) {
-  return role === "ADMIN" || role === "ENGINEER" ? "overview" : "production";
+export function landingFor(_role: Role | null | undefined) {
+  return "workbench";
 }
 
 /** 侧栏项，按 order 排。 */

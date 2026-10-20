@@ -5,7 +5,7 @@ After=local-fs.target
 [Service]
 Type=simple
 ExecStartPre=/sbin/modprobe vision_accel
-ExecStart=/usr/local/bin/vision-engine /var/lib/vision /var/lib/vision/jobs
+ExecStart=/usr/local/bin/vision-engine /var/lib/vision
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=15

@@ -76,7 +76,7 @@ export class SystemController {
       this.db.inspection.count({
         where: {
           OR: [
-            { result: "REVIEW", reviewResult: null, reviews: { none: {} } },
+            { result: { in: ["REVIEW", "ERROR"] }, reviewResult: null },
             { reviewResult: "REVIEW" },
           ],
         },
@@ -140,7 +140,7 @@ export class SystemController {
               label: "审核",
               done: sampleCount("REVIEWED"),
               waiting: reviewSamples,
-              to: "data/review",
+              to: "data/annotation",
             },
             {
               key: "dataset",

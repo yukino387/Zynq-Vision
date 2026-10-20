@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { chinese, displayName, fieldLabel } from "@vision/shared";
+import {
+  chinese,
+  displayName,
+  fieldLabel,
+  productClassesMatch,
+} from "@vision/shared";
 import { ref, computed, watch, toRaw } from "vue";
 import { useRoute } from "vue-router";
 import type { Named } from "../types";
 import type {
   DeviceSnapshot,
   DeviceState,
+  InspectionPlan,
   Model,
   ResidentModel,
 } from "@vision/contracts";
@@ -41,18 +47,17 @@ const tab = computed(() =>
   brightness = ref(0),
   targetModel = ref(""),
   targetPlan = ref(""),
+  plans = ref<InspectionPlan[]>([]),
+  productPlanId = ref(""),
+  productConfirm = ref(false),
+  assigning = ref(false),
   busy = ref(false);
 /** 遥测是微秒，界面按毫秒显示。 */
 const metric = (us: number | undefined) =>
   us === undefined ? "—" : (us / 1000).toFixed(1);
-const legacy = (d: DeviceSnapshot | null | undefined) =>
-  d?.executionMode === "BARE_METAL";
+const legacy = (_d: DeviceSnapshot | null | undefined) => false;
 const modeName = (d: DeviceSnapshot | null | undefined) =>
-  d?.executionMode === "LINUX_TERMINAL"
-    ? "Linux 独立终端"
-    : legacy(d)
-      ? "旧裸机设备"
-      : "运行环境待确认";
+  d?.executionMode === "SIMULATOR" ? "模拟设备" : "Linux 检测终端";
 watch(
   () => devices.devices,
   () => {
@@ -190,10 +195,48 @@ async function open(d: DeviceSnapshot) {
   selected.value = d;
   targetModel.value = d.desiredState.modelVersion ?? "";
   targetPlan.value = d.desiredState.planVersion ?? "";
+  productPlanId.value = d.terminal?.state?.product?.id ?? "";
+  productConfirm.value = false;
+  void ensurePlans();
   try {
     detail.value = await api(`/devices/${d.id}`);
   } catch (e) {
     notices.error(e);
+  }
+}
+async function ensurePlans() {
+  if (plans.value.length) return;
+  try {
+    plans.value = (
+      await api<{ items: InspectionPlan[] }>("/plans?pageSize=100")
+    ).items;
+  } catch (e) {
+    notices.error(e);
+  }
+}
+const compatiblePlans = computed(() => {
+  const classes = selected.value?.terminal?.state?.model?.classes;
+  if (!classes) return [];
+  return plans.value.filter((plan) =>
+    productClassesMatch(plan.rules.classes, classes),
+  );
+});
+async function assignProduct() {
+  if (!selected.value || !productPlanId.value) return;
+  assigning.value = true;
+  try {
+    await post(`/devices/${selected.value.id}/product`, {
+      planId: productPlanId.value,
+      confirm: productConfirm.value,
+    });
+    await devices.snapshot();
+    selected.value =
+      devices.devices.find((d) => d.id === selected.value?.id) ?? null;
+    notices.add("产品已分配到设备");
+  } catch (e) {
+    notices.error(e);
+  } finally {
+    assigning.value = false;
   }
 }
 /** 设备 SD 模型库。板子自己维护这份清单，平台只读它。 */
@@ -342,13 +385,17 @@ async function create() {
     </p>
     <template v-if="devices.current?.terminal?.state">
       <p>
-        最近上报作业：{{ devices.current.terminal.state.jobName || "未启用" }} ·
-        已检查 {{ devices.current.terminal.state.total }} · 待上传
-        {{ devices.current.terminal.state.pendingSync }}
+        模型：{{ devices.current.terminal.state.model?.version || "未下发" }} ·
+        产品：{{ devices.current.terminal.state.product?.name || "未分配" }} ·
+        {{
+          devices.current.terminal.state.production ? "自动检测中" : "已停止"
+        }}
       </p>
       <p>
-        CPU {{ devices.current.terminal.state.cpuPercent?.toFixed(1) ?? "—" }}%
-        · 内存
+        已检查 {{ devices.current.terminal.state.total }} · 待上传
+        {{ devices.current.terminal.state.pendingSync }} · CPU
+        {{ devices.current.terminal.state.cpuPercent?.toFixed(1) ?? "—" }}% ·
+        内存
         {{ (devices.current.terminal.state.memoryUsed / 1048576).toFixed(1) }} /
         {{ (devices.current.terminal.state.memoryTotal / 1048576).toFixed(1) }}
         MiB
@@ -649,12 +696,48 @@ async function create() {
     <section v-if="!legacy(selected)" class="terminal-summary">
       <h3>{{ modeName(selected) }}</h3>
       <p>
-        检查、暂停和作业切换在板端执行；平台用于分配作业、查看状态与复核证据。
+        模型和产品由平台下发；开始/停止自动检测与补检可在工作台或板端面板操作。
       </p>
-      <p>当前模型：{{ selected.reportedState.modelVersion || "未上报" }}</p>
+      <p>
+        当前模型：{{ selected.terminal?.state?.model?.version || "未下发" }} ·
+        当前产品：{{ selected.terminal?.state?.product?.name || "未分配" }}
+      </p>
       <p v-if="selected.terminal?.state">
-        作业：{{ selected.terminal.state.jobName || "未启用" }} · 待上传
-        {{ selected.terminal.state.pendingSync }}
+        过件：{{
+          selected.terminal.state.production ? "自动检测中" : "已停止"
+        }}
+        · 待上传 {{ selected.terminal.state.pendingSync }}
+      </p>
+      <div class="toolbar product-assign">
+        <label
+          >分配产品<select v-model="productPlanId" :disabled="assigning">
+            <option value="">选择产品</option>
+            <option
+              v-for="plan in compatiblePlans"
+              :key="plan.id"
+              :value="plan.id"
+            >
+              {{ displayName(plan.name) }} / V{{ plan.version }}
+            </option>
+          </select></label
+        >
+        <label class="confirm-line">
+          <input v-model="productConfirm" type="checkbox" />
+          停止当前生产并确认后切换
+        </label>
+        <button
+          class="primary"
+          :disabled="assigning || !productPlanId"
+          @click="assignProduct"
+        >
+          {{ assigning ? "分配中…" : "分配产品" }}
+        </button>
+      </div>
+      <p
+        v-if="selected.terminal?.state?.model && !compatiblePlans.length"
+        class="note"
+      >
+        没有与当前模型类别顺序一致的产品，请先在产品配置中检查类别。
       </p>
       <RouterLink
         to="/production"
@@ -663,7 +746,7 @@ async function create() {
           devices.selected = selected.id;
           selected = null;
         "
-        >进入检测作业</RouterLink
+        >查看生产批次</RouterLink
       >
     </section>
     <p class="note" v-if="legacy(selected)">

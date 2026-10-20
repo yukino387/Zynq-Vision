@@ -16,6 +16,7 @@ export interface Annotation {
   boxes: DetectionBox[];
 }
 export interface Sample {
+  plan?: InspectionPlan | null;
   task?: { plan: InspectionPlan | null } | null;
   id: string;
   name: string;
@@ -33,6 +34,9 @@ export interface Inspection {
   sampleId: string;
   batchId?: string | null;
   metadata?: {
+    localResult?: import("./index.js").InspectionResult;
+    manual?: boolean;
+    productionRunId?: string;
     decision?: import("./inspection.js").InspectionDecision;
     snapshot?: import("./inspection.js").BatchSnapshot;
   };

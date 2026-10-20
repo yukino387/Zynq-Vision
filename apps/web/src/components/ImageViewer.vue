@@ -13,6 +13,13 @@ const props = defineProps<{
   width?: number;
   height?: number;
   region?: { x: number; y: number; width: number; height: number };
+  regions?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    label: string;
+  }[];
 }>();
 const toolsOpen = ref(false);
 const image = ref(""),
@@ -181,7 +188,9 @@ onUnmounted(() => {
         }"
       >
         <img :src="image" alt="采样图像" draggable="false" /><svg
-          v-if="displayBoxes || (mode === 'PREVIEW' && region)"
+          v-if="
+            displayBoxes || (mode === 'PREVIEW' && (region || regions?.length))
+          "
           :viewBox="`0 0 ${size} ${imageHeight}`"
         >
           <rect
@@ -193,6 +202,27 @@ onUnmounted(() => {
             fill="none"
             stroke-dasharray="6 5"
           />
+          <g
+            v-for="(area, i) in mode === 'PREVIEW' ? (regions ?? []) : []"
+            :key="`region-${i}`"
+          >
+            <rect
+              :x="area.x * size"
+              :y="area.y * imageHeight"
+              :width="area.width * size"
+              :height="area.height * imageHeight"
+              fill="none"
+              style="stroke: #e6ad39"
+              stroke-dasharray="6 4"
+            />
+            <text
+              :x="area.x * size + 3"
+              :y="Math.max(16, area.y * imageHeight - 5)"
+              style="fill: #e6ad39"
+            >
+              {{ area.label }} · 合格中心范围
+            </text>
+          </g>
           <g v-for="(box, i) in displayBoxes ? (boxes ?? []) : []" :key="i">
             <rect
               :x="box.x1"

@@ -117,6 +117,7 @@ model InspectionPlan {
  createdAt DateTime @default(now())
  deletedAt DateTime?
  tasks Task[]
+ samples Sample[]
  @@unique([name,version])
 }
 model Task {
@@ -162,6 +163,8 @@ model CaptureSet {
 }
 model Sample {
  id String @id @default(cuid())
+ planId String?
+ plan InspectionPlan? @relation(fields:[planId],references:[id])
  name String
  source Source
  clientId String
@@ -290,12 +293,13 @@ model InspectionBatch {
  taskId String
  target Int
  status String @default("OPEN")
- execution String @default("HOST")
+ productionRunId String?
  snapshot Json
  createdBy String
  createdAt DateTime @default(now())
  closedAt DateTime?
  inspections Inspection[]
+ @@unique([deviceId,productionRunId])
  @@index([deviceId,status])
  @@index([taskId])
 }

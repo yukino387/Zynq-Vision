@@ -30,6 +30,7 @@ import { Roles, type Request } from "../core/auth.js";
 import { parse, DomainError } from "../core/errors.js";
 import { listing, page } from "../core/list.js";
 import { ModelsService } from "./models.service.js";
+import { DatasetsService } from "../datasets/datasets.service.js";
 import { AssetsService } from "../assets/assets.service.js";
 function normalizeClasses(raw: string): string[] {
   if (!raw.trim()) return [...DEFAULT_CLASSES];
@@ -247,7 +248,10 @@ export class ModelsController {
 @Roles("ADMIN", "ENGINEER")
 @Controller("api/trainings")
 export class TrainingsController {
-  constructor(@Inject(Db) private db: Db) {}
+  constructor(
+    @Inject(Db) private db: Db,
+    @Inject(DatasetsService) private datasets: DatasetsService,
+  ) {}
   @Get() async list(@Query() query: unknown) {
     const { q, args } = listing(query, [
       "name",
@@ -281,16 +285,57 @@ export class TrainingsController {
     const dto = parse(
       z
         .object({
-          datasetId: z.string(),
+          datasetId: z.string().optional(),
+          planId: z.string().optional(),
           name: z.string().min(1).max(120),
           options: trainingOptionsSchema.default({}),
         })
         .strict(),
       body,
     );
+    if (Boolean(dto.datasetId) === Boolean(dto.planId))
+      throw new DomainError(
+        "VALIDATION_ERROR",
+        "请选择产品或指定训练数据版本",
+        400,
+      );
     return this.db.$transaction(async (tx) => {
+      let datasetId = dto.datasetId;
+      if (dto.planId) {
+        const plan = await tx.inspectionPlan.findUniqueOrThrow({
+          where: { id: dto.planId, deletedAt: null },
+        });
+        const samples = await tx.sample.findMany({
+          where: {
+            planId: plan.id,
+            deletedAt: null,
+            source: { not: "SIMULATION" },
+            status: { notIn: ["REJECTED", "NEEDS_WORK"] },
+          },
+          include: { annotations: { orderBy: { version: "desc" }, take: 1 } },
+        });
+        const ids = samples
+          .filter((s) => s.annotations[0]?.status === "COMPLETE")
+          .map((s) => s.id);
+        if (ids.length < 2)
+          throw new DomainError(
+            "INVALID_STATE",
+            "该产品至少需要两张已完成标注的真实图片",
+          );
+        const name = `${plan.name} · 训练图片`;
+        const previous = await tx.dataset.findFirst({
+          where: { name },
+          orderBy: { version: "desc" },
+        });
+        const created = await tx.dataset.create({
+          data: { name, version: (previous?.version ?? 0) + 1 },
+        });
+        datasetId = created.id;
+        await this.datasets.add(datasetId, ids, tx);
+      }
+      await this.datasets.freeze(datasetId!, tx);
       const dataset = await tx.dataset.findUniqueOrThrow({
-        where: { id: dto.datasetId },
+        where: { id: datasetId! },
         include: {
           items: {
             orderBy: { sampleId: "asc" },
@@ -328,7 +373,7 @@ export class TrainingsController {
           "数据集快照校验失败，请创建新版本并重新锁定后训练",
         );
       const training = await tx.trainingJob.create({
-        data: { name: dto.name, datasetId: dto.datasetId, source: "IMPORT" },
+        data: { name: dto.name, datasetId: datasetId!, source: "IMPORT" },
       });
       await tx.job.create({
         data: {

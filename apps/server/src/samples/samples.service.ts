@@ -1,3 +1,6 @@
+import { isLinuxTerminal } from "../devices/terminal-state.js";
+import { terminalRequest } from "../devices/terminal-client.js";
+import { decodeRgb565 } from "@vision/device-protocol";
 import { Injectable, Inject } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -17,6 +20,7 @@ export const captureSchema = z
   .object({
     deviceId: z.string(),
     taskId: z.string().optional(),
+    planId: z.string().optional(),
     batchId: z.string().optional(),
     idempotencyKey: z.string().min(8).max(160),
     clientId: z.string().min(1).max(120),
@@ -28,6 +32,7 @@ export const uploadSchema = z
   .object({
     source: z.enum(["MOBILE", "IMPORT"]),
     taskId: z.string().optional(),
+    planId: z.string().optional(),
     idempotencyKey: z.string().min(8).max(160),
     clientId: z.string().min(1).max(120),
     localSequence: z.number().int().min(0).max(2147483647),
@@ -93,6 +98,22 @@ export class SamplesService {
       if (this.locks.get(key) === next) this.locks.delete(key);
     }
   }
+  private async productPlan(
+    dto: { planId?: string; taskId?: string },
+    db: Prisma.TransactionClient,
+  ) {
+    const task = dto.taskId
+      ? await db.task.findUniqueOrThrow({ where: { id: dto.taskId } })
+      : null;
+    const planId = dto.planId ?? task?.planId;
+    if (dto.planId && task?.planId && dto.planId !== task.planId)
+      throw new DomainError("INVALID_STATE", "产品与采样任务不匹配");
+    if (planId)
+      await db.inspectionPlan.findUniqueOrThrow({
+        where: { id: planId, deletedAt: null },
+      });
+    return planId;
+  }
   private async requireOpenTask(
     taskId: string | undefined,
     db: Prisma.TransactionClient = this.db,
@@ -107,7 +128,12 @@ export class SamplesService {
         "采样任务已完成，请重新开放任务或选择其他任务",
       );
   }
-  async capture(dto: CaptureDto, actor: string, requestId: string) {
+  async capture(
+    dto: CaptureDto,
+    actor: string,
+    requestId: string,
+    authorization = "",
+  ) {
     return this.idempotent(
       dto.idempotencyKey,
       actor,
@@ -120,7 +146,7 @@ export class SamplesService {
               where: { id: dto.batchId },
             });
             if (
-              batch.status !== "OPEN" || batch.execution !== "HOST" ||
+              batch.status !== "OPEN" ||
               batch.deviceId !== dto.deviceId ||
               batch.taskId !== dto.taskId
             )
@@ -130,12 +156,60 @@ export class SamplesService {
                 409,
               );
           }
-          const frame = await this.devices
-            .transport(dto.deviceId)
-            .captureOnce();
           const device = await this.db.device.findUniqueOrThrow({
             where: { id: dto.deviceId },
           });
+          let frame: CapturedFrame;
+          let terminalPlanId: string | undefined;
+          if (isLinuxTerminal(device)) {
+            const response = await terminalRequest(
+              device,
+              "/capture",
+              authorization,
+            );
+            const binary = Buffer.from(await response.arrayBuffer());
+            if (binary.length < 4)
+              throw new DomainError("INVALID_FRAME", "设备画面不完整", 502);
+            const length = binary.readUInt32LE(0);
+            if (length > 65536 || binary.length !== 4 + length + 416 * 416 * 2)
+              throw new DomainError("INVALID_FRAME", "设备画面格式错误", 502);
+            const metadata = JSON.parse(
+              binary.subarray(4, 4 + length).toString(),
+            );
+            terminalPlanId = metadata.planId ?? undefined;
+            if (!metadata.fresh)
+              throw new DomainError(
+                "DEVICE_TIMEOUT",
+                "当前画面已过期，请开始检测后再采样",
+                409,
+              );
+            const raw = binary.subarray(4 + length);
+            frame = {
+              frameId: metadata.frameId,
+              receivedAt: new Date().toISOString(),
+              raw,
+              width: 416,
+              height: 416,
+              format: "RGB565_LE",
+              preview: await sharp(decodeRgb565(raw), {
+                raw: { width: 416, height: 416, channels: 3 },
+              })
+                .jpeg()
+                .toBuffer(),
+              detections: metadata.boxes.map((box: { classId: number }) => ({
+                ...box,
+                label:
+                  metadata.modelClasses?.[box.classId] ??
+                  `类别 ${box.classId + 1}`,
+              })),
+              telemetry: null,
+              modelState: {
+                modelVersion: metadata.modelVersion ?? null,
+                modelPayloadSha256: metadata.modelPayloadSha256 ?? null,
+              },
+            };
+          } else
+            frame = await this.devices.transport(dto.deviceId).captureOnce();
           const source: Source =
             device.type === "SIMULATOR" ? "SIMULATION" : "BOARD";
           const stored = await this.assets.store(
@@ -201,11 +275,15 @@ export class SamplesService {
                 ),
               ])
             : [];
-          const quality = dto.batchId ? assessInspectionImage(frame.raw) : await this.assets.quality(frame.preview);
+          const quality = dto.batchId
+            ? assessInspectionImage(frame.raw)
+            : await this.assets.quality(frame.preview);
           const sample = await this.db.$transaction(async (tx) => {
             await this.requireOpenTask(dto.taskId, tx);
             const set = await tx.captureSet.upsert({
-              where: { clientId: dto.captureSetClientId ?? dto.idempotencyKey },
+              where: {
+                clientId: dto.captureSetClientId ?? dto.idempotencyKey,
+              },
               create: {
                 clientId: dto.captureSetClientId ?? dto.idempotencyKey,
                 session: { create: { taskId: dto.taskId, source } },
@@ -223,6 +301,14 @@ export class SamplesService {
                 localSequence: dto.localSequence,
                 idempotencyKey: dto.idempotencyKey,
                 taskId: dto.taskId,
+                planId: await this.productPlan(
+                  {
+                    ...dto,
+                    planId:
+                      dto.planId ?? (dto.taskId ? undefined : terminalPlanId),
+                  },
+                  tx,
+                ),
                 captureSetId: set?.id,
                 capturedAt: new Date(frame.receivedAt),
                 metadata: {
@@ -248,16 +334,18 @@ export class SamplesService {
                 quality: { create: quality },
               },
             });
-            await this.inspection(
-              tx,
-              created.id,
-              device,
-              frame,
-              source,
-              dto.taskId,
-              dto.batchId,
-              quality.status,
-            );
+            // A retained image is training evidence, not an additional inspected item.
+            if (!isLinuxTerminal(device))
+              await this.inspection(
+                tx,
+                created.id,
+                device,
+                frame,
+                source,
+                dto.taskId,
+                dto.batchId,
+                quality.status,
+              );
             return tx.sample.findUniqueOrThrow({
               where: { id: created.id },
               include: {
@@ -267,7 +355,7 @@ export class SamplesService {
             });
           });
           this.events.emit(
-            "device.inspection.completed",
+            "sample.created",
             device.id,
             sample,
             source,
@@ -331,7 +419,7 @@ export class SamplesService {
         where: { id: batchId },
       });
       if (
-        batch.status !== "OPEN" || batch.execution !== "HOST" ||
+        batch.status !== "OPEN" ||
         batch.deviceId !== device.id ||
         batch.taskId !== taskId
       )
@@ -485,6 +573,7 @@ export class SamplesService {
               name,
               source: dto.source,
               taskId: dto.taskId,
+              planId: await this.productPlan(dto, tx),
               clientId: dto.clientId,
               localSequence: dto.localSequence,
               idempotencyKey: dto.idempotencyKey,

@@ -1,14 +1,14 @@
+import { isLinuxTerminal } from "./terminal-state.js";
+import { terminalRequest } from "./terminal-client.js";
 import {
   Controller,
   Get,
   Post,
-  Patch,
   Param,
   Body,
   Query,
   Req,
   Inject,
-  ForbiddenException,
 } from "@nestjs/common";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
@@ -16,11 +16,13 @@ import { Db } from "../core/db.js";
 import { Roles, type Request } from "../core/auth.js";
 import { parse, DomainError } from "../core/errors.js";
 import { listing, page } from "../core/list.js";
-import { terminalCapabilities } from "./terminal-state.js";
+import { terminalCapabilities, terminalStatus } from "./terminal-state.js";
 import { DevicesService } from "./devices.service.js";
 import { CommandsService } from "./commands.service.js";
 import { baseCapabilities } from "./transport.js";
 import { config } from "../config.js";
+import { planRulesSchema, acceptanceSchema } from "@vision/contracts";
+import { productClassesMatch } from "@vision/shared";
 @Controller("api/devices")
 export class DevicesController {
   constructor(
@@ -107,8 +109,19 @@ export class DevicesController {
     @Req() req: Request,
   ) {
     return this.commands.run(id, "CONNECT", req.id, async () => {
-      await this.devices.transport(id).connect();
-      return this.devices.transport(id).getStatus();
+      const device = await this.db.device.findUniqueOrThrow({ where: { id } });
+      if (!isLinuxTerminal(device)) {
+        await this.devices.transport(id).connect();
+        return this.devices.transport(id).getStatus();
+      }
+      return (
+        await terminalRequest(
+          device,
+          "/control",
+          req.headers.authorization ?? "",
+          { type: "CONNECT" },
+        )
+      ).json();
     });
   }
   @Roles("ADMIN", "ENGINEER") @Post(":id/disconnect") disconnect(
@@ -116,42 +129,117 @@ export class DevicesController {
     @Req() req: Request,
   ) {
     return this.commands.run(id, "DISCONNECT", req.id, async () => {
+      const device = await this.db.device.findUniqueOrThrow({ where: { id } });
+      if (isLinuxTerminal(device)) return { disconnected: true };
       await this.devices.transport(id).disconnect();
       return { disconnected: true };
     });
   }
-  @Roles("ADMIN") @Patch(":id/desired") async desired(
-    @Param("id") id: string,
-    @Body() body: unknown,
-  ) {
-    await this.devices.assertLegacyTransport(id);
-    const dto = parse(
-      z
-        .object({
-          modelVersion: z.string().min(1).optional(),
-          planVersion: z.string().min(1).optional(),
-          inspectionEnabled: z.boolean().optional(),
-        })
-        .strict(),
-      body,
-    );
-    await this.db.device.update({ where: { id }, data: { desiredState: dto } });
-    return (await this.devices.snapshots()).find((d) => d.id === id);
-  }
-  /** 删除设备 SD 模型库里的一个槽位。板端会拒绝删当前版本和上一版。 */
-  @Roles("ADMIN", "ENGINEER") @Post(":id/models/delete") async removeModel(
+  /** 把产品规则分配给终端；生产中必须显式确认停止。 */
+  @Roles("ADMIN", "ENGINEER") @Post(":id/product") async product(
     @Param("id") id: string,
     @Body() body: unknown,
     @Req() req: Request,
   ) {
     const dto = parse(
-      z.object({ index: z.number().int().min(0) }).strict(),
+      z
+        .object({
+          planId: z.string().min(1),
+          acceptance: acceptanceSchema.optional(),
+          confirm: z.boolean().optional(),
+        })
+        .strict(),
       body,
     );
-    await this.commands.run(id, "DELETE_MODEL", req.id, () =>
-      this.devices.transport(id).deleteModel(dto.index),
+    const device = await this.db.device.findUniqueOrThrow({ where: { id } });
+    if (!isLinuxTerminal(device))
+      throw new DomainError("NO_CAPABILITY", "该设备不支持产品分配", 422);
+    const status = await terminalStatus(this.db, device);
+    if (!status.online || !status.state)
+      throw new DomainError("UNAVAILABLE", "设备未连接，请等待设备上线", 409);
+    if (!status.state.model)
+      throw new DomainError("INVALID_STATE", "请先下发模型，再分配产品", 409);
+    const plan = await this.db.inspectionPlan.findUniqueOrThrow({
+      where: { id: dto.planId },
+    });
+    if (plan.deletedAt)
+      throw new DomainError("INVALID_STATE", "产品已删除", 409);
+    const rules = parse(planRulesSchema, plan.rules);
+    if (!productClassesMatch(rules.classes, status.state.model.classes))
+      throw new DomainError(
+        "MODEL_INCOMPATIBLE",
+        "产品类别及顺序必须与设备当前模型一致",
+        422,
+      );
+    if (!rules.checks.some((check) => check.min > 0))
+      throw new DomainError(
+        "VALIDATION_ERROR",
+        "自动过件需要至少一个必需类别；请把产品主体加入识别类别",
+        422,
+      );
+    const acceptance = dto.acceptance ?? { confidence: 0.7, qualityGate: true };
+    const current = status.state.product;
+    if (
+      current &&
+      current.id === plan.id &&
+      current.version === plan.version &&
+      current.acceptance.confidence === acceptance.confidence &&
+      current.acceptance.qualityGate === acceptance.qualityGate
+    )
+      return status.state;
+    if (status.state.production && !dto.confirm)
+      throw new DomainError(
+        "DEVICE_BUSY",
+        "请先停止自动检测并确认当前件已处理，再切换产品",
+        409,
+      );
+    return (
+      await terminalRequest(
+        device,
+        "/runtime/product",
+        req.headers.authorization ?? "",
+        {
+          planId: plan.id,
+          planName: plan.name,
+          planVersion: plan.version,
+          product: rules.product,
+          rules,
+          acceptance,
+          confirm: dto.confirm ?? false,
+        },
+        30000,
+      )
+    ).json();
+  }
+  /** 停止状态下的单件补检/调试；自动生产中由引擎拒绝。 */
+  @Roles("ADMIN", "ENGINEER", "OPERATOR") @Post(":id/check") async check(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+  ) {
+    const dto = parse(
+      z.object({ requestId: z.string().uuid().optional() }).strict(),
+      body,
     );
-    return (await this.devices.snapshots()).find((d) => d.id === id);
+    const device = await this.db.device.findUniqueOrThrow({ where: { id } });
+    if (!isLinuxTerminal(device))
+      throw new DomainError("NO_CAPABILITY", "该设备不支持单件检查", 422);
+    const status = await terminalStatus(this.db, device);
+    if (!status.online || !status.state)
+      throw new DomainError("UNAVAILABLE", "设备未连接，请等待设备上线", 409);
+    // The engine can confirm a previously saved request even after production resumes.
+    const requestId = dto.requestId ?? crypto.randomUUID();
+    return this.commands.run(id, "CHECK_ONE", req.id, async () =>
+      (
+        await terminalRequest(
+          device,
+          "/control",
+          req.headers.authorization ?? "",
+          { type: "CHECK_ONE", requestId },
+          15000,
+        )
+      ).json(),
+    );
   }
   @Roles("ADMIN", "ENGINEER")
   @Post(":id/commands/:commandId/cancel")
@@ -167,7 +255,7 @@ export class DevicesController {
       );
     return { id, status: "CANCELLED" };
   }
-  @Roles("ADMIN", "ENGINEER") @Post(":id/commands") command(
+  @Roles("ADMIN", "ENGINEER", "OPERATOR") @Post(":id/commands") async command(
     @Param("id") id: string,
     @Body() body: unknown,
     @Req() req: Request,
@@ -175,51 +263,23 @@ export class DevicesController {
     const dto = parse(
       z
         .object({
-          type: z.enum([
-            "GET_STATUS",
-            "START_INSPECTION",
-            "STOP_INSPECTION",
-            "SET_BRIGHTNESS",
-            "CAMERA_ONLY",
-            "SET_PLAN",
-            "FAULT",
-          ]),
-          value: z.union([z.string(), z.number().int()]).optional(),
+          type: z.enum(["GET_STATUS", "START_INSPECTION", "STOP_INSPECTION"]),
         })
         .strict(),
       body,
     );
-    if (dto.type === "SET_PLAN" && req.actor.role !== "ADMIN")
-      throw new ForbiddenException("只有管理员可以修改设备使用的方案");
-    if (
-      dto.type === "SET_BRIGHTNESS" &&
-      (typeof dto.value !== "number" || dto.value < -4 || dto.value > 4)
-    )
-      throw new DomainError(
-        "VALIDATION_ERROR",
-        "Brightness range is -4..4",
-        400,
-      );
-    if (dto.type === "CAMERA_ONLY" && dto.value !== 0 && dto.value !== 1)
-      throw new DomainError("VALIDATION_ERROR", "Camera mode is 0 or 1", 400);
-    if (dto.type === "FAULT")
-      parse(
-        z.enum([
-          "NONE",
-          "NETWORK_LOST",
-          "DEVICE_TIMEOUT",
-          "INVALID_MODEL",
-          "CHECKSUM_ERROR",
-          "INFERENCE_ERROR",
-          "DEPLOYMENT_FAILED",
-          "LOW_FPS",
-          "HIGH_LATENCY",
-          "QUEUE_OVERFLOW",
-        ]),
-        dto.value,
-      );
-    return this.commands.run(id, dto.type, req.id, () =>
-      this.devices.transport(id).sendCommand(dto.type, dto.value),
-    );
+    const device = await this.db.device.findUniqueOrThrow({ where: { id } });
+    return this.commands.run(id, dto.type, req.id, async () => {
+      if (!isLinuxTerminal(device))
+        return this.devices.transport(id).sendCommand(dto.type);
+      return (
+        await terminalRequest(
+          device,
+          "/control",
+          req.headers.authorization ?? "",
+          dto,
+        )
+      ).json();
+    });
   }
 }

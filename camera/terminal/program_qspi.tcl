@@ -17,7 +17,6 @@ connect -url tcp:127.0.0.1:3121
 targets -set -filter {name =~ "ARM Cortex-A9 MPCore #0"}
 catch {stop}
 configparams force-mem-accesses 1
-stop_private_watchdog
 rst -system -stop
 after 500
 targets -set -filter {name =~ "ARM Cortex-A9 MPCore #1"}

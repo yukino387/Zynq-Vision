@@ -2,24 +2,20 @@ import type { Device } from "@prisma/client";
 import type { Capabilities, TerminalStatus } from "@vision/contracts";
 import type { Db } from "../core/db.js";
 export const terminalCapabilities: Capabilities = {
-  capture: false,
-  preview: false,
+  capture: true,
+  preview: true,
   inference: true,
-  modelUpdate: false,
+  modelUpdate: true,
   firmwareUpdate: false,
   localStorage: true,
   offlineInference: true,
   offlineSync: true,
   modelVersion: true,
-  planUpdate: false,
+  planUpdate: true,
   restartInference: false,
 };
-export function isLinuxTerminal(device: Pick<Device, "type" | "metadata">) {
-  const metadata = device.metadata as Record<string, unknown>;
-  return (
-    device.type === "ZYNQ" &&
-    (metadata.runtimeProfile === "LINUX_TERMINAL" || !!metadata.terminal)
-  );
+export function isLinuxTerminal(device: Pick<Device, "type">) {
+  return device.type === "ZYNQ";
 }
 export async function terminalStatus(
   db: Db,

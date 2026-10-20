@@ -13,6 +13,8 @@ import { useNotificationStore } from "./notifications";
 import { useAuthStore } from "./auth";
 export interface Preview {
   frameId: number;
+  planId?: string | null;
+  planVersion?: number | null;
   receivedAt: string;
   width: number;
   height: number;
@@ -101,11 +103,7 @@ export const useDeviceStore = defineStore("devices", () => {
         previews.value[event.entityId] = event.payload as Preview;
         return;
       }
-      if (
-        event.type === "device.telemetry" &&
-        device &&
-        device.executionMode !== "LINUX_TERMINAL"
-      ) {
+      if (event.type === "device.telemetry" && device) {
         const p = event.payload as {
           telemetry: Telemetry;
           reportedState: DeviceState;
@@ -164,16 +162,6 @@ export const useDeviceStore = defineStore("devices", () => {
     connect();
     clock = setInterval(() => {
       for (const d of devices.value) {
-        if (d.executionMode === "LINUX_TERMINAL") {
-          d.connectionState =
-            d.terminal?.online &&
-            d.lastSeenAt &&
-            Date.now() - Date.parse(d.lastSeenAt) <= 20000
-              ? "ONLINE"
-              : "OFFLINE";
-          if (d.connectionState === "OFFLINE") d.runtimeState = "UNKNOWN";
-          continue;
-        }
         d.connectionState = connectionState(
           d.lastSeenAt ? Date.parse(d.lastSeenAt) : null,
           Date.now(),
