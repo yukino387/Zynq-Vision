@@ -405,11 +405,19 @@ async function remove() {
       <details class="section-space">
         <summary>目标框后处理与跟踪</summary>
         <p class="note">
-          先过滤无效和过小框，再删除同类包含框（外框面积至少为内框的 1.5
-          倍），最后做同类重叠去重。不同类别保留，避免删除瓶体与液面、托盘与物件。跟踪
-          ID 仅用于当前会话；生产件数仍按过件记录统计。
+          先过滤无效和过小框。置信度优先模式保留更可信的同类框，再处理包含与重叠；
+          同分时优先较小框。不同类别保留，避免删除瓶体与液面、托盘与物件。跟踪
+          ID
+          仅用于当前会话。固定机位使用空场参考辅助离场判断；开始生产时先保持空场。
+          单件数量参考连续多帧，数量组合不稳定时转人工复核；生产件数按过件记录统计。
         </p>
         <div class="plan-region">
+          <label
+            >包含框处理<select v-model="postprocess.algorithm">
+              <option value="BOX_FILTER_V3">置信度优先</option>
+              <option value="BOX_FILTER_V2">小框优先（原版本）</option>
+            </select></label
+          >
           <label
             >重叠去重 IoU<input
               v-model.number="postprocess.nmsIou"

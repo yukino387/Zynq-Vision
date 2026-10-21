@@ -83,10 +83,38 @@ const recordSchema = z
           z.number().int().nonnegative(),
         ]),
         interrupted: z.boolean(),
+        consensus: z
+          .object({
+            algorithm: z.literal("COUNT_VECTOR_V1"),
+            mode: z.enum(["COUNT_VECTOR", "PERSISTENT_DEFECT"]),
+            support: z.number().int().min(1).max(2147483647),
+            consecutive: z.number().int().min(1).max(2147483647),
+            durationMs: z.number().int().min(0).max(2147483647),
+            patterns: z.number().int().min(1).max(8),
+            unstable: z.boolean(),
+            counts: z
+              .array(
+                z
+                  .object({
+                    classId: z.number().int().min(0).max(5),
+                    count: z.number().int().min(0).max(300),
+                    uncertain: z.number().int().min(0).max(300),
+                  })
+                  .strict(),
+              )
+              .max(6),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .refine(
-        (value) => value.votes.reduce((a, b) => a + b, 0) === value.samples,
+        (value) =>
+          value.votes.reduce((a, b) => a + b, 0) === value.samples &&
+          (!value.consensus ||
+            (value.consensus.support <= value.samples &&
+              value.consensus.consecutive <= value.consensus.support &&
+              value.consensus.patterns <= value.samples)),
         "过件帧数不一致",
       )
       .optional(),
@@ -536,6 +564,7 @@ export class TerminalController {
       decision.reason = "目标过多或候选数据异常，请人工复核";
     }
     // Local data is evidence, not authority. Recompute decisions and flag disagreement or late arrivals.
+    const evidenceResult = decision.result;
     const late = matched?.late ?? false;
     if (decision.result !== dto.localResult || late) {
       decision.result = "REVIEW";
@@ -543,12 +572,47 @@ export class TerminalController {
         ? "离线记录在批次结束后到达，请核对实际作业时间"
         : "板端与平台判定不一致，请核对原始证据";
     }
+    const consensus = dto.passage?.consensus;
+    if (!late && consensus) {
+      const counts = decision.findings.map(({ classId, count, uncertain }) => ({
+        classId,
+        count,
+        uncertain,
+      }));
+      const stableDefect =
+        consensus.mode === "PERSISTENT_DEFECT" &&
+        evidenceResult === "FAIL" &&
+        decision.findings.some(
+          (finding) => finding.max === 0 && finding.count > 0,
+        ) &&
+        consensus.consecutive >= 2 &&
+        consensus.durationMs >= 60;
+      const stableCount =
+        consensus.mode === "COUNT_VECTOR" &&
+        consensus.support * 5 >= dto.passage!.samples * 3 &&
+        consensus.consecutive >= 3 &&
+        consensus.durationMs >= 140;
+      if (
+        canonical(counts) !== canonical(consensus.counts) ||
+        consensus.durationMs > 250 * (consensus.consecutive - 1) ||
+        consensus.support >
+          dto.passage!.votes[
+            { PASS: 0, FAIL: 1, REVIEW: 2, ERROR: 3 }[evidenceResult]
+          ]! ||
+        consensus.unstable ||
+        (!stableDefect && !stableCount)
+      ) {
+        decision.result = "REVIEW";
+        decision.reason = "多帧数量不一致或连续证据不足，请人工复核";
+      }
+    }
     if (
       !late &&
       dto.passage &&
       (dto.passage.interrupted ||
         dto.passage.samples < 3 ||
-        Math.max(...dto.passage.votes) * 5 < dto.passage.samples * 3)
+        (!consensus &&
+          Math.max(...dto.passage.votes) * 5 < dto.passage.samples * 3))
     ) {
       decision.result = "REVIEW";
       decision.reason = "过件证据不足或检测中断，请人工复核";

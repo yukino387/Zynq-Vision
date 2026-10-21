@@ -2,7 +2,9 @@ import { z } from "zod";
 
 export const postprocessSchema = z
   .object({
-    algorithm: z.literal("BOX_FILTER_V2").default("BOX_FILTER_V2"),
+    algorithm: z
+      .enum(["BOX_FILTER_V2", "BOX_FILTER_V3"])
+      .default("BOX_FILTER_V3"),
     nmsIou: z.number().min(0.05).max(0.95).default(0.45),
     containment: z.number().min(0.5).max(1).default(0.9),
     minArea: z.number().min(0).max(0.1).default(0.00002),

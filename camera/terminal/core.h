@@ -12,6 +12,7 @@ struct Box { unsigned class_id; double confidence, x1, y1, x2, y2; unsigned trac
 struct Postprocess {
     double nms_iou=.45,containment=.9,min_area=.00002,track_iou=.3;
     unsigned max_detections=100,track_min_hits=2,track_max_misses=3,track_max_gap_ms=1000;
+    unsigned algorithm_version=3;
 };
 struct FilterResult {
     std::vector<Box> boxes;
@@ -21,13 +22,20 @@ struct FilterResult {
 FilterResult filter_boxes(const std::vector<Box>&,const Postprocess& = {});
 FilterResult detect_objects(const int8_t* out0,const int8_t* out1,const Postprocess& = {});
 class Tracker {
-    struct Track { Box box; unsigned id,hits,misses; uint64_t last_ns; };
+    struct Track {
+        Box box;
+        unsigned id,hits,misses;
+        uint64_t last_ns;
+        double vx=0,vy=0;
+        bool moving=false,has_appearance=false;
+        std::array<double,19> appearance{};
+    };
     std::vector<Track> tracks;
     unsigned next_id=1;
     uint64_t last_ns=0;
 public:
     void reset();
-    void update(std::vector<Box>&,uint64_t monotonic_ns,const Postprocess&);
+    void update(std::vector<Box>&,uint64_t monotonic_ns,const Postprocess&,const uint16_t* pixels=nullptr,double confidence=.7);
 };
 struct Check { unsigned class_id, minimum, maximum; bool positioned=false; std::array<double,4> region={0,0,1,1}; };
 struct Rules {

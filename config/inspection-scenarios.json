@@ -34,7 +34,7 @@
         }
       ],
       "postprocess": {
-        "algorithm": "BOX_FILTER_V2",
+        "algorithm": "BOX_FILTER_V3",
         "nmsIou": 0.45,
         "containment": 0.9,
         "minArea": 2e-5,
@@ -82,7 +82,7 @@
         }
       ],
       "postprocess": {
-        "algorithm": "BOX_FILTER_V2",
+        "algorithm": "BOX_FILTER_V3",
         "nmsIou": 0.45,
         "containment": 0.9,
         "minArea": 2e-5,
@@ -124,7 +124,7 @@
         }
       ],
       "postprocess": {
-        "algorithm": "BOX_FILTER_V2",
+        "algorithm": "BOX_FILTER_V3",
         "nmsIou": 0.45,
         "containment": 0.9,
         "minArea": 2e-5,

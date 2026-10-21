@@ -67,15 +67,17 @@ void validate_manifest(const json& manifest) {
     if(manifest.at("networkTemplate")!="ZYNQ7020_NEU_INT8_V1" || manifest.at("classCount")!=6 || manifest.at("classes").size()!=6 || scales.size()!=2 || std::abs(scales[0].get<double>()-.11581249687615341)>1e-15 || std::abs(scales[1].get<double>()-.15977688286248154)>1e-15)throw std::runtime_error("Unsupported postprocessing profile");
 }
 Postprocess load_postprocess(const json& rules) {
-    Postprocess p;if(!rules.contains("postprocess"))return p;const auto& r=rules.at("postprocess");
-    if(r.value("algorithm",std::string("BOX_FILTER_V2"))!="BOX_FILTER_V2")throw std::runtime_error("Unsupported postprocessing policy");
+    Postprocess p;if(!rules.contains("postprocess")){p.algorithm_version=2;return p;}const auto& r=rules.at("postprocess");
+    const auto algorithm=r.value("algorithm",std::string("BOX_FILTER_V3"));
+    if(algorithm!="BOX_FILTER_V2" && algorithm!="BOX_FILTER_V3")throw std::runtime_error("Unsupported postprocessing policy");
+    p.algorithm_version=algorithm=="BOX_FILTER_V3"?3:2;
     p.nms_iou=r.value("nmsIou",p.nms_iou);p.containment=r.value("containment",p.containment);p.min_area=r.value("minArea",p.min_area);p.max_detections=r.value("maxDetections",p.max_detections);
     p.track_iou=r.value("trackIou",p.track_iou);p.track_min_hits=r.value("trackMinHits",p.track_min_hits);p.track_max_misses=r.value("trackMaxMisses",p.track_max_misses);p.track_max_gap_ms=r.value("trackMaxGapMs",p.track_max_gap_ms);
     if(!std::isfinite(p.nms_iou) || p.nms_iou<.05 || p.nms_iou>.95 || !std::isfinite(p.containment) || p.containment<.5 || p.containment>1 || !std::isfinite(p.min_area) || p.min_area<0 || p.min_area>.1 || !std::isfinite(p.track_iou) || p.track_iou<.05 || p.track_iou>.95 || p.max_detections<1 || p.max_detections>300 || p.track_min_hits<1 || p.track_min_hits>10 || p.track_max_misses>30 || p.track_max_gap_ms<100 || p.track_max_gap_ms>5000)throw std::runtime_error("Invalid postprocessing policy");
     return p;
 }
 json postprocess_json(const Postprocess& p) {
-    return {{"algorithm","BOX_FILTER_V2"},{"nmsIou",p.nms_iou},{"containment",p.containment},{"minArea",p.min_area},{"maxDetections",p.max_detections},{"trackIou",p.track_iou},{"trackMinHits",p.track_min_hits},{"trackMaxMisses",p.track_max_misses},{"trackMaxGapMs",p.track_max_gap_ms}};
+    return {{"algorithm",p.algorithm_version==3?"BOX_FILTER_V3":"BOX_FILTER_V2"},{"nmsIou",p.nms_iou},{"containment",p.containment},{"minArea",p.min_area},{"maxDetections",p.max_detections},{"trackIou",p.track_iou},{"trackMinHits",p.track_min_hits},{"trackMaxMisses",p.track_max_misses},{"trackMaxGapMs",p.track_max_gap_ms}};
 }
 json filter_json(const FilterResult& r,const Postprocess& p){return {{"policy",postprocess_json(p)},{"candidates",r.candidates},{"invalid",r.invalid},{"tiny",r.tiny},{"nested",r.nested},{"suppressed",r.suppressed},{"overflow",r.overflow}};}
 Decision filtered_decision(const Rules& rules,const FilterResult& filtered,const Frame& frame) {
@@ -300,7 +302,7 @@ public:
             capture_finished(elapsed);
             if(!paused && !model.is_null() && error.empty()){
                 frame=std::move(next);frame_filter=detect_objects(frame.out0.data(),frame.out1.data(),rules.postprocess);frame_boxes=frame_filter.boxes;
-                tracker.update(frame_boxes,frame.monotonic_ns,rules.postprocess);frame_decoded=true;
+                tracker.update(frame_boxes,frame.monotonic_ns,rules.postprocess,frame.pixels.data(),rules.confidence);frame_decoded=true;
                 if(production && !product.is_null()) {
                     const auto decision=filtered_decision(rules,frame_filter,frame);
                     if(passage.observe(frame,frame_boxes,rules,decision))save_passage();
@@ -332,7 +334,7 @@ public:
         if(model.is_null() || product.is_null() || paused || !error.empty())throw std::runtime_error("No active model and product");
         try {frame=capture_frame();frame_ready.notify_all();}catch(const std::exception& e){error=e.what();frame=Frame{};frame_ready.notify_all();throw;}
         frame_filter=detect_objects(frame.out0.data(),frame.out1.data(),rules.postprocess);frame_boxes=frame_filter.boxes;
-        tracker.update(frame_boxes,frame.monotonic_ns,rules.postprocess);frame_decoded=true;
+        tracker.update(frame_boxes,frame.monotonic_ns,rules.postprocess,frame.pixels.data(),rules.confidence);frame_decoded=true;
         return save_evidence(request,frame,filtered_decision(rules,frame_filter,frame));
     }
 private:
@@ -342,12 +344,16 @@ private:
         struct statvfs space{};if(statvfs(root.c_str(),&space) || uint64_t(space.f_bavail)*space.f_frsize<64*1024*1024)throw std::runtime_error("Insufficient evidence storage");
         if(sequence==2147483647)throw std::runtime_error("Check sequence exhausted");
         json payload={{"postprocess",postprocess_json(rules.postprocess)},{"formatVersion",1},{"planId",product.at("id")},{"planVersion",product.at("version")},{"planName",product.at("name")},{"product",product.at("rules").at("product")},{"modelId",model.at("id")},{"modelVersion",model.at("version")},{"modelPayloadSha256",model.at("payloadSha256")},{"acceptance",product.at("acceptance")},{"bootId",boot_id},{"sequence",++sequence},{"frameId",frame.id},{"monotonicNs",std::to_string(frame.monotonic_ns)},{"capturedAt",utc_now()},{"raw",base64(frame.pixels.data(),frame.pixels.size()*2)},{"out0",base64(frame.out0.data(),frame.out0.size())},{"out1",base64(frame.out1.data(),frame.out1.size())},{"rawSha256",sha256(frame.pixels.data(),frame.pixels.size()*2)},{"localResult",name(decision.result)}};
-        if(source)payload["passage"]={{"samples",source->samples()},{"votes",source->votes()},{"interrupted",source->interrupted()}};
+        if(source) {
+            json counts=json::array();for(const auto& f:decision.findings)counts.push_back({{"classId",f.check.class_id},{"count",f.count},{"uncertain",f.uncertain}});
+            payload["passage"]={{"samples",source->samples()},{"votes",source->votes()},{"interrupted",source->interrupted()},
+                {"consensus",{{"algorithm","COUNT_VECTOR_V1"},{"mode",source->defect()?"PERSISTENT_DEFECT":"COUNT_VECTOR"},{"support",source->support()},{"consecutive",source->consecutive()},{"durationMs",source->span_ms()},{"patterns",source->patterns()},{"unstable",source->unstable()},{"counts",counts}}}};
+        }
         if(source)payload["productionRunId"]=production_run;
         auto report=decision_json(decision,product);report["sequence"]=sequence;report["bootId"]=boot_id;report["productionRunId"]=source?json(production_run):json(nullptr);
         const auto filtered=detect_objects(frame.out0.data(),frame.out1.data(),rules.postprocess);
         if(filtered.overflow || filtered.invalid)report["reason"]="目标过多或候选数据异常，请人工复核";
-        else if(source && decision.result==Result::Review)report["reason"]="过件证据不足或检测中断，请人工复核";
+        else if(source && decision.result==Result::Review)report["reason"]="多帧数量不一致、证据不足或检测中断，请人工复核";
         const auto path=root/"records"/(boot_id+"-"+std::to_string(sequence)+".json");
         records.emplace(request,Record{path,payload,request,false,false,report});checked_frame=frame.monotonic_ns;
         pending_storage=request;

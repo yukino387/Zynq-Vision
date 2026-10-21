@@ -149,6 +149,39 @@ export function postprocessBoxes(
     }
     clean.push(b);
   }
+  if (policy.algorithm === "BOX_FILTER_V3") {
+    clean.sort((a, b) => b.confidence - a.confidence || area(a) - area(b));
+    const kept: DetectionBox[] = [];
+    for (const b of clean) {
+      let removed = false;
+      for (const k of kept) {
+        if (k.classId !== b.classId) continue;
+        const small = Math.min(area(k), area(b)),
+          large = Math.max(area(k), area(b));
+        const intersection =
+          Math.max(0, Math.min(k.x2, b.x2) - Math.max(k.x1, b.x1)) *
+          Math.max(0, Math.min(k.y2, b.y2) - Math.max(k.y1, b.y1));
+        // A weak nested box cannot delete a reliable product. Suppressed boxes
+        // cannot suppress anything else, including through containment chains.
+        if (
+          large >= 1.5 * small &&
+          intersection / small >= policy.containment
+        ) {
+          report.nested++;
+          removed = true;
+          break;
+        }
+        if (overlap(k, b) > policy.nmsIou) {
+          report.suppressed++;
+          removed = true;
+          break;
+        }
+      }
+      if (!removed) kept.push(b);
+    }
+    report.overflow = kept.length > policy.maxDetections;
+    return { boxes: kept.slice(0, policy.maxDetections), report };
+  }
   // Remove enclosing duplicates BEFORE NMS, so a confident large box cannot erase its smaller target.
   // Different classes remain independent: bottle/liquid and tray/items are valid nested objects.
   const leaves = clean.filter((outer, index) => {
