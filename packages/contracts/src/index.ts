@@ -98,6 +98,8 @@ export interface DetectionBox {
   y1: number;
   x2: number;
   y2: number;
+  trackId?: number;
+  trackConfirmed?: boolean;
 }
 export interface TerminalModel {
   id: string;
@@ -114,6 +116,7 @@ export interface TerminalProduct {
   product?: string;
   instructions?: string;
   purpose?: import("./plans.js").PlanRules["purpose"];
+  postprocess?: import("./postprocess.js").PostprocessPolicy;
   region?: import("./plans.js").PlanRules["region"];
   checks?: Array<
     import("./plans.js").PlanRules["checks"][number] & { label: string }
@@ -320,3 +323,8 @@ export type {
   FirmwareDeployment,
   FirmwareSegment,
 } from "./entities.js";
+export {
+  postprocessSchema,
+  type PostprocessPolicy,
+  type PostprocessReport,
+} from "./postprocess.js";

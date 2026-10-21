@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { postprocessSchema } from "./postprocess.js";
 export const planPurposeSchema = z.enum([
   "PRESENCE",
   "COUNT",
@@ -23,6 +24,7 @@ export const planRulesSchema = z
   .object({
     product: z.string().trim().min(1).max(120),
     purpose: planPurposeSchema,
+    postprocess: postprocessSchema.optional(),
     classes: z
       .array(z.string().trim().min(1).max(40))
       .min(1)

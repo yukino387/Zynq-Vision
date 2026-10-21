@@ -15,6 +15,7 @@ import sharp from "sharp";
 import { z } from "zod";
 import {
   acceptanceSchema,
+  postprocessSchema,
   inspectionRegionSchema,
   planPurposeSchema,
   type BatchSnapshot,
@@ -24,7 +25,7 @@ import {
   assessInspectionImage,
   evaluateInspection,
 } from "@vision/shared";
-import { detect, decodeRgb565 } from "@vision/device-protocol";
+import { detect, detectObjects, decodeRgb565 } from "@vision/device-protocol";
 import { Public, Roles, type Request } from "../core/auth.js";
 import { Db } from "../core/db.js";
 import { Events } from "../core/events.js";
@@ -52,6 +53,7 @@ const runCountsSchema = z
 const recordSchema = z
   .object({
     formatVersion: z.literal(1),
+    postprocess: postprocessSchema.optional(),
     planId: z.string().min(1),
     planVersion: z.number().int().min(1),
     planName: z.string().min(1).max(120),
@@ -113,6 +115,7 @@ const heartbeatSchema = z
         product: z.string().max(120).optional(),
         instructions: z.string().max(2000).optional(),
         purpose: planPurposeSchema.optional(),
+        postprocess: postprocessSchema.optional(),
         region: inspectionRegionSchema.optional(),
         checks: z
           .array(
@@ -501,7 +504,21 @@ export class TerminalController {
       out1 = decode(dto.out1, 6468);
     if (createHash("sha256").update(raw).digest("hex") !== dto.rawSha256)
       throw new DomainError("CHECKSUM_ERROR", "终端原图摘要不匹配", 422);
-    const boxes = detect(out0, out1).map((box) => ({
+    const policy = postprocessSchema.parse(snapshot.rules.postprocess ?? {});
+    if (snapshot.rules.postprocess && !dto.postprocess)
+      throw new DomainError(
+        "MODEL_INCOMPATIBLE",
+        "此方案要求新版后处理参数，请更新终端程序后重试",
+        422,
+      );
+    if (dto.postprocess && canonical(dto.postprocess) !== canonical(policy))
+      throw new DomainError(
+        "MODEL_INCOMPATIBLE",
+        "记录的后处理参数与方案快照不一致",
+        422,
+      );
+    const filtered = dto.postprocess ? detectObjects(out0, out1, policy) : null;
+    const boxes = (filtered?.boxes ?? detect(out0, out1)).map((box) => ({
       ...box,
       label: snapshot.modelClasses[box.classId]!,
     }));
@@ -514,6 +531,10 @@ export class TerminalController {
         height: 416,
         quality: quality.status,
       });
+    if (filtered?.report.overflow || filtered?.report.invalid) {
+      decision.result = "REVIEW";
+      decision.reason = "目标过多或候选数据异常，请人工复核";
+    }
     // Local data is evidence, not authority. Recompute decisions and flag disagreement or late arrivals.
     const late = matched?.late ?? false;
     if (decision.result !== dto.localResult || late) {
@@ -619,6 +640,12 @@ export class TerminalController {
               bootId: dto.bootId,
               monotonicNs: dto.monotonicNs,
               localResult: dto.localResult,
+              ...(filtered
+                ? {
+                    postprocess:
+                      filtered.report as unknown as Prisma.InputJsonValue,
+                  }
+                : {}),
               manual: !dto.productionRunId,
               ...(dto.productionRunId
                 ? { productionRunId: dto.productionRunId }

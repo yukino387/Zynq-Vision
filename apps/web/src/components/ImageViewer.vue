@@ -5,6 +5,7 @@ import { blob } from "../api";
 import type { Asset } from "../types";
 import type { DetectionBox } from "@vision/contracts";
 const props = defineProps<{
+  postprocess?: import("@vision/contracts").PostprocessReport;
   compact?: boolean;
   operator?: boolean;
   jpeg?: string;
@@ -49,6 +50,37 @@ const size = computed(
 const displayBoxes = computed(
   () => mode.value === "PREVIEW" && showBoxes.value,
 );
+const boxColors = [
+  "#60c5ff",
+  "#ffc857",
+  "#d495ff",
+  "#75d69c",
+  "#ff9292",
+  "#5fdfd4",
+];
+function boxCaption(box: DetectionBox) {
+  const chars = Array.from(displayName(box.label));
+  const label =
+    chars.length > 22 ? chars.slice(0, 21).join("") + "…" : chars.join("");
+  return `${label} ${(box.confidence * 100).toFixed(0)}%${box.trackId ? ` · #${box.trackId}${box.trackConfirmed ? "" : "?"}` : ""}`;
+}
+function tagWidth(box: DetectionBox) {
+  return Math.min(
+    size.value,
+    10 +
+      Array.from(boxCaption(box)).reduce(
+        (total, char) => total + (char.charCodeAt(0) > 255 ? 12 : 7),
+        0,
+      ),
+  );
+}
+const tagX = (box: DetectionBox) =>
+  Math.max(0, Math.min(box.x1, size.value - tagWidth(box)));
+const tagY = (box: DetectionBox) =>
+  Math.max(
+    0,
+    Math.min(imageHeight.value - 20, box.y1 >= 20 ? box.y1 - 20 : box.y1),
+  );
 function measure() {
   if (stage.value)
     fitWidth.value = Math.min(
@@ -163,6 +195,12 @@ onUnmounted(() => {
         >
       </div>
     </div>
+    <p
+      v-if="postprocess?.overflow || postprocess?.invalid"
+      class="postprocess-warning"
+    >
+      候选过多或数据异常，当前显示不用于确认合格，请人工复核。
+    </p>
     <div
       class="image-stage"
       ref="stage"
@@ -223,23 +261,37 @@ onUnmounted(() => {
               {{ area.label }} · 合格中心范围
             </text>
           </g>
-          <g v-for="(box, i) in displayBoxes ? (boxes ?? []) : []" :key="i">
+          <g
+            v-for="(box, i) in displayBoxes ? (boxes ?? []) : []"
+            :key="i"
+            :style="{
+              '--box-color': boxColors[box.classId % boxColors.length],
+            }"
+          >
+            <title>
+              {{ box.label }} · {{ (box.confidence * 100).toFixed(1) }}%{{
+                box.trackId
+                  ? ` · 跟踪 #${box.trackId}${box.trackConfirmed ? "" : " 待确认"}`
+                  : ""
+              }}
+            </title>
             <rect
               :x="box.x1"
               :y="box.y1"
               :width="box.x2 - box.x1"
               :height="box.y2 - box.y1"
+              style="stroke: var(--box-color)"
             />
             <rect
               class="box-label"
-              :x="box.x1"
-              :y="Math.max(0, box.y1 - 20)"
-              :width="Math.min(220, box.label.length * 11 + 48)"
+              :x="tagX(box)"
+              :y="tagY(box)"
+              :width="tagWidth(box)"
               height="20"
+              style="fill: var(--box-color)"
             />
-            <text :x="box.x1 + 5" :y="Math.max(15, box.y1 - 6)">
-              {{ displayName(box.label) }}
-              {{ (box.confidence * 100).toFixed(0) }}%
+            <text :x="tagX(box) + 5" :y="tagY(box) + 14">
+              {{ boxCaption(box) }}
             </text>
           </g>
         </svg>
@@ -253,3 +305,12 @@ onUnmounted(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.postprocess-warning {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--red);
+  font-size: 12px;
+}
+</style>

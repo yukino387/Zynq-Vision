@@ -358,6 +358,7 @@ async function checkOne() {
           :height="shown?.height"
           :region="previewProduct?.region"
           :regions="positionedRegions"
+          :postprocess="shown?.postprocess"
         />
         <div class="canvas-footer">
           <span>{{
@@ -588,7 +589,9 @@ async function checkOne() {
             class="detection-item"
           >
             <span class="target-number">{{
-              String(i + 1).padStart(2, "0")
+              box.trackId
+                ? `#${box.trackId}${box.trackConfirmed ? "" : "?"}`
+                : String(i + 1).padStart(2, "0")
             }}</span>
             <div>
               <b>{{ displayName(box.label) }}</b
@@ -597,7 +600,7 @@ async function checkOne() {
                 {{ Math.round(box.x2) }},{{ Math.round(box.y2) }}</small
               >
             </div>
-            <strong v-if="auth.engineer" class="mono"
+            <strong class="mono"
               >{{ (box.confidence * 100).toFixed(1) }}<small>%</small></strong
             >
           </div>

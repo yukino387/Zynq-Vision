@@ -5,6 +5,7 @@ import type {
   PlanRules,
   InspectionScenario,
 } from "@vision/contracts";
+import { postprocessSchema } from "@vision/contracts";
 import { api, post } from "../api";
 import { useAuthStore } from "../stores/auth";
 import { useNotificationStore } from "../stores/notifications";
@@ -26,6 +27,7 @@ const name = ref(""),
   instructions = ref(""),
   conditions = ref("");
 const scenarios = ref<InspectionScenario[]>([]);
+const postprocess = ref(postprocessSchema.parse({}));
 const entryRegion = () => ({ x: 0, y: 0, width: 100, height: 100 });
 const entries = ref([
   { name: "", min: 1, max: 1, positioned: false, region: entryRegion() },
@@ -55,6 +57,7 @@ async function load() {
 }
 onMounted(load);
 function open(plan?: Pick<InspectionPlan, "name" | "rules">) {
+  postprocess.value = postprocessSchema.parse(plan?.rules.postprocess ?? {});
   name.value = plan?.name ?? "";
   product.value = plan?.rules.product ?? "";
   purpose.value = plan?.rules.purpose ?? "PRESENCE";
@@ -109,6 +112,7 @@ async function save() {
   try {
     const rules: PlanRules = {
       product: product.value,
+      postprocess: postprocess.value,
       purpose: purpose.value,
       classes: entries.value.map((e) => e.name),
       instructions: instructions.value,
@@ -398,6 +402,88 @@ async function remove() {
         添加类别
       </button>
       <p class="note">当前兼容模板最多 6 类，这是设备边界，不限定产品种类。</p>
+      <details class="section-space">
+        <summary>目标框后处理与跟踪</summary>
+        <p class="note">
+          先过滤无效和过小框，再删除同类包含框（外框面积至少为内框的 1.5
+          倍），最后做同类重叠去重。不同类别保留，避免删除瓶体与液面、托盘与物件。跟踪
+          ID 仅用于当前会话；生产件数仍按过件记录统计。
+        </p>
+        <div class="plan-region">
+          <label
+            >重叠去重 IoU<input
+              v-model.number="postprocess.nmsIou"
+              type="number"
+              min="0.05"
+              max="0.95"
+              step="0.01"
+              required
+          /></label>
+          <label
+            >包含覆盖率<input
+              v-model.number="postprocess.containment"
+              type="number"
+              min="0.5"
+              max="1"
+              step="0.01"
+              required
+          /></label>
+          <label
+            >最小框面积 / 原图面积<input
+              v-model.number="postprocess.minArea"
+              type="number"
+              min="0"
+              max="0.1"
+              step="0.00001"
+              required
+          /></label>
+          <label
+            >单帧最多目标<input
+              v-model.number="postprocess.maxDetections"
+              type="number"
+              min="1"
+              max="300"
+              required
+          /></label>
+          <label
+            >跟踪匹配 IoU<input
+              v-model.number="postprocess.trackIou"
+              type="number"
+              min="0.05"
+              max="0.95"
+              step="0.01"
+              required
+          /></label>
+          <label
+            >确认帧数<input
+              v-model.number="postprocess.trackMinHits"
+              type="number"
+              min="1"
+              max="10"
+              required
+          /></label>
+          <label
+            >允许丢失帧数<input
+              v-model.number="postprocess.trackMaxMisses"
+              type="number"
+              min="0"
+              max="30"
+              required
+          /></label>
+          <label
+            >最长丢失时间 ms<input
+              v-model.number="postprocess.trackMaxGapMs"
+              type="number"
+              min="100"
+              max="5000"
+              step="1"
+              required
+          /></label>
+        </div>
+        <p class="note">
+          目标超出上限会转人工复核，不用截断后的数量给出合格结论。
+        </p>
+      </details>
       <label
         >摆放与采样指引<textarea
           v-model="instructions"

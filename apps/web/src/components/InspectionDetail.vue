@@ -118,6 +118,7 @@ async function raw() {
         :boxes="inspection.detections"
         :region="inspection.metadata?.snapshot?.rules.region"
         :regions="positionedRegions"
+        :postprocess="inspection.metadata?.postprocess"
       />
       <p class="note">{{ reasonLabel(inspection.reason) }}</p>
       <RouterLink

@@ -332,7 +332,9 @@ void refresh(lv_timer_t*) {
         if(picture_valid && frame.at("fresh").get<bool>() && displayed_frame==frame_id)return;
         std::memcpy(pixels.data(),frame_data.data()+4+size,pixels.size());displayed_frame=frame_id;
         lv_image_set_src(picture,&image);lv_obj_invalidate(picture);picture_valid=true;lv_obj_add_flag(empty_label,LV_OBJ_FLAG_HIDDEN);
-        text(fresh_label,(frame.at("fresh").get<bool>()?"实时画面":"画面已超时")+std::string(" · #")+std::to_string(frame.at("frameId").get<unsigned>()));
+        unsigned confirmed=0;for(const auto& b:frame.at("boxes"))if(b.value("trackConfirmed",false))++confirmed;
+        const bool truncated=frame.contains("postprocess") && (frame["postprocess"].value("overflow",false) || frame["postprocess"].value("invalid",0u));
+        text(fresh_label,(frame.at("fresh").get<bool>()?"实时画面":"画面已超时")+std::string(" · #")+std::to_string(frame.at("frameId").get<unsigned>())+" · 本帧目标 "+std::to_string(frame.at("boxes").size())+" · 稳定跟踪 "+std::to_string(confirmed)+(truncated?" · 目标异常，请复核":""));
         for(auto object:rectangles)lv_obj_delete(object);rectangles.clear();
         if(has_product && frame.at("planId")==state["product"].at("id") && frame.at("planVersion")==state["product"].at("version") && state["product"].contains("checks"))for(const auto& check:state["product"]["checks"])if(check.contains("region")) {
             const auto& r=check["region"];auto rectangle=lv_obj_create(picture);lv_obj_remove_style_all(rectangle);
@@ -341,8 +343,16 @@ void refresh(lv_timer_t*) {
             caption(rectangle,(check.at("label").get<std::string>()+" 合格中心范围").c_str(),3,2,200,0xe6ad39);
         }
         if(frame.at("fresh").get<bool>())for(const auto& box:frame.at("boxes")) {
+            const uint32_t palette[]={0x60c5ff,0xffc857,0xd495ff,0x75d69c,0xff9292,0x5fdfd4};
+            const unsigned cls=box.at("classId").get<unsigned>();const auto color=palette[cls%6];
             auto rectangle=lv_obj_create(picture);lv_obj_remove_style_all(rectangle);
-            lv_obj_set_pos(rectangle,int(box["x1"].get<double>()),int(box["y1"].get<double>()));lv_obj_set_size(rectangle,int(box["x2"].get<double>()-box["x1"].get<double>()),int(box["y2"].get<double>()-box["y1"].get<double>()));lv_obj_set_style_border_width(rectangle,2,0);lv_obj_set_style_border_color(rectangle,lv_color_hex(0xd8e5dc),0);rectangles.push_back(rectangle);
+            lv_obj_set_pos(rectangle,int(box["x1"].get<double>()),int(box["y1"].get<double>()));lv_obj_set_size(rectangle,int(box["x2"].get<double>()-box["x1"].get<double>()),int(box["y2"].get<double>()-box["y1"].get<double>()));lv_obj_set_style_border_width(rectangle,2,0);lv_obj_set_style_border_color(rectangle,lv_color_hex(color),0);rectangles.push_back(rectangle);
+            const std::string label=cls<frame.at("modelClasses").size()?frame["modelClasses"][cls].get<std::string>():"类别 "+std::to_string(cls);
+            std::string value=label+" "+std::to_string(unsigned(box.at("confidence").get<double>()*100+.5))+"%";
+            const unsigned id=box.value("trackId",0u);if(id)value+=" #"+std::to_string(id)+(box.value("trackConfirmed",false)?"":"?");
+            lv_point_t extent;lv_text_get_size(&extent,value.c_str(),ui_font,0,0,1000,LV_TEXT_FLAG_NONE);
+            const int width=std::min(416,int(extent.x)+8),x=std::clamp(int(box["x1"].get<double>()),0,416-width),y=std::clamp(int(box["y1"].get<double>())>=18?int(box["y1"].get<double>())-18:int(box["y1"].get<double>()),0,398);
+            auto tag=panel(picture,x,y,width,18,color);auto title=caption(tag,value.c_str(),4,1,width-8);lv_label_set_long_mode(title,LV_LABEL_LONG_DOT);rectangles.push_back(tag);
         }
     }catch(const std::exception& e){clear_picture();lv_obj_set_style_bg_color(health_dot,lv_color_hex(0xd93025),0);text(fresh_label,"画面不可用");text(run_label,"服务连接异常");text(error_label,e.what());}
 }

@@ -39,6 +39,7 @@ export interface Inspection {
     productionRunId?: string;
     decision?: import("./inspection.js").InspectionDecision;
     snapshot?: import("./inspection.js").BatchSnapshot;
+    postprocess?: import("./postprocess.js").PostprocessReport;
   };
   deviceId: string | null;
   source: Source;
