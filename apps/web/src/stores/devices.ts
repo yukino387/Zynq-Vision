@@ -46,6 +46,7 @@ export const useDeviceStore = defineStore("devices", () => {
     refreshing = false,
     snapshotRevision = 0,
     stopped = false;
+  const watched = new Set<string>();
   const current = computed(
     () =>
       devices.value.find((d) => d.id === selected.value) ?? devices.value[0],
@@ -97,6 +98,7 @@ export const useDeviceStore = defineStore("devices", () => {
       if (event.type === "session.ready") {
         connected.value = true;
         void snapshot().catch((e) => useNotificationStore().error(e));
+        for (const id of watched) sendPreviewWatch(id, true);
         return;
       }
       const device = devices.value.find((d) => d.id === event.entityId);
@@ -119,7 +121,7 @@ export const useDeviceStore = defineStore("devices", () => {
           ? new Date(p.lastSeen).toISOString()
           : null;
         device.error = p.error;
-        device.connectionState = p.lastSeen ? "ONLINE" : "OFFLINE";
+        // 在线状态只由快照和 status.changed 决定；遥测不能把离线设备翻成在线。
         // 遥测不落库，所以趋势只能在客户端攒。只留最近 120 帧，够画一条趋势。
         if (device.id === current.value?.id)
           history.value = [
@@ -199,6 +201,25 @@ export const useDeviceStore = defineStore("devices", () => {
     if (snapshotTimer) clearInterval(snapshotTimer);
     snapshotRevision++;
   }
+  function sendPreviewWatch(deviceId: string, on: boolean) {
+    if (socket?.readyState !== WebSocket.OPEN) return;
+    socket.send(
+      JSON.stringify({
+        type: on ? "preview.watch" : "preview.unwatch",
+        deviceId,
+      }),
+    );
+  }
+  function watchPreview(deviceId: string) {
+    if (!deviceId) return;
+    watched.add(deviceId);
+    sendPreviewWatch(deviceId, true);
+  }
+  function unwatchPreview(deviceId: string) {
+    if (!deviceId) return;
+    watched.delete(deviceId);
+    sendPreviewWatch(deviceId, false);
+  }
   return {
     devices,
     selected,
@@ -210,5 +231,7 @@ export const useDeviceStore = defineStore("devices", () => {
     snapshot,
     start,
     stop,
+    watchPreview,
+    unwatchPreview,
   };
 });

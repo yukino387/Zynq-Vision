@@ -42,7 +42,7 @@ export function parseTerminalFrame(binary: Buffer) {
 export async function readTerminalPreview(
   device: Device,
   after = 0,
-): Promise<TerminalPreview> {
+): Promise<TerminalPreview | null> {
   const response = await terminalRequest(
     device,
     after > 0 ? `/preview?after=${after}` : "/preview",
@@ -52,6 +52,7 @@ export async function readTerminalPreview(
   );
   const binary = Buffer.from(await response.arrayBuffer());
   const { metadata, raw } = parseTerminalFrame(binary);
+  if (metadata.frameId === after) return null;
   if (!metadata.fresh)
     throw new DomainError("DEVICE_TIMEOUT", "当前画面已过期", 409);
   const jpeg = await sharp(decodeRgb565(raw), {

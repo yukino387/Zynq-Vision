@@ -172,7 +172,7 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
                   ? ("DESYNCED" as const)
                   : ("SYNCED" as const),
             telemetry:
-              state?.timing && state
+              terminal.online && state?.timing && state
                 ? {
                     frameId: state.timing.frameId,
                     receivedAt: state.receivedAt,
@@ -290,7 +290,11 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
           snapshot.source,
         );
       }
-      if (snapshot.executionMode === "LINUX_TERMINAL" && snapshot.telemetry)
+      if (
+        snapshot.executionMode === "LINUX_TERMINAL" &&
+        snapshot.connectionState === "ONLINE" &&
+        snapshot.telemetry
+      )
         this.events.emit(
           "device.telemetry",
           snapshot.id,
@@ -319,14 +323,13 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
         .map((snapshot) => snapshot.id),
     );
     for (const [id, poller] of this.previewPollers) {
-      if (online.has(id) && this.events.count() > 0) continue;
+      if (online.has(id) && this.events.watching(id)) continue;
       poller.stopped = true;
       if (poller.timer) clearTimeout(poller.timer);
       this.previewPollers.delete(id);
     }
-    if (this.events.count() === 0) return;
     for (const id of online) {
-      if (this.previewPollers.has(id)) continue;
+      if (!this.events.watching(id) || this.previewPollers.has(id)) continue;
       const poller: {
         timer: ReturnType<typeof setTimeout> | null;
         busy: boolean;
@@ -353,7 +356,7 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
       const device = await this.db.device.findUnique({ where: { id } });
       if (!device || !isLinuxTerminal(device)) return;
       const frame = await readTerminalPreview(device, poller.frameId);
-      if (frame.frameId === poller.frameId) return;
+      if (!frame || frame.frameId === poller.frameId) return;
       poller.frameId = frame.frameId;
       this.events.emit("device.preview.frame", id, frame, "BOARD");
     } catch {

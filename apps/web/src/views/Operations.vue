@@ -6,7 +6,7 @@ import {
   terminalActivity,
   deviceSyncText,
 } from "@vision/shared";
-import { ref, computed, onMounted, watch } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import type { Inspection } from "../types";
 import { post } from "../api";
@@ -89,15 +89,20 @@ const frames = ref<Preview[]>([]),
 let lastFilmstripAt = 0;
 watch(
   () => device.value?.id,
-  () => {
-    checkRequest.value =
-      sessionStorage.getItem(`vision.check.${device.value?.id}`) || "";
+  (id, previous) => {
+    if (previous) devices.unwatchPreview(previous);
+    if (id) devices.watchPreview(id);
+    checkRequest.value = sessionStorage.getItem(`vision.check.${id}`) || "";
     frames.value = [];
     held.value = null;
     lastFilmstripAt = 0;
   },
   { immediate: true },
 );
+onBeforeUnmount(() => {
+  const id = device.value?.id;
+  if (id) devices.unwatchPreview(id);
+});
 watch(preview, (frame) => {
   if (!frame || Date.now() - lastFilmstripAt < 1000) return;
   lastFilmstripAt = Date.now();

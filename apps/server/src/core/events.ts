@@ -10,6 +10,42 @@ import { Db } from "./db.js";
 export class Events implements OnModuleDestroy {
   private server: WebSocketServer | null = null;
   private sequence = 0;
+  private watchers = new Map<string, Set<WebSocket>>();
+  private subscriptions = new WeakMap<WebSocket, Set<string>>();
+  watching(deviceId: string) {
+    return (this.watchers.get(deviceId)?.size ?? 0) > 0;
+  }
+  private setWatch(ws: WebSocket, deviceId: string, on: boolean) {
+    if (on) {
+      let devices = this.watchers.get(deviceId);
+      if (!devices) {
+        devices = new Set();
+        this.watchers.set(deviceId, devices);
+      }
+      devices.add(ws);
+      let subscriptions = this.subscriptions.get(ws);
+      if (!subscriptions) {
+        subscriptions = new Set();
+        this.subscriptions.set(ws, subscriptions);
+      }
+      subscriptions.add(deviceId);
+      return;
+    }
+    const devices = this.watchers.get(deviceId);
+    devices?.delete(ws);
+    if (devices && !devices.size) this.watchers.delete(deviceId);
+    this.subscriptions.get(ws)?.delete(deviceId);
+  }
+  private forget(ws: WebSocket) {
+    const subscriptions = this.subscriptions.get(ws);
+    if (!subscriptions) return;
+    for (const deviceId of subscriptions) {
+      const devices = this.watchers.get(deviceId);
+      devices?.delete(ws);
+      if (devices && !devices.size) this.watchers.delete(deviceId);
+    }
+    this.subscriptions.delete(ws);
+  }
   constructor(
     @Inject(JwtService) private jwt: JwtService,
     @Inject(Db) private db: Db,
@@ -57,6 +93,29 @@ export class Events implements OnModuleDestroy {
                 Math.max(0, claims.exp * 1000 - Date.now()),
               );
               clearTimeout(timeout);
+              ws.on("message", (message) => {
+                try {
+                  const value = JSON.parse(message.toString()) as {
+                    type?: string;
+                    deviceId?: string;
+                  };
+                  if (
+                    typeof value.deviceId !== "string" ||
+                    !value.deviceId ||
+                    value.deviceId.length > 100 ||
+                    (value.type !== "preview.watch" &&
+                      value.type !== "preview.unwatch")
+                  )
+                    return;
+                  this.setWatch(
+                    ws,
+                    value.deviceId,
+                    value.type === "preview.watch",
+                  );
+                } catch {
+                  /* Ignore malformed subscription messages. */
+                }
+              });
               ws.send(
                 JSON.stringify(
                   this.envelope("session.ready", "session", {
@@ -72,6 +131,7 @@ export class Events implements OnModuleDestroy {
         ws.on("close", () => {
           clearTimeout(timeout);
           if (expiration) clearTimeout(expiration);
+          this.forget(ws);
         });
         Object.defineProperty(ws, "authorized", { get: () => authenticated });
       });

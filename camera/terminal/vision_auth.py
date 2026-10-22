@@ -111,7 +111,10 @@ class Authority:
             username, password = document.get('username'), document.get('password')
             if not isinstance(username, str) or not 1 <= len(username) <= 80 or not isinstance(password, str) or not 1 <= len(password) <= 200:
                 raise AuthError('请输入平台账号和密码', 400)
-            server = self._server() if self.connection.exists() else self.valid_server(document.get('server', ''))
+            requested = document.get('server')
+            if not isinstance(requested, str) or not requested:
+                requested = self._server() if self.connection.exists() else ''
+            server = self.valid_server(requested)
             reply = self._remote(server, '/api/auth/login', {'username': username, 'password': password})
             bearer = reply.get('token')
             if not isinstance(bearer, str) or not bearer:
