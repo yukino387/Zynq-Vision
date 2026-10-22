@@ -8,16 +8,42 @@ import type {
 } from "@vision/contracts";
 import { api, errorText } from "../api";
 import { useDeviceStore } from "../stores/devices";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { terminalActivity } from "@vision/shared";
 import InspectionDetail from "../components/InspectionDetail.vue";
+import AnalyticsPanel from "../components/AnalyticsPanel.vue";
 import Status from "../components/Status.vue";
 import Drawer from "../components/Drawer.vue";
 import Icon from "../components/Icon.vue";
-import { UiButton, UiCard, UiSelect, UiBadge, UiStat } from "../components/ui";
+import {
+  UiButton,
+  UiCard,
+  UiSelect,
+  UiBadge,
+  UiStat,
+  UiTabs,
+} from "../components/ui";
 
 const devices = useDeviceStore(),
-  route = useRoute();
+  route = useRoute(),
+  router = useRouter();
+const tab = ref(route.query.tab === "stats" ? "stats" : "batches");
+const tabs = [
+  { key: "batches", label: "批次明细" },
+  { key: "stats", label: "统计分析" },
+];
+watch(tab, (value) => {
+  if (route.query.tab === value) return;
+  void router.replace({
+    query: { ...route.query, tab: value === "batches" ? undefined : value },
+  });
+});
+watch(
+  () => route.query.tab,
+  (value) => {
+    tab.value = value === "stats" ? "stats" : "batches";
+  },
+);
 const batches = ref<InspectionBatch[]>([]),
   selected = ref(""),
   summary = ref<BatchSummary | null>(null),
@@ -125,10 +151,11 @@ watch(
     <div>
       <h1>生产批次</h1>
       <p>
-        批次随现场工作台自动过件开始/停止自动创建与关闭，此页面供实时统计复核与历史追踪。
+        批次随现场工作台自动创建与关闭；统计分析汇总趋势、合格率与类别分布。
       </p>
     </div>
     <div class="heading-actions">
+      <UiTabs v-model="tab" :items="tabs" variant="segment" size="sm" />
       <Status :value="devices.current?.connectionState" />
       <UiBadge
         tone="forest"
@@ -155,7 +182,7 @@ watch(
       </UiSelect>
     </div>
 
-    <div class="toolbar-group batch-select-group">
+    <div v-if="tab === 'batches'" class="toolbar-group batch-select-group">
       <span class="toolbar-label">生产批次</span>
       <UiSelect v-model="selected" aria-label="生产批次" size="md">
         <option value="">请选择批次</option>
@@ -178,188 +205,195 @@ watch(
     </div>
   </section>
 
-  <div v-if="error" class="error-banner" role="alert">
-    <Icon name="alert" :size="16" />
-    <span>{{ error }}</span>
-  </div>
-
-  <!-- 所选批次上下文卡片 -->
-  <UiCard v-if="batch" variant="accent" padding="md" class="batch-info-card">
-    <div class="batch-info-header">
-      <div class="batch-title-row">
-        <h3>当前批次：{{ batch.name }}</h3>
-
-        <UiBadge
-          :tone="batch.status === 'OPEN' ? 'success' : 'neutral'"
-          chip
-          size="sm"
-        >
-          {{ batch.status === "OPEN" ? "进行中" : "已归档" }}
-        </UiBadge>
-      </div>
-      <div class="batch-tags">
-        <span class="batch-tag-item"
-          >产品：<b>{{ batch.snapshot.rules.product }}</b></span
-        >
-        <span class="batch-tag-item"
-          >规则版本：<b>V{{ batch.snapshot.planVersion }}</b></span
-        >
-        <span class="batch-tag-item"
-          >模型：<b>{{ batch.snapshot.modelVersion }}</b></span
-        >
-      </div>
-    </div>
-    <div v-if="localBatch" class="batch-sub-stats mono">
-      <span
-        >本机原判已检：<b>{{ terminalState?.runTotal }}</b> 件</span
-      >
-      <span class="divider">|</span>
-      <span
-        >全机待同步：<b>{{ terminalState?.pendingSync }}</b> 条</span
-      >
-    </div>
-    <p class="batch-note">
-      本页统计已经上传到平台的单件记录。设备在每件产品离开画面后保存并计数；全机待上传数量包含历史批次和补检，上传后按各自批次归入。
-    </p>
-  </UiCard>
-
-  <!-- 批次统计与记录两栏布局 -->
-  <div class="batch-content-grid">
-    <!-- 左侧：指标总览 -->
-    <div class="batch-stats-col">
-      <UiCard
-        title="批次指标汇总"
-        subtitle="所选批次判定与合格率统计"
-        padding="md"
-      >
-        <template v-if="summary">
-          <div class="stat-cards-grid">
-            <UiStat
-              label="检测总件数"
-              :value="summary.total"
-              unit="件"
-              icon="scan"
-            />
-            <UiStat
-              label="综合合格率"
-              :value="
-                summary.passRate === null
-                  ? '暂无已判定记录'
-                  : (summary.passRate * 100).toFixed(1)
-              "
-              unit="%"
-              icon="gauge"
-              :tone="
-                summary.passRate && summary.passRate >= 0.95
-                  ? 'success'
-                  : 'warn'
-              "
-            />
-            <UiStat
-              label="最终合格"
-              :value="summary.final.PASS"
-              unit="件"
-              tone="success"
-            />
-            <UiStat
-              label="最终不合格"
-              :value="summary.final.FAIL"
-              unit="件"
-              tone="crit"
-            />
-          </div>
-
-          <div class="summary-details">
-            <h4 class="sub-header">机器原判与最终结论</h4>
-            <div class="verdict-compare-table">
-              <div class="compare-row compare-header">
-                <span>判定类型</span>
-                <span>平台机器原判</span>
-                <span>最终处理结论</span>
-              </div>
-              <div class="compare-row">
-                <span class="verdict-tag ok">合格</span>
-                <span class="mono">{{ summary.machine.PASS }}</span>
-                <span class="mono font-semibold">{{ summary.final.PASS }}</span>
-              </div>
-              <div class="compare-row">
-                <span class="verdict-tag fail">不合格</span>
-                <span class="mono">{{ summary.machine.FAIL }}</span>
-                <span class="mono font-semibold">{{ summary.final.FAIL }}</span>
-              </div>
-              <div class="compare-row">
-                <span class="verdict-tag review">待复核</span>
-                <span class="mono">{{ summary.machine.REVIEW }}</span>
-                <span class="mono font-semibold">{{ summary.pending }}</span>
-              </div>
-              <div class="compare-row">
-                <span class="verdict-tag error">异常</span>
-                <span class="mono">{{ summary.machine.ERROR }}</span>
-                <span class="mono font-semibold">{{
-                  summary.final.ERROR
-                }}</span>
-              </div>
-            </div>
-          </div>
-        </template>
-        <p v-else class="empty-hint">请在上方选择一个生产批次以查看指标。</p>
-      </UiCard>
+  <template v-if="tab === 'batches'">
+    <div v-if="error" class="error-banner" role="alert">
+      <Icon name="alert" :size="16" />
+      <span>{{ error }}</span>
     </div>
 
-    <!-- 右侧：最近过件流水 -->
-    <div class="batch-records-col">
-      <UiCard
-        title="最近过件明细"
-        subtitle="点击行打开单件检测详情与复核"
-        padding="md"
-      >
-        <template #actions>
-          <UiBadge v-if="loading" tone="info" size="sm">同步中…</UiBadge>
-          <span v-else class="records-count mono"
-            >{{ records.length }} 条记录</span
+    <!-- 所选批次上下文卡片 -->
+    <UiCard v-if="batch" variant="accent" padding="md" class="batch-info-card">
+      <div class="batch-info-header">
+        <div class="batch-title-row">
+          <h3>当前批次：{{ batch.name }}</h3>
+
+          <UiBadge
+            :tone="batch.status === 'OPEN' ? 'success' : 'neutral'"
+            chip
+            size="sm"
           >
-        </template>
-
-        <div class="records-list">
-          <button
-            v-for="record in records"
-            :key="record.id"
-            class="record-item"
-            @click="detail = record"
-          >
-            <div class="record-left">
-              <span v-if="record.frameId != null" class="record-id mono"
-                >图像帧 {{ record.frameId }}</span
-              >
-              <time class="record-time mono">{{
-                new Date(record.createdAt).toLocaleTimeString()
-              }}</time>
-            </div>
-            <div class="record-middle">
-              <span class="record-verdict">
-                原判 <Status :value="record.result" />
-              </span>
-              <span class="record-sep">/</span>
-              <span class="record-verdict">
-                人工
-                <Status
-                  v-if="record.reviewResult"
-                  :value="record.reviewResult"
-                /><span v-else class="text-muted">未复核</span>
-              </span>
-            </div>
-            <div class="record-right">
-              <span class="record-arrow">查看</span>
-            </div>
-          </button>
-
-          <p v-if="!records.length" class="empty-hint">
-            当前批次暂无已同步检测记录。
-          </p>
+            {{ batch.status === "OPEN" ? "进行中" : "已归档" }}
+          </UiBadge>
         </div>
-      </UiCard>
+        <div class="batch-tags">
+          <span class="batch-tag-item"
+            >产品：<b>{{ batch.snapshot.rules.product }}</b></span
+          >
+          <span class="batch-tag-item"
+            >规则版本：<b>V{{ batch.snapshot.planVersion }}</b></span
+          >
+          <span class="batch-tag-item"
+            >模型：<b>{{ batch.snapshot.modelVersion }}</b></span
+          >
+        </div>
+      </div>
+      <div v-if="localBatch" class="batch-sub-stats mono">
+        <span
+          >本机原判已检：<b>{{ terminalState?.runTotal }}</b> 件</span
+        >
+        <span class="divider">|</span>
+        <span
+          >全机待同步：<b>{{ terminalState?.pendingSync }}</b> 条</span
+        >
+      </div>
+      <p class="batch-note">
+        本页统计已经上传到平台的单件记录。设备在每件产品离开画面后保存并计数；全机待上传数量包含历史批次和补检，上传后按各自批次归入。
+      </p>
+    </UiCard>
+
+    <!-- 批次统计与记录两栏布局 -->
+    <div class="batch-content-grid">
+      <!-- 左侧：指标总览 -->
+      <div class="batch-stats-col">
+        <UiCard
+          title="批次指标汇总"
+          subtitle="所选批次判定与合格率统计"
+          padding="md"
+        >
+          <template v-if="summary">
+            <div class="stat-cards-grid">
+              <UiStat
+                label="检测总件数"
+                :value="summary.total"
+                unit="件"
+                icon="scan"
+              />
+              <UiStat
+                label="综合合格率"
+                :value="
+                  summary.passRate === null
+                    ? '暂无已判定记录'
+                    : (summary.passRate * 100).toFixed(1)
+                "
+                unit="%"
+                icon="gauge"
+                :tone="
+                  summary.passRate && summary.passRate >= 0.95
+                    ? 'success'
+                    : 'warn'
+                "
+              />
+              <UiStat
+                label="最终合格"
+                :value="summary.final.PASS"
+                unit="件"
+                tone="success"
+              />
+              <UiStat
+                label="最终不合格"
+                :value="summary.final.FAIL"
+                unit="件"
+                tone="crit"
+              />
+            </div>
+
+            <div class="summary-details">
+              <h4 class="sub-header">机器原判与最终结论</h4>
+              <div class="verdict-compare-table">
+                <div class="compare-row compare-header">
+                  <span>判定类型</span>
+                  <span>平台机器原判</span>
+                  <span>最终处理结论</span>
+                </div>
+                <div class="compare-row">
+                  <span class="verdict-tag ok">合格</span>
+                  <span class="mono">{{ summary.machine.PASS }}</span>
+                  <span class="mono font-semibold">{{
+                    summary.final.PASS
+                  }}</span>
+                </div>
+                <div class="compare-row">
+                  <span class="verdict-tag fail">不合格</span>
+                  <span class="mono">{{ summary.machine.FAIL }}</span>
+                  <span class="mono font-semibold">{{
+                    summary.final.FAIL
+                  }}</span>
+                </div>
+                <div class="compare-row">
+                  <span class="verdict-tag review">待复核</span>
+                  <span class="mono">{{ summary.machine.REVIEW }}</span>
+                  <span class="mono font-semibold">{{ summary.pending }}</span>
+                </div>
+                <div class="compare-row">
+                  <span class="verdict-tag error">异常</span>
+                  <span class="mono">{{ summary.machine.ERROR }}</span>
+                  <span class="mono font-semibold">{{
+                    summary.final.ERROR
+                  }}</span>
+                </div>
+              </div>
+            </div>
+          </template>
+          <p v-else class="empty-hint">请在上方选择一个生产批次以查看指标。</p>
+        </UiCard>
+      </div>
+
+      <!-- 右侧：最近过件流水 -->
+      <div class="batch-records-col">
+        <UiCard
+          title="最近过件明细"
+          subtitle="点击行打开单件检测详情与复核"
+          padding="md"
+        >
+          <template #actions>
+            <UiBadge v-if="loading" tone="info" size="sm">同步中…</UiBadge>
+            <span v-else class="records-count mono"
+              >{{ records.length }} 条记录</span
+            >
+          </template>
+
+          <div class="records-list">
+            <button
+              v-for="record in records"
+              :key="record.id"
+              class="record-item"
+              @click="detail = record"
+            >
+              <div class="record-left">
+                <span v-if="record.frameId != null" class="record-id mono"
+                  >图像帧 {{ record.frameId }}</span
+                >
+                <time class="record-time mono">{{
+                  new Date(record.createdAt).toLocaleTimeString()
+                }}</time>
+              </div>
+              <div class="record-middle">
+                <span class="record-verdict">
+                  原判 <Status :value="record.result" />
+                </span>
+                <span class="record-sep">/</span>
+                <span class="record-verdict">
+                  人工
+                  <Status
+                    v-if="record.reviewResult"
+                    :value="record.reviewResult"
+                  /><span v-else class="text-muted">未复核</span>
+                </span>
+              </div>
+              <div class="record-right">
+                <span class="record-arrow">查看</span>
+              </div>
+            </button>
+
+            <p v-if="!records.length" class="empty-hint">
+              当前批次暂无已同步检测记录。
+            </p>
+          </div>
+        </UiCard>
+      </div>
     </div>
-  </div>
+  </template>
+  <AnalyticsPanel v-else :device-id="devices.current?.id ?? ''" />
 
   <!-- 详情抽屉 -->
   <Drawer v-if="detail" title="检测详情" @close="detail = null">

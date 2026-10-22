@@ -14,7 +14,6 @@ import Access from "./views/Access.vue";
 import Plans from "./views/Plans.vue";
 import Account from "./views/Account.vue";
 import Production from "./views/Production.vue";
-import Analytics from "./views/Analytics.vue";
 
 export interface TabMeta {
   tab: string;
@@ -66,14 +65,7 @@ export const routes: RouteRecordRaw[] = [
   },
   {
     path: "/analytics",
-    name: "analytics",
-    component: Analytics,
-    meta: {
-      title: "统计看板",
-      nav: true,
-      order: 3.5,
-      discipline: "business",
-    },
+    redirect: { path: "/production", query: { tab: "stats" } },
   },
   {
     path: "/account",

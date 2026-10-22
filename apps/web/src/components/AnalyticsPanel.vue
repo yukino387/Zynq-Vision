@@ -3,12 +3,16 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { displayName } from "@vision/shared";
 import { api } from "../api";
 import { useNotificationStore } from "../stores/notifications";
-import AsyncState from "../components/AsyncState.vue";
-import DistributionBar from "../components/DistributionBar.vue";
-import RankBars from "../components/RankBars.vue";
-import Status from "../components/Status.vue";
-import TrendChart from "../components/TrendChart.vue";
-import { UiButton, UiSelect, UiStat, UiTable, UiTabs } from "../components/ui";
+import AsyncState from "./AsyncState.vue";
+import DistributionBar from "./DistributionBar.vue";
+import RankBars from "./RankBars.vue";
+import Status from "./Status.vue";
+import TrendChart from "./TrendChart.vue";
+import { UiButton, UiStat, UiTable, UiTabs } from "./ui";
+
+const props = withDefaults(defineProps<{ deviceId?: string }>(), {
+  deviceId: "",
+});
 
 interface StatsPoint {
   at: string;
@@ -34,27 +38,6 @@ interface Stats {
   };
   series: StatsPoint[];
   classes: { label: string; count: number }[];
-  batches: {
-    id: string;
-    name: string;
-    status: string;
-    deviceName: string | null;
-    createdAt: string;
-    closedAt: string | null;
-    total: number;
-    pass: number;
-    fail: number;
-    passRate: number | null;
-  }[];
-  recent: {
-    id: string;
-    result: string;
-    reviewResult: string | null;
-    createdAt: string;
-    planVersion: string | null;
-    latency: number | null;
-    deviceName: string | null;
-  }[];
   devices: {
     id: string;
     name: string;
@@ -72,8 +55,7 @@ const notices = useNotificationStore();
 const stats = ref<Stats | null>(null),
   error = ref(""),
   busy = ref(false),
-  range = ref("7d"),
-  deviceId = ref("");
+  range = ref("7d");
 const ranges = [
   { key: "24h", label: "近 24 小时" },
   { key: "7d", label: "近 7 天" },
@@ -92,7 +74,7 @@ async function load() {
         from: from.toISOString(),
         to: now.toISOString(),
       });
-    if (deviceId.value) query.set("deviceId", deviceId.value);
+    if (props.deviceId) query.set("deviceId", props.deviceId);
     stats.value = await api<Stats>(`/inspections/stats?${query}`);
     error.value = "";
   } catch (e) {
@@ -104,7 +86,7 @@ async function load() {
   }
 }
 
-watch([range, deviceId], () => void load());
+watch([range, () => props.deviceId], () => void load());
 onMounted(() => {
   void load();
   timer = setInterval(() => void load(), 30000);
@@ -164,9 +146,6 @@ const distribution = computed<Slice[]>(() => [
   { label: "待复核 / 异常", value: pending.value, tone: "warn" },
 ]);
 
-function percent(value: number | null) {
-  return value == null ? "—" : `${(value * 100).toFixed(1)}%`;
-}
 function time(value: string | null) {
   return value
     ? new Date(value).toLocaleString("zh-CN", { hour12: false })
@@ -180,34 +159,11 @@ const rangeLabel = computed(() =>
 </script>
 
 <template>
-  <div class="page-heading">
-    <div>
-      <h1>统计看板</h1>
-      <p>检测量、合格率、结果构成与生产批次的实时汇总。</p>
-    </div>
-    <div class="heading-actions">
-      <UiTabs v-model="range" :items="ranges" variant="segment" size="sm" />
-      <UiButton
-        variant="secondary"
-        icon="refresh"
-        :loading="busy"
-        @click="load"
-      >
-        {{ busy ? "刷新中…" : "刷新" }}
-      </UiButton>
-    </div>
-  </div>
-
   <div class="analytics-toolbar">
-    <label class="device-filter"
-      >设备
-      <UiSelect v-model="deviceId" aria-label="统计设备" size="sm">
-        <option value="">全部设备</option>
-        <option v-for="device in devices" :key="device.id" :value="device.id">
-          {{ displayName(device.name) }}
-        </option>
-      </UiSelect>
-    </label>
+    <UiTabs v-model="range" :items="ranges" variant="segment" size="sm" />
+    <UiButton variant="secondary" icon="refresh" :loading="busy" @click="load">
+      {{ busy ? "刷新中…" : "刷新" }}
+    </UiButton>
     <span class="muted mono range-label">{{ rangeLabel }}</span>
   </div>
 
@@ -342,83 +298,6 @@ const rangeLabel = computed(() =>
       <div class="analytics-tables">
         <section class="panel table-panel">
           <div class="panel-head">
-            <h3>生产批次</h3>
-          </div>
-          <UiTable>
-            <thead>
-              <tr>
-                <th>批次</th>
-                <th>状态</th>
-                <th>设备</th>
-                <th>数量</th>
-                <th>合格率</th>
-                <th>开始时间</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="batch in stats.batches" :key="batch.id">
-                <td>{{ batch.name }}</td>
-                <td>
-                  <Status
-                    chip
-                    :value="batch.status === 'OPEN' ? 'RUNNING' : 'COMPLETED'"
-                    :label="batch.status === 'OPEN' ? '进行中' : '已结束'"
-                  />
-                </td>
-                <td>{{ batch.deviceName || "—" }}</td>
-                <td class="mono">{{ batch.total }}</td>
-                <td class="mono">{{ percent(batch.passRate) }}</td>
-                <td class="mono">{{ time(batch.createdAt) }}</td>
-              </tr>
-              <tr v-if="!stats.batches.length">
-                <td colspan="6" class="table-empty">本时段没有生产批次</td>
-              </tr>
-            </tbody>
-          </UiTable>
-        </section>
-
-        <section class="panel table-panel">
-          <div class="panel-head">
-            <h3>最近检测</h3>
-          </div>
-          <UiTable>
-            <thead>
-              <tr>
-                <th>时间</th>
-                <th>结果</th>
-                <th>设备</th>
-                <th>方案版本</th>
-                <th>耗时</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in stats.recent" :key="row.id">
-                <td class="mono">
-                  <RouterLink
-                    :to="{ name: 'inspection', params: { id: row.id } }"
-                    >{{ time(row.createdAt) }}</RouterLink
-                  >
-                </td>
-                <td>
-                  <Status chip :value="row.reviewResult ?? row.result" />
-                </td>
-                <td>{{ row.deviceName || "—" }}</td>
-                <td class="mono">{{ row.planVersion || "—" }}</td>
-                <td class="mono">
-                  {{
-                    row.latency == null ? "—" : row.latency.toFixed(1) + " ms"
-                  }}
-                </td>
-              </tr>
-              <tr v-if="!stats.recent.length">
-                <td colspan="5" class="table-empty">本时段没有检测记录</td>
-              </tr>
-            </tbody>
-          </UiTable>
-        </section>
-
-        <section class="panel table-panel">
-          <div class="panel-head">
             <h3>设备状态</h3>
           </div>
           <UiTable>
@@ -455,21 +334,12 @@ const rangeLabel = computed(() =>
 <style scoped>
 .analytics-toolbar {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 14px;
   flex-wrap: wrap;
-  margin: 14px 0 18px;
-}
-.device-filter {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  font-size: 12px;
-  color: var(--muted);
+  margin: 0 0 16px;
 }
 .range-label {
-  margin-bottom: 8px;
   font-size: 11px;
 }
 .empty-note {
