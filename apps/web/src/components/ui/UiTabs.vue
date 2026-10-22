@@ -204,7 +204,7 @@ function measure() {
     return;
   }
   if (props.modelValue !== lastKey) {
-    Object.assign(trail, lead);
+    Object.assign(trail, { ...lead, vx: 0, vy: 0, vw: 0, vh: 0 });
     trailStartWidth = Math.max(1, lead.width);
     trailTarget = budRect(leadRect.value);
     trailBudWidth = trailTarget.width;
