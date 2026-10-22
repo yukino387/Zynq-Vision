@@ -115,6 +115,9 @@ const actions = [
       <p>围绕产品与检查方案，把现场采样、模型准备和正式发布连接起来。</p>
     </div>
     <div class="heading-actions">
+      <UiButton variant="secondary" icon="chart" to="/analytics">
+        统计看板
+      </UiButton>
       <UiButton
         variant="secondary"
         icon="refresh"

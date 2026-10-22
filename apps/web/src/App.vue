@@ -25,6 +25,7 @@ const navIcons: Record<string, string> = {
   overview: "dashboard",
   plans: "clipboard",
   production: "scan",
+  analytics: "chart",
   workbench: "camera",
   records: "audit",
   data: "database",
