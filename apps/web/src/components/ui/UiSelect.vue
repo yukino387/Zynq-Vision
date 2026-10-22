@@ -543,12 +543,18 @@ onBeforeUnmount(() => {
   align-items: center;
   position: relative;
   background: var(--surface);
+  background-image: linear-gradient(
+    180deg,
+    var(--lui-surface-top, var(--surface)) 0%,
+    var(--surface) 100%
+  );
   border: 1px solid var(--line-strong);
   border-radius: var(--radius, 8px);
+  box-shadow: inset 0 1px 0 var(--lui-rim, transparent);
   transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease,
-    background-color 0.15s ease;
+    border-color var(--lui-quick, 140ms) var(--lui-ease, ease),
+    box-shadow var(--lui-quick, 140ms) var(--lui-ease, ease),
+    background-color var(--lui-quick, 140ms) var(--lui-ease, ease);
   width: 100%;
   box-sizing: border-box;
 }
@@ -724,9 +730,16 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   overscroll-behavior: contain;
   background: var(--surface);
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface) 96%, #fff) 0%,
+    var(--surface) 100%
+  );
   border: 1px solid var(--line-strong);
   border-radius: var(--radius, 8px);
-  box-shadow: 0 10px 30px #0002;
+  box-shadow:
+    inset 0 1px 0 var(--lui-rim, transparent),
+    0 14px 34px -18px rgba(0, 0, 0, 0.35);
   box-sizing: border-box;
   max-width: calc(100vw - 16px);
   opacity: 0;

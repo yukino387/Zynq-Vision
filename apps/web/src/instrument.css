@@ -32,6 +32,20 @@
   --instrument-ink: #eeefe7;
   --shadow-drawer: -12px 0 48px #0003;
   --shadow-toast: 0 4px 16px #0002;
+  /* Liquid surface pass: 只借用表面层次与运动语义，不做全量 Gooey */
+  --lui-rim: rgba(255, 255, 255, 0.7);
+  --lui-sheen: rgba(255, 255, 255, 0.45);
+  --lui-shadow:
+    0 1px 2px rgba(24, 32, 24, 0.04), 0 14px 30px -22px rgba(24, 32, 24, 0.35);
+  --lui-shadow-lift:
+    0 2px 4px rgba(24, 32, 24, 0.05), 0 20px 40px -24px rgba(24, 32, 24, 0.45);
+  --lui-surface-top: color-mix(in srgb, var(--surface) 92%, #fff);
+  --lui-surface-bottom: color-mix(in srgb, var(--surface) 97%, #000);
+  --lui-ease: cubic-bezier(0.22, 0.82, 0.2, 1);
+  --lui-ease-settle: cubic-bezier(0.2, 0.9, 0.28, 1);
+  --lui-quick: 140ms;
+  --lui-base: 240ms;
+  --lui-press: 0.985;
 }
 :root[data-theme="dark"] {
   --paper: #232622;
@@ -54,6 +68,14 @@
   --crit-bg: #402a24;
   --info: #bdc6b4;
   --info-bg: #353d31;
+  --lui-rim: rgba(255, 255, 255, 0.07);
+  --lui-sheen: rgba(255, 255, 255, 0.04);
+  --lui-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.3), 0 14px 32px -20px rgba(0, 0, 0, 0.7);
+  --lui-shadow-lift:
+    0 2px 5px rgba(0, 0, 0, 0.35), 0 22px 44px -24px rgba(0, 0, 0, 0.8);
+  --lui-surface-top: color-mix(in srgb, var(--surface) 94%, #fff);
+  --lui-surface-bottom: var(--surface);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -77,6 +99,14 @@
     --crit-bg: #402a24;
     --info: #bdc6b4;
     --info-bg: #353d31;
+    --lui-rim: rgba(255, 255, 255, 0.07);
+    --lui-sheen: rgba(255, 255, 255, 0.04);
+    --lui-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.3), 0 14px 32px -20px rgba(0, 0, 0, 0.7);
+    --lui-shadow-lift:
+      0 2px 5px rgba(0, 0, 0, 0.35), 0 22px 44px -24px rgba(0, 0, 0, 0.8);
+    --lui-surface-top: color-mix(in srgb, var(--surface) 94%, #fff);
+    --lui-surface-bottom: var(--surface);
   }
 }
 body {
@@ -2690,4 +2720,197 @@ h6 {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+
+/* ---------------------------------------------------------------
+   Liquid surface pass (L0)
+   参考 Liquid UI v1.2 的“表面层次 + 连续运动”约束，只做轻量落地：
+   统一顶缘高光、柔和环境阴影、按压缩放和减速曲线；不使用 Gooey
+   滤镜，也不改变现有布局、颜色语义和交互结构。
+---------------------------------------------------------------- */
+.panel,
+.toolbar,
+.workbench-toolbar,
+.batch-toolbar,
+.access-toolbar {
+  background-image: linear-gradient(
+    180deg,
+    var(--lui-surface-top) 0%,
+    var(--surface) 46%,
+    var(--lui-surface-bottom) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 var(--lui-rim),
+    var(--lui-shadow);
+}
+
+.panel-head {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface) 96%, #fff) 0%,
+    var(--surface) 100%
+  );
+  box-shadow: inset 0 1px 0 var(--lui-rim);
+}
+
+.table-wrap {
+  background-image: linear-gradient(
+    180deg,
+    var(--lui-surface-top) 0%,
+    var(--surface) 40%,
+    var(--surface) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 var(--lui-rim),
+    var(--lui-shadow);
+}
+
+thead th {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface-2) 88%, #fff) 0%,
+    var(--surface-2) 100%
+  );
+}
+
+tbody tr {
+  transition: background-color var(--lui-quick) var(--lui-ease);
+}
+
+tbody tr:hover {
+  background-color: color-mix(in srgb, var(--surface-2) 78%, transparent);
+}
+
+/* 侧栏选中态：保留原色，只补一层表面高光和轻微投影 */
+.sidebar nav a.sub.selected,
+.sidebar nav a.leaf.selected {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--forest) 86%, #fff) 0%,
+    var(--forest) 58%
+  );
+  border-color: transparent;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    0 8px 18px -12px color-mix(in srgb, var(--forest) 60%, transparent);
+  transition:
+    background-color var(--lui-quick) var(--lui-ease),
+    box-shadow var(--lui-base) var(--lui-ease),
+    color var(--lui-quick) var(--lui-ease);
+}
+
+.sidebar nav a.sub.selected:hover,
+.sidebar nav a.leaf.selected:hover {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--forest-hover) 86%, #fff) 0%,
+    var(--forest-hover) 58%
+  );
+}
+
+/* 实时画面：只加边缘高光与状态呼吸，不加滤镜 */
+.canvas-title {
+  background-image: linear-gradient(180deg, #2e332c 0%, var(--instrument) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.vision-canvas {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35);
+}
+
+.image-stage {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+}
+
+.signal-dot.live {
+  box-shadow: 0 0 0 0 rgba(145, 198, 141, 0.45);
+  animation: signal-breathe 2.4s var(--lui-ease) infinite;
+}
+
+@keyframes signal-breathe {
+  0% {
+    box-shadow: 0 0 0 0 rgba(145, 198, 141, 0.4);
+  }
+  68% {
+    box-shadow: 0 0 0 7px rgba(145, 198, 141, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(145, 198, 141, 0);
+  }
+}
+
+/* 状态标签和输入框的顶缘高光，保持内容层清晰 */
+.tag,
+.status.chip {
+  box-shadow: inset 0 1px 0 var(--lui-rim);
+}
+
+/* 系统级降级：系统开启减少动态效果时，关闭所有非必要运动 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* 页面级：标题下的短强调线和更连续的进入动画 */
+.page-heading {
+  position: relative;
+}
+
+.page-heading::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: min(180px, 32%);
+  height: 1px;
+  background: linear-gradient(90deg, var(--forest), transparent);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.page-enter-active {
+  transition:
+    opacity var(--lui-base) var(--lui-ease-settle),
+    transform var(--lui-base) var(--lui-ease-settle);
+}
+
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+/* 顶栏、侧栏与页面底色：只加极轻的层次，不改变现有灰绿/暖橙关系 */
+.topbar {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface) 96%, #fff) 0%,
+    var(--surface) 100%
+  );
+  box-shadow: inset 0 1px 0 var(--lui-rim);
+}
+
+.sidebar {
+  background-image: linear-gradient(
+    180deg,
+    #23271f 0%,
+    var(--instrument-deep) 46%,
+    #171a17 100%
+  );
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.05);
+}
+
+main {
+  background-image: radial-gradient(
+    900px 420px at 18% -12%,
+    color-mix(in srgb, var(--forest) 4%, transparent),
+    transparent 72%
+  );
 }

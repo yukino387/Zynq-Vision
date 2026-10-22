@@ -94,9 +94,18 @@ function select(key: string, disabled?: boolean) {
   font-weight: 550;
   cursor: pointer;
   user-select: none;
-  transition: all 0.15s ease;
+  transition:
+    background-color var(--lui-quick, 140ms) var(--lui-ease, ease),
+    color var(--lui-quick, 140ms) var(--lui-ease, ease),
+    box-shadow var(--lui-base, 240ms) var(--lui-ease, ease),
+    border-color var(--lui-quick, 140ms) var(--lui-ease, ease),
+    transform var(--lui-quick, 140ms) var(--lui-ease, ease);
   position: relative;
   white-space: nowrap;
+}
+
+.ui-tab-item:active:not(.is-disabled) {
+  transform: scale(var(--lui-press, 0.985));
 }
 
 .ui-tab-item:focus-visible {
@@ -155,8 +164,15 @@ function select(key: string, disabled?: boolean) {
 }
 .variant-segment .ui-tab-item.is-active {
   background: var(--surface);
+  background-image: linear-gradient(
+    180deg,
+    var(--lui-surface-top, var(--surface)) 0%,
+    var(--surface) 100%
+  );
   color: var(--forest);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  box-shadow:
+    inset 0 1px 0 var(--lui-rim, transparent),
+    0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 /* 变体：pill */
@@ -173,8 +189,14 @@ function select(key: string, disabled?: boolean) {
 }
 .variant-pill .ui-tab-item.is-active {
   background: var(--forest);
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--forest) 86%, #fff) 0%,
+    var(--forest) 58%
+  );
   border-color: var(--forest);
   color: var(--forest-ink);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
 /* 数量角标 */

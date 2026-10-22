@@ -151,9 +151,27 @@ const lastAction = computed(() => status.value?.actions?.at(-1));
   gap: 10px;
   padding: 14px 16px;
   background: var(--surface);
+  background-image: linear-gradient(
+    180deg,
+    var(--lui-surface-top, var(--surface)) 0%,
+    var(--surface) 48%,
+    var(--lui-surface-bottom, var(--surface)) 100%
+  );
   border: 1px solid var(--line);
   border-left: 4px solid var(--line-strong);
   border-radius: 10px;
+  box-shadow:
+    inset 0 1px 0 var(--lui-rim, transparent),
+    var(--lui-shadow, 0 1px 3px rgba(0, 0, 0, 0.03));
+  transition:
+    border-color var(--lui-base, 240ms) var(--lui-ease, ease),
+    box-shadow var(--lui-base, 240ms) var(--lui-ease, ease);
+}
+.mqtt-card.tone-online {
+  box-shadow:
+    inset 0 1px 0 var(--lui-rim, transparent),
+    0 0 0 1px color-mix(in srgb, var(--green) 12%, transparent),
+    var(--lui-shadow, 0 1px 3px rgba(0, 0, 0, 0.03));
 }
 .mqtt-card.tone-online {
   border-left-color: var(--green);

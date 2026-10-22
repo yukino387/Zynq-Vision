@@ -118,7 +118,7 @@ const isLink = computed(() => !!props.to && !isDisabled.value);
     border-color 0.15s ease,
     color 0.15s ease,
     box-shadow 0.15s ease,
-    transform 0.08s ease;
+    transform var(--lui-quick, 140ms) var(--lui-ease, ease);
   min-width: 0;
   box-sizing: border-box;
 }
@@ -129,7 +129,7 @@ const isLink = computed(() => !!props.to && !isDisabled.value);
 }
 
 .ui-button:active:not(:disabled) {
-  transform: translateY(1px);
+  transform: translateY(0.5px) scale(var(--lui-press, 0.985));
 }
 
 /* 尺寸体系 */
@@ -168,26 +168,54 @@ const isLink = computed(() => !!props.to && !isDisabled.value);
 /* 变体体系 */
 .variant-primary {
   background: var(--forest);
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--forest) 86%, #fff) 0%,
+    var(--forest) 58%
+  );
   border-color: var(--forest);
   color: var(--forest-ink);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 1px 2px rgba(0, 0, 0, 0.08);
 }
 .variant-primary:hover:not(:disabled) {
   background: var(--forest-hover);
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--forest-hover) 86%, #fff) 0%,
+    var(--forest-hover) 58%
+  );
   border-color: var(--forest-hover);
   color: var(--forest-ink);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    0 3px 8px rgba(0, 0, 0, 0.12);
 }
 .variant-primary:active:not(:disabled) {
   background: var(--forest);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--forest) 92%, #fff) 0%,
+    var(--forest) 58%
+  );
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.12),
+    0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
 .variant-secondary {
   background: var(--surface);
+  background-image: linear-gradient(
+    180deg,
+    var(--lui-surface-top, var(--surface)) 0%,
+    var(--surface) 100%
+  );
   border-color: var(--line);
   color: var(--ink);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  box-shadow:
+    inset 0 1px 0 var(--lui-rim, transparent),
+    0 1px 2px rgba(0, 0, 0, 0.03);
 }
 .variant-secondary:hover:not(:disabled) {
   background: var(--surface-2);

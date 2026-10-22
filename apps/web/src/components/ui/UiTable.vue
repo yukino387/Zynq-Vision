@@ -36,6 +36,12 @@ withDefaults(defineProps<UiTableProps>(), {
 .ui-table-container {
   position: relative;
   background: var(--surface);
+  background-image: linear-gradient(
+    180deg,
+    var(--lui-surface-top, var(--surface)) 0%,
+    var(--surface) 38%,
+    var(--surface) 100%
+  );
   border-radius: var(--radius, 8px);
   overflow: hidden;
   box-sizing: border-box;
@@ -43,7 +49,9 @@ withDefaults(defineProps<UiTableProps>(), {
 
 .ui-table-container.is-bordered {
   border: 1px solid var(--line);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  box-shadow:
+    inset 0 1px 0 var(--lui-rim, transparent),
+    var(--lui-shadow, 0 1px 3px rgba(0, 0, 0, 0.03));
 }
 
 .ui-table-scroll {
@@ -63,6 +71,11 @@ withDefaults(defineProps<UiTableProps>(), {
 
 :deep(th) {
   background: var(--surface-2);
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface-2) 88%, #fff) 0%,
+    var(--surface-2) 100%
+  );
   color: var(--ink-2);
   font-weight: 600;
   font-size: 12px;
@@ -77,6 +90,10 @@ withDefaults(defineProps<UiTableProps>(), {
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
   vertical-align: middle;
+}
+
+:deep(tbody tr) {
+  transition: background-color var(--lui-quick, 140ms) var(--lui-ease, ease);
 }
 
 .is-compact :deep(th) {

@@ -48,16 +48,27 @@ const emit = defineEmits<{
 }>();
 
 const hasValue = computed(() => {
-  return props.modelValue !== "" && props.modelValue !== null && props.modelValue !== undefined;
+  return (
+    props.modelValue !== "" &&
+    props.modelValue !== null &&
+    props.modelValue !== undefined
+  );
 });
 
 const showClear = computed(() => {
-  return props.clearable && !props.disabled && !props.readonly && hasValue.value;
+  return (
+    props.clearable && !props.disabled && !props.readonly && hasValue.value
+  );
 });
 
 function onInput(event: Event) {
   const target = event.target as HTMLInputElement;
-  const val = props.type === "number" ? (target.value === "" ? "" : Number(target.value)) : target.value;
+  const val =
+    props.type === "number"
+      ? target.value === ""
+        ? ""
+        : Number(target.value)
+      : target.value;
   emit("update:modelValue", val);
 }
 
@@ -82,7 +93,10 @@ function onClear() {
   >
     <div class="ui-input-inner">
       <span v-if="icon" class="ui-input-prefix" aria-hidden="true">
-        <Icon :name="icon" :size="size === 'sm' ? 14 : size === 'lg' ? 18 : 16" />
+        <Icon
+          :name="icon"
+          :size="size === 'sm' ? 14 : size === 'lg' ? 18 : 16"
+        />
       </span>
 
       <input
@@ -124,7 +138,11 @@ function onClear() {
       <slot name="suffix" />
     </div>
 
-    <span v-if="typeof error === 'string' && error" class="ui-input-error-msg" role="alert">
+    <span
+      v-if="typeof error === 'string' && error"
+      class="ui-input-error-msg"
+      role="alert"
+    >
       {{ error }}
     </span>
   </div>
@@ -149,12 +167,18 @@ function onClear() {
   align-items: center;
   position: relative;
   background: var(--surface);
+  background-image: linear-gradient(
+    180deg,
+    var(--lui-surface-top, var(--surface)) 0%,
+    var(--surface) 100%
+  );
   border: 1px solid var(--line-strong);
   border-radius: var(--radius, 8px);
+  box-shadow: inset 0 1px 0 var(--lui-rim, transparent);
   transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease,
-    background-color 0.15s ease;
+    border-color var(--lui-quick, 140ms) var(--lui-ease, ease),
+    box-shadow var(--lui-quick, 140ms) var(--lui-ease, ease),
+    background-color var(--lui-quick, 140ms) var(--lui-ease, ease);
   width: 100%;
   box-sizing: border-box;
 }
@@ -239,7 +263,9 @@ function onClear() {
   margin-right: 8px;
   cursor: pointer;
   flex-shrink: 0;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 
 .ui-input-clear:hover {
