@@ -64,6 +64,7 @@ const uid = useId();
 const listId = `ui-select-${uid}`;
 const gooId = `ui-select-goo-${uid}`;
 const gradientId = `ui-select-gradient-${uid}`;
+const shadowId = `ui-select-shadow-${uid}`;
 
 interface SurfaceRect {
   x: number;
@@ -75,9 +76,47 @@ interface SelectSurface {
   width: number;
   height: number;
   bud: SurfaceRect | null;
-  connector: SurfaceRect | null;
 }
 const surface = ref<SelectSurface | null>(null);
+const renderMenu = ref(false);
+const closing = ref(false);
+const contentLeaving = ref(false);
+let closeTimer: ReturnType<typeof setTimeout> | undefined;
+const motionRect = ref<SurfaceRect>({
+  x: 0,
+  y: 0,
+  width: 0,
+  height: 0,
+});
+const spring = { x: 0, y: 0, width: 0, height: 0, vx: 0, vy: 0, vw: 0, vh: 0 };
+let springTarget: SurfaceRect = { x: 0, y: 0, width: 0, height: 0 };
+let frameId: number | null = null;
+let lastFrame = 0;
+let settleFrames = 0;
+const reducedMotion =
+  typeof window !== "undefined" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const revealProgress = computed(() => {
+  const size = surface.value;
+  if (!size) return 0;
+  return Math.max(
+    0,
+    Math.min(
+      1,
+      Math.min(
+        motionRect.value.width / Math.max(1, size.width),
+        motionRect.value.height / Math.max(1, size.height),
+      ),
+    ),
+  );
+});
+const contentOpacity = computed(() =>
+  contentLeaving.value
+    ? 0
+    : Math.max(0, Math.min(1, (revealProgress.value - 0.35) / 0.55)),
+);
+const contentReady = computed(() => open.value && revealProgress.value > 0.6);
 
 function sameValue(a: unknown, b: unknown) {
   if (Object.is(a, b)) return true;
@@ -184,24 +223,174 @@ function firstEnabledIndex() {
   return allOptions.value.findIndex((opt) => !opt.disabled);
 }
 
+function stopLoop() {
+  if (frameId != null) cancelAnimationFrame(frameId);
+  frameId = null;
+}
+
+function isSettled() {
+  const position = Math.max(
+      Math.abs(spring.x - springTarget.x),
+      Math.abs(spring.y - springTarget.y),
+    ),
+    size = Math.max(
+      Math.abs(spring.width - springTarget.width),
+      Math.abs(spring.height - springTarget.height),
+    ),
+    speed = Math.max(
+      Math.abs(spring.vx),
+      Math.abs(spring.vy),
+      Math.abs(spring.vw),
+      Math.abs(spring.vh),
+    );
+  return position <= 0.5 && size <= 0.5 && speed <= 3;
+}
+
+function integrate(dt: number) {
+  const ax = (210 * (springTarget.x - spring.x) - 26 * spring.vx) / 0.9;
+  spring.vx += ax * dt;
+  spring.x += spring.vx * dt;
+  const ay = (210 * (springTarget.y - spring.y) - 26 * spring.vy) / 0.9;
+  spring.vy += ay * dt;
+  spring.y += spring.vy * dt;
+  const aw =
+    (235 * (springTarget.width - spring.width) - 28 * spring.vw) / 0.84;
+  spring.vw += aw * dt;
+  spring.width += spring.vw * dt;
+  const ah =
+    (205 * (springTarget.height - spring.height) - 27 * spring.vh) / 0.88;
+  spring.vh += ah * dt;
+  spring.height += spring.vh * dt;
+  spring.width = Math.max(8, spring.width);
+  spring.height = Math.max(6, spring.height);
+}
+
+function tick(now: number) {
+  const previous = lastFrame || now - 16.67;
+  lastFrame = now;
+  const delta = Math.min(48, Math.max(1, now - previous)) / 1000,
+    fixedStep = 1 / 120,
+    steps = Math.max(1, Math.min(12, Math.ceil(delta / fixedStep)));
+  for (let index = 0; index < steps; index++) integrate(fixedStep);
+  motionRect.value = {
+    x: spring.x,
+    y: spring.y,
+    width: spring.width,
+    height: spring.height,
+  };
+  if (isSettled()) {
+    settleFrames++;
+    if (settleFrames >= 2) {
+      stopLoop();
+      if (!open.value) {
+        renderMenu.value = false;
+        positioned.value = false;
+        surface.value = null;
+        closing.value = false;
+        contentLeaving.value = false;
+      }
+      return;
+    }
+  } else settleFrames = 0;
+  frameId = requestAnimationFrame(tick);
+}
+
+function startLoop() {
+  if (frameId != null) return;
+  lastFrame = 0;
+  settleFrames = 0;
+  frameId = requestAnimationFrame(tick);
+}
+
+function budRect(size: SelectSurface): SurfaceRect {
+  return (
+    size.bud ?? {
+      x: Math.max(0, Math.round(size.width * 0.25)),
+      y: Math.max(0, size.height - 10),
+      width: Math.max(24, Math.round(size.width * 0.5)),
+      height: 10,
+    }
+  );
+}
+
+function startOpen(reset: boolean) {
+  const size = surface.value;
+  if (!size) return;
+  if (reducedMotion) {
+    spring.x = 0;
+    spring.y = 0;
+    spring.width = size.width;
+    spring.height = size.height;
+    spring.vx = 0;
+    spring.vy = 0;
+    spring.vw = 0;
+    spring.vh = 0;
+    motionRect.value = { x: 0, y: 0, width: size.width, height: size.height };
+    closing.value = false;
+    stopLoop();
+    return;
+  }
+  if (reset) {
+    const bud = budRect(size);
+    spring.x = bud.x;
+    spring.y = bud.y;
+    spring.width = bud.width;
+    spring.height = bud.height;
+    spring.vx = 0;
+    spring.vy = 0;
+    spring.vw = 0;
+    spring.vh = 0;
+    motionRect.value = { ...bud };
+  }
+  springTarget = { x: 0, y: 0, width: size.width, height: size.height };
+  closing.value = false;
+  startLoop();
+}
+
 function closeMenu() {
-  if (!open.value) return;
+  if (!open.value && !renderMenu.value) return;
   open.value = false;
-  positioned.value = false;
-  surface.value = null;
+  contentLeaving.value = true;
+  if (!surface.value || reducedMotion) {
+    renderMenu.value = false;
+    positioned.value = false;
+    surface.value = null;
+    closing.value = false;
+    contentLeaving.value = false;
+    stopLoop();
+    return;
+  }
+  closing.value = true;
+  stopLoop();
+  if (closeTimer) clearTimeout(closeTimer);
+  // 内容先退出；表面在 120ms 后才沿锚点回吸。
+  closeTimer = setTimeout(() => {
+    if (!closing.value || !surface.value) return;
+    springTarget = budRect(surface.value);
+    startLoop();
+  }, 120);
 }
 
 async function openMenu() {
   if (props.disabled || open.value) return;
+  const wasRendered = renderMenu.value,
+    hadSurface = !!surface.value;
+  renderMenu.value = true;
   open.value = true;
-  positioned.value = false;
-  surface.value = null;
+  closing.value = false;
+  contentLeaving.value = false;
+  if (closeTimer) clearTimeout(closeTimer);
+  if (!wasRendered) {
+    surface.value = null;
+    positioned.value = false;
+  }
   const selected = allOptions.value.findIndex(
     (opt) => !opt.disabled && isSelected(opt),
   );
   activeIndex.value = selected >= 0 ? selected : firstEnabledIndex();
   await nextTick();
   positionMenu();
+  startOpen(!wasRendered || !hadSurface);
   scrollActiveIntoView();
 }
 
@@ -300,11 +489,11 @@ function positionMenu() {
 
   menu.style.maxHeight = `${Math.max(120, maxHeight)}px`;
 
-  // 菜单与触发器进入同一个 Alpha 场：菜单主体、连接颈和触发器底部的
-  // 芽共用一次模糊 + 阈值；内容层仍由上面的 .ui-select-list 保持清晰。
-  const menuRect = menu.getBoundingClientRect(),
-    budHeight = 10,
-    neckWidth = 22;
+  // 菜单主体、连接颈与触发器芽共用同一个 Alpha 场；菜单从触发器下沿
+  // 的芽中长出，关闭时沿同一锚点回吸。
+  const wasPositioned = positioned.value,
+    menuRect = menu.getBoundingClientRect(),
+    budHeight = 10;
   surface.value = {
     width: Math.round(menuRect.width),
     height: Math.round(menuRect.height),
@@ -316,16 +505,21 @@ function positionMenu() {
           width: Math.max(8, rect.width - 10),
           height: budHeight,
         },
-    connector: placeAbove
-      ? null
-      : {
-          x: rect.left - menuRect.left + rect.width / 2 - neckWidth / 2,
-          y: -gap - 2,
-          width: neckWidth,
-          height: gap + 4,
-        },
   };
   positioned.value = true;
+  if (wasPositioned && surface.value) {
+    if (open.value) {
+      springTarget = {
+        x: 0,
+        y: 0,
+        width: surface.value.width,
+        height: surface.value.height,
+      };
+      startLoop();
+    } else if (closing.value) {
+      springTarget = budRect(surface.value);
+    }
+  }
 }
 
 function onDocumentPointerDown(event: PointerEvent) {
@@ -409,6 +603,8 @@ onMounted(() =>
 );
 
 onBeforeUnmount(() => {
+  stopLoop();
+  if (closeTimer) clearTimeout(closeTimer);
   document.removeEventListener("pointerdown", onDocumentPointerDown, true);
   window.removeEventListener("scroll", onViewportChange, true);
   window.removeEventListener("resize", onViewportChange);
@@ -521,7 +717,7 @@ onBeforeUnmount(() => {
 
     <Teleport to="body">
       <div
-        v-if="open"
+        v-if="renderMenu"
         :id="listId"
         ref="menuRef"
         class="ui-select-menu"
@@ -560,6 +756,15 @@ onBeforeUnmount(() => {
                   0 0 0 20 -9"
               />
             </filter>
+            <filter :id="shadowId" x="-20%" y="-20%" width="140%" height="170%">
+              <feDropShadow
+                dx="0"
+                dy="8"
+                stdDeviation="10"
+                flood-color="#000"
+                flood-opacity="0.18"
+              />
+            </filter>
             <linearGradient :id="gradientId" x1="0" y1="0" x2="0" y2="1">
               <stop
                 offset="0"
@@ -579,34 +784,34 @@ onBeforeUnmount(() => {
               rx="6"
             />
             <rect
-              v-if="surface.connector"
               class="goo-shape"
-              :x="surface.connector.x"
-              :y="surface.connector.y"
-              :width="surface.connector.width"
-              :height="surface.connector.height"
-              rx="10"
-            />
-            <rect
-              class="goo-shape"
-              x="0"
-              y="0"
-              :width="surface.width"
-              :height="surface.height"
+              :x="motionRect.x"
+              :y="motionRect.y"
+              :width="motionRect.width"
+              :height="motionRect.height"
               rx="8"
             />
           </g>
           <rect
             class="goo-crisp"
-            x="0"
-            y="0"
-            :width="surface.width"
-            :height="surface.height"
+            :filter="`url(#${shadowId})`"
+            :x="motionRect.x"
+            :y="motionRect.y"
+            :width="motionRect.width"
+            :height="motionRect.height"
             rx="8"
             :fill="`url(#${gradientId})`"
           />
         </svg>
-        <div class="ui-select-list">
+        <div
+          class="ui-select-list"
+          :class="{ 'is-leaving': contentLeaving }"
+          :style="{
+            opacity: contentOpacity,
+            transform: `translateY(${(1 - contentOpacity) * 6}px)`,
+            pointerEvents: contentReady ? 'auto' : 'none',
+          }"
+        >
           <div
             v-for="(option, index) in allOptions"
             :id="optionId(index)"
@@ -852,7 +1057,6 @@ onBeforeUnmount(() => {
   background: transparent;
   border: 0;
   border-radius: var(--radius, 8px);
-  box-shadow: 0 14px 34px -18px rgba(0, 0, 0, 0.35);
   box-sizing: border-box;
   max-width: calc(100vw - 16px);
   overflow: visible;
@@ -881,6 +1085,12 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   overscroll-behavior: contain;
   box-sizing: border-box;
+  will-change: opacity, transform;
+}
+
+.ui-select-list.is-leaving {
+  opacity: 0 !important;
+  transition: opacity 120ms var(--lui-ease, ease);
 }
 
 .goo-shape {
@@ -894,24 +1104,6 @@ onBeforeUnmount(() => {
 
 .ui-select-menu.is-positioned {
   opacity: 1;
-  animation: ui-select-in 0.12s ease-out;
-}
-
-@keyframes ui-select-in {
-  from {
-    opacity: 0;
-    transform: translateY(-3px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ui-select-menu.is-positioned {
-    animation: none;
-  }
 }
 
 .ui-select-option {
