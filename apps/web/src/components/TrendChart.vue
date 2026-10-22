@@ -219,6 +219,7 @@ function onMove(event: PointerEvent) {
         v-for="(line, index) in lines"
         :key="`line-${index}`"
         class="line"
+        pathLength="1"
         :d="line"
         :style="{ stroke: color }"
       />
@@ -304,10 +305,27 @@ svg {
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: line-draw 720ms var(--lui-ease, ease) 70ms forwards;
 }
 .area {
   opacity: 0.12;
   stroke: none;
+  animation: area-in 560ms var(--lui-ease, ease) both;
+}
+@keyframes line-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes area-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 0.12;
+  }
 }
 .crosshair {
   stroke: var(--line-strong);

@@ -422,7 +422,9 @@ async function checkOne() {
     aria-label="当前检测步骤"
   >
     <div class="panel-body">
-      <strong>{{ activity.label }}</strong>
+      <strong :key="activity.label" class="step-label">{{
+        activity.label
+      }}</strong>
       <p>{{ activity.hint }}</p>
       <UiButton
         v-if="
@@ -1192,6 +1194,22 @@ async function checkOne() {
   }
   .toolbar-capture .capture {
     flex: 1;
+  }
+}
+
+.step-label {
+  display: block;
+  animation: step-settle 260ms var(--lui-ease) both;
+}
+
+@keyframes step-settle {
+  from {
+    opacity: 0.45;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 </style>

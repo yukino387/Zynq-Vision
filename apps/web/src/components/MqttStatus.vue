@@ -205,6 +205,16 @@ const lastAction = computed(() => status.value?.actions?.at(-1));
 }
 .tone-online .mqtt-icon {
   color: var(--green);
+  animation: mqtt-live 3.4s var(--lui-ease, ease) infinite;
+}
+@keyframes mqtt-live {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
 }
 .tone-connecting .mqtt-icon {
   color: var(--amber);

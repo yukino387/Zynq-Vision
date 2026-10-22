@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, ref } from "vue";
 
 interface Item {
   label: string;
@@ -18,6 +18,8 @@ const props = withDefaults(
 const max = computed(() =>
   Math.max(1, ...props.items.map((item) => item.count)),
 );
+const shown = ref(false);
+onMounted(() => requestAnimationFrame(() => (shown.value = true)));
 </script>
 
 <template>
@@ -30,7 +32,9 @@ const max = computed(() =>
     >
       <span class="rank-label">{{ item.label }}</span>
       <span class="rank-track" aria-hidden="true">
-        <i :style="{ width: `${(item.count / max) * 100}%` }"></i>
+        <i
+          :style="{ width: shown ? `${(item.count / max) * 100}%` : '0%' }"
+        ></i>
       </span>
       <span class="rank-value mono">{{ item.count }}{{ unit }}</span>
     </div>
@@ -68,7 +72,7 @@ const max = computed(() =>
   height: 100%;
   border-radius: 0 4px 4px 0;
   background: var(--forest);
-  transition: width 0.2s ease;
+  transition: width 420ms var(--lui-ease, ease);
 }
 .rank-value {
   min-width: 36px;

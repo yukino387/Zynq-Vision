@@ -2873,7 +2873,16 @@ tbody tr:hover {
   height: 1px;
   background: linear-gradient(90deg, var(--forest), transparent);
   opacity: 0.55;
+  transform: scaleX(0);
+  transform-origin: left;
+  animation: accent-in 420ms var(--lui-ease-settle) 60ms forwards;
   pointer-events: none;
+}
+
+@keyframes accent-in {
+  to {
+    transform: scaleX(1);
+  }
 }
 
 .page-enter-active {

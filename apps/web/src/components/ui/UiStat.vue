@@ -49,9 +49,12 @@ const isLink = computed(() => !!props.to);
     </div>
 
     <div class="ui-stat-body">
-      <span class="ui-stat-value mono" :class="{ 'is-text': !numeric }">{{
-        displayValue
-      }}</span>
+      <span
+        :key="String(displayValue)"
+        class="ui-stat-value mono"
+        :class="{ 'is-text': !numeric }"
+        >{{ displayValue }}</span
+      >
       <span v-if="unit && numeric" class="ui-stat-unit">{{ unit }}</span>
     </div>
 
@@ -128,6 +131,7 @@ const isLink = computed(() => !!props.to);
   font-weight: 700;
   color: var(--ink);
   line-height: 1.2;
+  animation: stat-settle var(--lui-base, 240ms) var(--lui-ease, ease);
 }
 
 .ui-stat-unit {
@@ -166,5 +170,16 @@ const isLink = computed(() => !!props.to);
 .tone-crit .ui-stat-value,
 .tone-crit .ui-stat-icon {
   color: var(--red, #b6372a);
+}
+
+@keyframes stat-settle {
+  from {
+    opacity: 0.5;
+    transform: translateY(2px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 </style>

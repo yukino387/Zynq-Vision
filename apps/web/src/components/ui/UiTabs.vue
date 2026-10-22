@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import Icon from "../Icon.vue";
 
 export interface UiTabItem {
@@ -35,17 +36,69 @@ function select(key: string, disabled?: boolean) {
   emit("update:modelValue", key);
   emit("change", key);
 }
+
+const root = ref<HTMLDivElement | null>(null),
+  buttons = ref<(HTMLButtonElement | null)[]>([]),
+  indicator = ref({ left: 0, width: 0, ready: false });
+
+function setButton(el: unknown, index: number) {
+  buttons.value[index] = (el as HTMLButtonElement | null) ?? null;
+}
+
+function measure() {
+  if (props.variant !== "segment" || !root.value) return;
+  const index = props.items.findIndex(
+      (item) => normalize(item).key === props.modelValue,
+    ),
+    button = buttons.value[index];
+  if (!button) {
+    indicator.value = { ...indicator.value, ready: false };
+    return;
+  }
+  const rootRect = root.value.getBoundingClientRect(),
+    rect = button.getBoundingClientRect();
+  indicator.value = {
+    left: rect.left - rootRect.left - root.value.clientLeft,
+    width: rect.width,
+    ready: true,
+  };
+}
+
+function scheduleMeasure() {
+  void nextTick(measure);
+}
+
+onMounted(() => {
+  scheduleMeasure();
+  window.addEventListener("resize", measure);
+});
+onBeforeUnmount(() => window.removeEventListener("resize", measure));
+watch([() => props.modelValue, () => props.items], scheduleMeasure, {
+  deep: true,
+});
 </script>
 
 <template>
   <div
+    ref="root"
     class="ui-tabs"
     :class="[`variant-${variant}`, `size-${size}`]"
     role="tablist"
   >
+    <span
+      v-if="variant === 'segment'"
+      class="ui-tab-indicator"
+      :class="{ 'is-ready': indicator.ready }"
+      :style="{
+        width: `${indicator.width}px`,
+        transform: `translateX(${indicator.left}px)`,
+      }"
+      aria-hidden="true"
+    ></span>
     <button
-      v-for="raw in items"
+      v-for="(raw, index) in items"
       :key="normalize(raw).key"
+      :ref="(el) => setButton(el, index)"
       type="button"
       role="tab"
       class="ui-tab-item"
@@ -87,6 +140,7 @@ function select(key: string, disabled?: boolean) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  z-index: 1;
   border: none;
   background: transparent;
   color: var(--ink-2);
@@ -163,16 +217,35 @@ function select(key: string, disabled?: boolean) {
   background: color-mix(in srgb, var(--surface) 50%, transparent);
 }
 .variant-segment .ui-tab-item.is-active {
+  background: transparent;
+  color: var(--forest);
+}
+
+.ui-tab-indicator {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  z-index: 0;
+  border-radius: calc(var(--radius, 8px) - 2px);
   background: var(--surface);
   background-image: linear-gradient(
     180deg,
     var(--lui-surface-top, var(--surface)) 0%,
     var(--surface) 100%
   );
-  color: var(--forest);
   box-shadow:
     inset 0 1px 0 var(--lui-rim, transparent),
     0 1px 3px rgba(0, 0, 0, 0.08);
+  opacity: 0;
+  transition:
+    transform 260ms var(--lui-ease, ease),
+    width 260ms var(--lui-ease, ease),
+    opacity 160ms var(--lui-ease, ease);
+  pointer-events: none;
+}
+.ui-tab-indicator.is-ready {
+  opacity: 1;
 }
 
 /* 变体：pill */

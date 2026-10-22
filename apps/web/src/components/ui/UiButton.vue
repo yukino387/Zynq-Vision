@@ -128,6 +128,39 @@ const isLink = computed(() => !!props.to && !isDisabled.value);
   outline-offset: 2px;
 }
 
+/* 按压时只在表面层出现一次短促高光，文字和图标保持清晰 */
+.ui-button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    circle at 50% 45%,
+    rgba(255, 255, 255, 0.22),
+    transparent 62%
+  );
+  opacity: 0;
+  transition: opacity var(--lui-quick, 140ms) var(--lui-ease, ease);
+  pointer-events: none;
+}
+.variant-secondary::after,
+.variant-outline::after,
+.variant-ghost::after {
+  background: radial-gradient(
+    circle at 50% 45%,
+    color-mix(in srgb, var(--forest) 12%, transparent),
+    transparent 65%
+  );
+}
+.ui-button:active:not(:disabled)::after {
+  opacity: 1;
+}
+.ui-button > * {
+  position: relative;
+  z-index: 1;
+}
+
 .ui-button:active:not(:disabled) {
   transform: translateY(0.5px) scale(var(--lui-press, 0.985));
 }

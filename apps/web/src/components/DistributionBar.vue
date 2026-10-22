@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, ref } from "vue";
 
 interface Slice {
   label: string;
@@ -18,6 +18,8 @@ const percent = (value: number) =>
   total.value
     ? ((value / total.value) * 100).toFixed(value / total.value < 0.01 ? 1 : 0)
     : "0";
+const shown = ref(false);
+onMounted(() => requestAnimationFrame(() => (shown.value = true)));
 </script>
 
 <template>
@@ -34,7 +36,7 @@ const percent = (value: number) =>
         v-for="s in visible"
         :key="s.label"
         :class="['seg', s.tone]"
-        :style="{ width: `${(s.value / total) * 100}%` }"
+        :style="{ width: shown ? `${(s.value / total) * 100}%` : '0%' }"
         :title="`${s.label} ${s.value}`"
       ></span>
     </div>
@@ -49,3 +51,9 @@ const percent = (value: number) =>
     </ul>
   </div>
 </template>
+
+<style scoped>
+.seg {
+  transition: width 320ms var(--lui-ease, ease);
+}
+</style>
