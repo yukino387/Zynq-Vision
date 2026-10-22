@@ -17,8 +17,8 @@ import {
   UiButton,
   UiCard,
   UiBadge,
-  UiInput,
   UiSelect,
+  UiSwitch,
   UiEmpty,
   UiModal,
 } from "../components/ui";
@@ -450,12 +450,10 @@ async function remove() {
         </button>
         <details class="section-space" :open="entry.positioned">
           <summary>位置范围（可选）</summary>
-          <label class="check-row"
-            ><input
-              type="checkbox"
-              v-model="entry.positioned"
-            />仅统计框中心落在指定范围内的该类对象</label
-          >
+          <UiSwitch
+            v-model="entry.positioned"
+            label="仅统计框中心落在指定范围内的该类对象"
+          />
           <div v-if="entry.positioned" class="plan-region">
             <label
               v-for="(label, key) in {

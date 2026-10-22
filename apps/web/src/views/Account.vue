@@ -7,7 +7,14 @@ import { useAuthStore } from "../stores/auth";
 import { useNotificationStore } from "../stores/notifications";
 import AsyncState from "../components/AsyncState.vue";
 import Icon from "../components/Icon.vue";
-import { UiButton, UiCard, UiInput, UiBadge } from "../components/ui";
+import {
+  UiAlert,
+  UiBadge,
+  UiButton,
+  UiCard,
+  UiInput,
+  UiSwitch,
+} from "../components/ui";
 
 interface Profile {
   id: string;
@@ -219,22 +226,16 @@ async function changePassword() {
             </div>
 
             <div class="check-row">
-              <input
-                id="show-pass-check"
-                v-model="showPasswords"
-                type="checkbox"
-              />
-              <label for="show-pass-check">显示密码明文</label>
+              <UiSwitch v-model="showPasswords" label="显示密码明文" />
             </div>
 
             <p class="pwd-tip">
               建议使用包含大小写字母、数字和符号的强密码，并避免与其他平台共用密码。
             </p>
 
-            <div v-if="passwordError" class="error-banner" role="alert">
-              <Icon name="alert" :size="16" />
-              <span>{{ passwordError }}</span>
-            </div>
+            <UiAlert v-if="passwordError" tone="crit" title="密码未更新">
+              {{ passwordError }}
+            </UiAlert>
 
             <div class="form-actions">
               <UiButton

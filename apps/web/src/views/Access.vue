@@ -14,6 +14,7 @@ import {
   UiButton,
   UiInput,
   UiSelect,
+  UiSwitch,
   UiCard,
   UiBadge,
   UiTable,
@@ -582,8 +583,7 @@ async function resetUserPassword() {
         </UiSelect>
       </div>
       <div class="check-row">
-        <input id="user-disabled-chk" v-model="disabled" type="checkbox" />
-        <label for="user-disabled-chk">停用此账号</label>
+        <UiSwitch v-model="disabled" label="停用此账号" />
       </div>
       <div class="form-actions mt-2">
         <UiButton

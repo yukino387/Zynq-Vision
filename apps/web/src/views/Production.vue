@@ -14,8 +14,8 @@ import InspectionDetail from "../components/InspectionDetail.vue";
 import AnalyticsPanel from "../components/AnalyticsPanel.vue";
 import Status from "../components/Status.vue";
 import Drawer from "../components/Drawer.vue";
-import Icon from "../components/Icon.vue";
 import {
+  UiAlert,
   UiButton,
   UiCard,
   UiSelect,
@@ -206,10 +206,9 @@ watch(
   </section>
 
   <template v-if="tab === 'batches'">
-    <div v-if="error" class="error-banner" role="alert">
-      <Icon name="alert" :size="16" />
-      <span>{{ error }}</span>
-    </div>
+    <UiAlert v-if="error" tone="crit" title="批次数据加载失败">
+      {{ error }}
+    </UiAlert>
 
     <!-- 所选批次上下文卡片 -->
     <UiCard v-if="batch" variant="accent" padding="md" class="batch-info-card">

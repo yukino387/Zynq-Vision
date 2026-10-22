@@ -68,6 +68,30 @@ function scheduleMeasure() {
   void nextTick(measure);
 }
 
+function onKeydown(event: KeyboardEvent) {
+  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  const entries = props.items
+    .map((item, index) => ({ item: normalize(item), index }))
+    .filter(({ item }) => !item.disabled);
+  if (!entries.length) return;
+  event.preventDefault();
+  const current = entries.findIndex(
+      ({ item }) => item.key === props.modelValue,
+    ),
+    step = event.key === "ArrowRight" ? 1 : -1,
+    next =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? entries.length - 1
+          : current < 0
+            ? 0
+            : (current + step + entries.length) % entries.length,
+    target = entries[next]!;
+  select(target.item.key);
+  void nextTick(() => buttons.value[target.index]?.focus());
+}
+
 onMounted(() => {
   scheduleMeasure();
   window.addEventListener("resize", measure);
@@ -84,6 +108,7 @@ watch([() => props.modelValue, () => props.items], scheduleMeasure, {
     class="ui-tabs"
     :class="[`variant-${variant}`, `size-${size}`]"
     role="tablist"
+    @keydown="onKeydown"
   >
     <span
       v-if="variant === 'segment'"
@@ -107,6 +132,7 @@ watch([() => props.modelValue, () => props.items], scheduleMeasure, {
         'is-disabled': normalize(raw).disabled,
       }"
       :aria-selected="modelValue === normalize(raw).key"
+      :tabindex="modelValue === normalize(raw).key ? 0 : -1"
       :disabled="normalize(raw).disabled"
       @click="select(normalize(raw).key, normalize(raw).disabled)"
     >

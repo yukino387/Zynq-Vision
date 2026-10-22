@@ -8,7 +8,7 @@ import DistributionBar from "./DistributionBar.vue";
 import RankBars from "./RankBars.vue";
 import Status from "./Status.vue";
 import TrendChart from "./TrendChart.vue";
-import { UiButton, UiStat, UiTable, UiTabs } from "./ui";
+import { UiAlert, UiButton, UiStat, UiTable, UiTabs } from "./ui";
 
 const props = withDefaults(defineProps<{ deviceId?: string }>(), {
   deviceId: "",
@@ -175,8 +175,12 @@ const rangeLabel = computed(() =>
     @retry="load"
   >
     <template v-if="stats">
-      <p v-if="stats.totals.total === 0" class="empty-note">
-        当前时间范围没有检测记录，统计会随生产自动更新。
+      <UiAlert
+        v-if="stats.totals.total === 0"
+        tone="info"
+        title="当前时间范围没有检测记录"
+      >
+        统计会随生产自动更新。
         <button
           v-if="range === '24h'"
           type="button"
@@ -185,7 +189,7 @@ const rangeLabel = computed(() =>
         >
           查看近 7 天
         </button>
-      </p>
+      </UiAlert>
 
       <div class="analytics-kpis">
         <UiStat
@@ -343,11 +347,6 @@ const rangeLabel = computed(() =>
 }
 .range-label {
   font-size: 11px;
-}
-.empty-note {
-  margin: 0 0 14px;
-  color: var(--muted);
-  font-size: 13px;
 }
 .analytics-kpis {
   display: grid;

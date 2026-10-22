@@ -623,9 +623,10 @@ watch(
               >
             </div>
             <div class="experiment-progress">
-              <div class="bar">
-                <span :style="{ width: `${r.progress ?? 0}%` }" />
-              </div>
+              <UiProgress
+                :value="r.progress"
+                style="height: 4px; flex: 1; max-width: 400px"
+              />
               <span class="mono">{{
                 r.progress == null ? "进度未上报" : `${r.progress}%`
               }}</span>
@@ -691,9 +692,7 @@ watch(
           </div>
           <div class="deployment-progress">
             <Status :value="r.status" /><span>{{ stageText(r) }}</span>
-            <div class="bar">
-              <span :style="{ width: `${r.progress ?? 0}%` }" />
-            </div>
+            <UiProgress :value="r.progress" style="height: 4px; flex: 1" />
             <b class="mono">{{
               r.progress == null ? "进度未上报" : `${r.progress}%`
             }}</b>
@@ -805,13 +804,11 @@ watch(
                 <span class="mono">{{
                   r.progress == null ? "进度未上报" : r.progress + "%"
                 }}</span>
-                <div
+                <UiProgress
                   v-if="r.progress !== undefined"
-                  class="bar"
-                  style="width: 95px; margin-top: 7px"
-                >
-                  <span :style="{ width: `${r.progress}%` }" />
-                </div>
+                  :value="r.progress"
+                  style="width: 95px; height: 4px; margin-top: 7px"
+                />
               </td>
               <td>{{ new Date(r.createdAt).toLocaleString() }}</td>
               <td class="action-cell">
@@ -993,12 +990,11 @@ watch(
               <option value="cpu">CPU（调试）</option>
             </UiSelect></label
           >
-          <label v-if="trainingOptions.device === 'cuda'"
-            ><input
-              type="checkbox"
-              v-model="trainingOptions.amp"
-            />混合精度训练</label
-          >
+          <UiSwitch
+            v-if="trainingOptions.device === 'cuda'"
+            v-model="trainingOptions.amp"
+            label="混合精度训练"
+          />
           <label
             >数据加载进程<input
               v-model.number="trainingOptions.workers"
