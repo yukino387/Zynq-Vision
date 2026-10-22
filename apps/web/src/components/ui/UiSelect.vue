@@ -62,6 +62,22 @@ const positioned = ref(false);
 const activeIndex = ref(-1);
 const uid = useId();
 const listId = `ui-select-${uid}`;
+const gooId = `ui-select-goo-${uid}`;
+const gradientId = `ui-select-gradient-${uid}`;
+
+interface SurfaceRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+interface SelectSurface {
+  width: number;
+  height: number;
+  bud: SurfaceRect | null;
+  connector: SurfaceRect | null;
+}
+const surface = ref<SelectSurface | null>(null);
 
 function sameValue(a: unknown, b: unknown) {
   if (Object.is(a, b)) return true;
@@ -172,12 +188,14 @@ function closeMenu() {
   if (!open.value) return;
   open.value = false;
   positioned.value = false;
+  surface.value = null;
 }
 
 async function openMenu() {
   if (props.disabled || open.value) return;
   open.value = true;
   positioned.value = false;
+  surface.value = null;
   const selected = allOptions.value.findIndex(
     (opt) => !opt.disabled && isSelected(opt),
   );
@@ -265,11 +283,13 @@ function positionMenu() {
   menu.style.top = `${rect.bottom + gap}px`;
 
   const measured = menu.getBoundingClientRect();
-  let maxHeight = Math.min(320, viewportHeight - rect.bottom - gap - margin);
+  let maxHeight = Math.min(320, viewportHeight - rect.bottom - gap - margin),
+    placeAbove = false;
   if (
     measured.height > Math.max(160, maxHeight) &&
     rect.top - gap - margin > maxHeight
   ) {
+    placeAbove = true;
     maxHeight = Math.min(320, rect.top - gap - margin);
     menu.style.top = `${Math.max(margin, rect.top - gap - Math.min(measured.height, maxHeight))}px`;
   }
@@ -279,6 +299,32 @@ function positionMenu() {
   }
 
   menu.style.maxHeight = `${Math.max(120, maxHeight)}px`;
+
+  // 菜单与触发器进入同一个 Alpha 场：菜单主体、连接颈和触发器底部的
+  // 芽共用一次模糊 + 阈值；内容层仍由上面的 .ui-select-list 保持清晰。
+  const menuRect = menu.getBoundingClientRect(),
+    budHeight = 10,
+    neckWidth = 22;
+  surface.value = {
+    width: Math.round(menuRect.width),
+    height: Math.round(menuRect.height),
+    bud: placeAbove
+      ? null
+      : {
+          x: rect.left - menuRect.left + 5,
+          y: -gap - budHeight,
+          width: Math.max(8, rect.width - 10),
+          height: budHeight,
+        },
+    connector: placeAbove
+      ? null
+      : {
+          x: rect.left - menuRect.left + rect.width / 2 - neckWidth / 2,
+          y: -gap - 2,
+          width: neckWidth,
+          height: gap + 4,
+        },
+  };
   positioned.value = true;
 }
 
@@ -484,40 +530,118 @@ onBeforeUnmount(() => {
         :aria-label="ariaLabel"
         @pointerdown.prevent
       >
-        <div
-          v-for="(option, index) in allOptions"
-          :id="optionId(index)"
-          :key="index"
-          class="ui-select-option"
-          :class="{
-            'is-active': index === activeIndex,
-            'is-selected': isSelected(option),
-            'is-disabled': option.disabled,
-          }"
-          role="option"
-          :aria-selected="isSelected(option)"
-          :aria-disabled="option.disabled || undefined"
-          @pointermove="setActive(index)"
-          @click="selectOption(option)"
+        <svg
+          v-if="surface"
+          class="ui-select-surface"
+          :viewBox="`0 0 ${surface.width} ${surface.height}`"
+          aria-hidden="true"
         >
-          <span class="ui-select-option-label">{{ option.label }}</span>
-          <svg
-            v-if="isSelected(option)"
-            class="ui-select-check"
-            viewBox="0 0 12 12"
-            width="12"
-            height="12"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.8"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
+          <defs>
+            <filter
+              :id="gooId"
+              x="-20%"
+              y="-40%"
+              width="140%"
+              height="180%"
+              color-interpolation-filters="sRGB"
+            >
+              <feGaussianBlur
+                in="SourceGraphic"
+                stdDeviation="5"
+                result="blurred-field"
+              />
+              <feColorMatrix
+                in="blurred-field"
+                type="matrix"
+                values="
+                  1 0 0 0 0
+                  0 1 0 0 0
+                  0 0 1 0 0
+                  0 0 0 20 -9"
+              />
+            </filter>
+            <linearGradient :id="gradientId" x1="0" y1="0" x2="0" y2="1">
+              <stop
+                offset="0"
+                style="stop-color: var(--lui-surface-top, var(--surface))"
+              />
+              <stop offset="1" style="stop-color: var(--surface)" />
+            </linearGradient>
+          </defs>
+          <g :filter="`url(#${gooId})`">
+            <rect
+              v-if="surface.bud"
+              class="goo-shape"
+              :x="surface.bud.x"
+              :y="surface.bud.y"
+              :width="surface.bud.width"
+              :height="surface.bud.height"
+              rx="6"
+            />
+            <rect
+              v-if="surface.connector"
+              class="goo-shape"
+              :x="surface.connector.x"
+              :y="surface.connector.y"
+              :width="surface.connector.width"
+              :height="surface.connector.height"
+              rx="10"
+            />
+            <rect
+              class="goo-shape"
+              x="0"
+              y="0"
+              :width="surface.width"
+              :height="surface.height"
+              rx="8"
+            />
+          </g>
+          <rect
+            class="goo-crisp"
+            x="0"
+            y="0"
+            :width="surface.width"
+            :height="surface.height"
+            rx="8"
+            :fill="`url(#${gradientId})`"
+          />
+        </svg>
+        <div class="ui-select-list">
+          <div
+            v-for="(option, index) in allOptions"
+            :id="optionId(index)"
+            :key="index"
+            class="ui-select-option"
+            :class="{
+              'is-active': index === activeIndex,
+              'is-selected': isSelected(option),
+              'is-disabled': option.disabled,
+            }"
+            role="option"
+            :aria-selected="isSelected(option)"
+            :aria-disabled="option.disabled || undefined"
+            @pointermove="setActive(index)"
+            @click="selectOption(option)"
           >
-            <path d="M2 6.2l2.6 2.6L10 3.2" />
-          </svg>
+            <span class="ui-select-option-label">{{ option.label }}</span>
+            <svg
+              v-if="isSelected(option)"
+              class="ui-select-check"
+              viewBox="0 0 12 12"
+              width="12"
+              height="12"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M2 6.2l2.6 2.6L10 3.2" />
+            </svg>
+          </div>
+          <div v-if="!allOptions.length" class="ui-select-empty">暂无选项</div>
         </div>
-        <div v-if="!allOptions.length" class="ui-select-empty">暂无选项</div>
       </div>
     </Teleport>
   </div>
@@ -722,27 +846,50 @@ onBeforeUnmount(() => {
 .ui-select-menu {
   position: fixed;
   z-index: 1200;
+  display: block;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius, 8px);
+  box-shadow: 0 14px 34px -18px rgba(0, 0, 0, 0.35);
+  box-sizing: border-box;
+  max-width: calc(100vw - 16px);
+  overflow: visible;
+  opacity: 0;
+}
+
+/* L1 表面层：菜单主体、连接颈与触发器芽共用同一个 Alpha 场 */
+.ui-select-surface {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.ui-select-list {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin: 0;
   padding: 4px;
+  max-height: inherit;
   overflow-y: auto;
   overscroll-behavior: contain;
-  background: var(--surface);
-  background-image: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--surface) 96%, #fff) 0%,
-    var(--surface) 100%
-  );
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius, 8px);
-  box-shadow:
-    inset 0 1px 0 var(--lui-rim, transparent),
-    0 14px 34px -18px rgba(0, 0, 0, 0.35);
   box-sizing: border-box;
-  max-width: calc(100vw - 16px);
-  opacity: 0;
+}
+
+.goo-shape {
+  fill: var(--surface);
+}
+
+.goo-crisp {
+  stroke: var(--line-strong);
+  stroke-width: 1;
 }
 
 .ui-select-menu.is-positioned {
