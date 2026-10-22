@@ -26,6 +26,7 @@ import Icon from "../components/Icon.vue";
 import Sparkline from "../components/Sparkline.vue";
 import DistributionBar from "../components/DistributionBar.vue";
 import MqttSettings from "../components/MqttSettings.vue";
+import MqttStatus from "../components/MqttStatus.vue";
 const route = useRoute(),
   devices = useDeviceStore(),
   notices = useNotificationStore(),
@@ -376,6 +377,11 @@ async function create() {
       最近心跳：{{ new Date(devices.current.lastSeenAt).toLocaleString() }}
     </p>
   </section>
+  <MqttStatus
+    v-if="tab === 'registry' && auth.engineer && devices.current"
+    class="section-space"
+    :device-id="devices.current.id"
+  />
   <section
     v-if="tab === 'registry' && legacy(devices.current)"
     class="panel section-space telemetry-panel"

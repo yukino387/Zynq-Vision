@@ -21,6 +21,7 @@ import Status from "../components/Status.vue";
 import Icon from "../components/Icon.vue";
 import { useProductStore } from "../stores/product";
 import ProductApplication from "../components/ProductApplication.vue";
+import MqttStatus from "../components/MqttStatus.vue";
 const workflow = useProductStore();
 const route = useRoute(),
   router = useRouter(),
@@ -264,6 +265,11 @@ async function checkOne() {
       </p>
     </div>
     <div class="heading-actions">
+      <MqttStatus
+        v-if="auth.engineer && device"
+        compact
+        :device-id="device.id"
+      />
       <Status :value="device?.connectionState" />
       <Status v-if="device" chip :value="device.runtimeState" />
     </div>

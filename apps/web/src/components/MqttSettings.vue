@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { mqttConfigSchema, type MqttConfig } from "@vision/contracts";
 import { api, post } from "../api";
 import { useAuthStore } from "../stores/auth";
+import Icon from "./Icon.vue";
+import Status from "./Status.vue";
 const props = defineProps<{ deviceId: string }>();
 const auth = useAuthStore();
 type BridgeStatus = {
@@ -25,14 +27,42 @@ const advanced = ref(""),
   saving = ref(false),
   message = ref("");
 let timer: ReturnType<typeof setInterval> | undefined;
-const connection = computed(() =>
-  !status.value?.config.enabled
-    ? "未启用"
-    : status.value.connected
-      ? "已连接"
-      : "连接中",
+const tone = computed(() =>
+  loadError.value
+    ? "OFFLINE"
+    : !status.value
+      ? "UNKNOWN"
+      : !status.value.config.enabled
+        ? "DISABLED"
+        : status.value.connected
+          ? "ONLINE"
+          : status.value.error
+            ? "OFFLINE"
+            : "CONNECTING",
 );
+const label = computed(() =>
+  loadError.value
+    ? "MQTT 不可用"
+    : !status.value
+      ? "MQTT 未知"
+      : !status.value.config.enabled
+        ? "MQTT 未启用"
+        : status.value.connected
+          ? "MQTT 已连接"
+          : status.value.error
+            ? "MQTT 连接失败"
+            : "MQTT 连接中",
+);
+const brokerLabel = computed(() => {
+  const config = status.value?.config;
+  return config?.host
+    ? `${config.tls ? "mqtts" : "mqtt"}://${config.host}:${config.port}`
+    : "未配置 Broker";
+});
+let busy = false;
 async function load(updateConfig = true) {
+  if (busy) return;
+  busy = true;
   try {
     const value = await api<BridgeStatus>(`/devices/${props.deviceId}/mqtt`);
     status.value = value;
@@ -55,6 +85,8 @@ async function load(updateConfig = true) {
     }
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    busy = false;
   }
 }
 async function save(enabled = true) {
@@ -151,19 +183,21 @@ const example = computed(() =>
     2,
   ),
 );
-function toggle(event: Event) {
-  clearInterval(timer);
-  if (!(event.target as HTMLDetailsElement).open) return;
-  void load(!status.value);
+onMounted(() => {
+  void load();
   timer = setInterval(() => void load(false), 5000);
-}
+});
 onUnmounted(() => clearInterval(timer));
 </script>
 
 <template>
-  <details class="section-space" @toggle="toggle">
-    <summary>
-      MQTT 接入<span v-if="status"> · {{ connection }}</span>
+  <details class="mqtt-settings section-space">
+    <summary class="mqtt-summary">
+      <span class="mqtt-summary-title"
+        ><Icon name="link" :size="16" />MQTT 外设接入</span
+      >
+      <Status chip :value="tone" :label="label" />
+      <span class="mono mqtt-summary-broker">{{ brokerLabel }}</span>
     </summary>
     <p>连接后自动接收检测指令，发布状态与结果。</p>
     <p v-if="error || loadError" role="alert" class="error">
@@ -259,6 +293,23 @@ onUnmounted(() => clearInterval(timer));
 </template>
 
 <style scoped>
+.mqtt-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  cursor: pointer;
+}
+.mqtt-summary-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 650;
+}
+.mqtt-summary-broker {
+  color: var(--muted);
+  font-size: 11px;
+}
 .mqtt-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
