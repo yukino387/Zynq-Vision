@@ -244,6 +244,7 @@ const rangeLabel = computed(() =>
           </div>
           <div class="panel-body">
             <TrendChart
+              :key="`volume-${range}-${deviceId}`"
               label="检测量"
               unit=" 件"
               :points="volumeSeries"
@@ -259,6 +260,7 @@ const rangeLabel = computed(() =>
           </div>
           <div class="panel-body">
             <TrendChart
+              :key="`rate-${range}-${deviceId}`"
               label="合格率"
               unit="%"
               color="var(--green)"
