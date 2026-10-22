@@ -169,6 +169,29 @@ export class SamplesController {
       req.actor.id,
     );
   }
+  @Get("export") async exportFrames(
+    @Query("ids") ids: string,
+    @Res() reply: FastifyReply,
+  ) {
+    const list = [
+      ...new Set(
+        String(ids ?? "")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (!list.length || list.length > 200)
+      throw new DomainError("INVALID_STATE", "请选择 1–200 张图片导出", 422);
+    const stream = await this.samples.frameExport(list);
+    return reply
+      .header(
+        "Content-Disposition",
+        `attachment; filename="frames-${Date.now()}.zip"`,
+      )
+      .type("application/zip")
+      .send(stream);
+  }
   @Get(":id") detail(@Param("id") id: string) {
     return this.db.sample.findUniqueOrThrow({
       where: { id, deletedAt: null },

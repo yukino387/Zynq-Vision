@@ -49,6 +49,11 @@ class Passage {
         ++p.support;p.last_ns=frame.monotonic_ns;p.frame=frame;previous_=index;
     }
 public:
+    void observe_window(const Frame& frame,const Decision& decision) {
+        if(ready_ || !frame.monotonic_ns || frame.monotonic_ns<=last_ns_)return;
+        if(last_ns_ && frame.monotonic_ns-last_ns_>250000000ULL){previous_=8;interrupted_=true;}
+        last_ns_=frame.monotonic_ns;active_=true;sample(frame,decision);
+    }
     void reset() {*this=Passage{};}
     const char* phase() const {return ready_?"SAVING":active_?"INSPECTING":armed_?"WAITING":"CLEARING";}
     bool active() const {return active_;}

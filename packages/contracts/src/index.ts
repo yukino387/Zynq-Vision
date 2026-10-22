@@ -328,3 +328,4 @@ export {
   type PostprocessPolicy,
   type PostprocessReport,
 } from "./postprocess.js";
+export { mqttConfigSchema, type MqttConfig } from "./mqtt.js";

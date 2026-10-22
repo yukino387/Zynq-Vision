@@ -73,8 +73,8 @@ async function submit() {
 <template>
   <div class="login-screen">
     <section class="auth-faceplate">
-      <span class="workspace-index">边缘视觉 / 设备工作站</span>
-      <h2>看见细节。<br />作出判断<span>.</span></h2>
+      <h2>边缘视觉检测平台</h2>
+      <p>配置产品规则，连接检测设备，查看单件结果。</p>
       <div class="auth-instrument">
         <span>配置产品</span><span>自动检测</span><span>逐件追溯</span>
       </div>

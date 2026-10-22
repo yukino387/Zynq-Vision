@@ -20,6 +20,7 @@ import urllib.parse
 import urllib.request
 import zipfile
 from vision_auth import Authority, AuthError
+from vision_mqtt import MqttBridge
 
 STATE = Path('/var/lib/vision')
 AUTH = Authority(STATE/'connection.json')
@@ -62,6 +63,9 @@ def engine(path='/state', payload=None, token=''):
             return json.loads(response.read(1024*1024))
     except urllib.error.HTTPError as exc:
         raise ValueError(json.loads(exc.read()).get('error', '检测服务操作失败')) from exc
+
+
+MQTT = None
 
 
 def mounts():
@@ -169,6 +173,8 @@ def heartbeat_once():
         total = memory.get('MemTotal', 0)
         pending_request = inspection.get('pendingRequestId') or None
         diagnostics = inspection.get('diagnostics', {})
+        last = inspection.get('last')
+        if last is not None:last = {key: last[key] for key in ('sequence', 'result', 'bootId', 'productionRunId', 'reason', 'findings') if key in last}
         timing = ({'frameId': inspection.get('frameId', 0),
                    'captureMs': diagnostics.get('lastCaptureMs') or 0,
                    'prepareMs': diagnostics.get('hwPrepareMs') or 0,
@@ -189,7 +195,7 @@ def heartbeat_once():
                    'timing': timing,
                    'paused': inspection.get('paused', True), 'fresh': inspection.get('fresh', False),
                    'pendingSync': inspection.get('pendingSync', 0), 'pendingRequestId': pending_request,
-                   'last': inspection.get('last'), 'error': inspection.get('error', '')[:1000],
+                   'last': last, 'error': inspection.get('error', '')[:1000],
                    'syncError': inspection.get('syncError', '')[:1000],
                    'cpuPercent': sample.get('cpus', [{}])[0].get('percent') if sample.get('cpus') else None,
                    'memoryUsed': max(0, total-memory.get('MemAvailable', total)), 'memoryTotal': total}
@@ -667,6 +673,9 @@ class PreviewHandler(http.server.BaseHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', '0'))
             if length < 2 or length > 1048576:raise ValueError('请求无效')
             command = json.loads(self.rfile.read(length))
+            if path == '/mqtt/config':
+                if role != 'ADMIN':self.reply(403, b'Forbidden');return
+                self.reply(200, json.dumps(MQTT.configure(command)).encode());return
             if path == '/control':
                 if role not in ('ADMIN', 'ENGINEER', 'OPERATOR'):
                     self.reply(403, b'Forbidden');return
@@ -703,6 +712,13 @@ class PreviewHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urllib.parse.urlsplit(self.path).path
+        if path == '/mqtt':
+            try:
+                actor = self.platform_actor()
+                if actor.get('role') not in ('ADMIN', 'ENGINEER'):self.reply(403, b'Forbidden');return
+                self.reply(200, json.dumps(MQTT.status()).encode())
+            except Exception as exc:self.reply(403, json.dumps({'error': str(exc)}).encode())
+            return
         if path in ('/capture', '/preview'):
             try:
                 if path == '/capture':self.platform_actor()
@@ -754,8 +770,10 @@ if __name__ == '__main__':
     STATE.mkdir(parents=True, exist_ok=True)
     lock_stream = (STATE/'manager.lock').open('a')
     fcntl.flock(lock_stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    MQTT = MqttBridge(STATE, engine)
     threading.Thread(target=sampling, daemon=True).start()
     threading.Thread(target=platform_sync, daemon=True).start()
+    MQTT.start()
     preview = http.server.ThreadingHTTPServer(('0.0.0.0', PREVIEW_PORT), PreviewHandler)
     threading.Thread(target=preview.serve_forever, daemon=True).start()
     http.server.ThreadingHTTPServer(('127.0.0.1', 8878), Handler).serve_forever()

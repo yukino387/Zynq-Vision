@@ -21,6 +21,7 @@ class Hardware {
     uint64_t captured_ns=0;
     int32_t commands[330]{};
     std::vector<uint16_t> captured_pixels;
+    std::vector<uint16_t> shading;
     std::vector<int8_t> gray,out0_raw,out1_raw;
     void pin(unsigned,bool);
     void start();void stop();
@@ -37,6 +38,7 @@ public:
     Hardware(const Hardware&)=delete;
     Hardware& operator=(const Hardware&)=delete;
     void initialize_camera();
+    void set_shading(std::vector<uint16_t>);
     void load_model(const std::vector<uint8_t>&,const std::string&,const std::string&,const std::string&);
     Frame capture();
 };

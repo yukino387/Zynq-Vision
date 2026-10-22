@@ -179,7 +179,8 @@ async function pair() {
 }
 
 function formatBytes(value: number | undefined) {
-  if (value === undefined || value === null || Number.isNaN(value)) return "—";
+  if (value === undefined || value === null || Number.isNaN(value))
+    return "未上报";
   if (value < 1024) return `${value} B`;
   const units = ["KB", "MB", "GB", "TB"];
   let size = value / 1024,
@@ -232,7 +233,7 @@ const healthCards = computed(() => {
       label: "数据库",
       status: "READY",
       value: formatBytes(value.database?.sizeBytes),
-      detail: `${value.database?.engine ?? "SQLite"} · ${value.database?.journalMode ?? "—"} · ${value.database?.pages ?? "—"} 页`,
+      detail: `${value.database?.engine ?? "SQLite"} · ${value.database?.journalMode ?? "日志模式未上报"} · ${value.database?.pages ?? "未上报"} 页`,
     },
     {
       key: "storage",
@@ -275,7 +276,8 @@ const healthCards = computed(() => {
         }}
       </h1>
       <p v-if="tab === 'health'" class="mono">
-        {{ health?.server?.status ?? "读取中" }} · 数据与存储实时状态
+        {{ health ? chinese(health.server?.status) : "读取中" }} ·
+        数据与存储实时状态
       </p>
       <p v-else-if="tab === 'pairing'">
         为移动采样端生成服务器连接码，或工位/设备快捷选择码
@@ -410,12 +412,12 @@ const healthCards = computed(() => {
       <div class="two-columns">
         <div>
           <label v-if="qrType === 'DEVICE'"
-            >设备<select v-model="deviceId">
+            >设备<UiSelect v-model="deviceId">
               <option value="">选择设备</option>
               <option v-for="d in devices.devices" :key="d.id" :value="d.id">
                 {{ displayName(d.name) }}
               </option>
-            </select></label
+            </UiSelect></label
           >
           <label
             >服务器地址<input
@@ -445,12 +447,12 @@ const healthCards = computed(() => {
             指向手机自己；切换热点后请刷新地址并重新生成二维码。
           </p>
           <label v-if="qrType !== 'DEVICE'"
-            >关联工位<select v-model="stationId">
+            >关联工位<UiSelect v-model="stationId">
               <option value="">未指定</option>
               <option v-for="s in stations" :key="s.id" :value="s.id">
                 {{ displayName(s.name) }}
               </option>
-            </select></label
+            </UiSelect></label
           >
           <p class="note">
             {{
@@ -533,8 +535,10 @@ const healthCards = computed(() => {
                   <small class="mono">{{ r.username ?? r.id }}</small>
                 </td>
                 <td>
-                  {{ r.entityId ?? "—"
-                  }}<small class="mono">{{ r.requestId }}</small>
+                  {{ r.entityId ?? "平台操作"
+                  }}<small v-if="r.requestId" class="mono"
+                    >请求编号：{{ r.requestId }}</small
+                  >
                 </td>
                 <td>
                   <Status

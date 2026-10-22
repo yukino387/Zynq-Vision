@@ -1,4 +1,4 @@
-import { computed, reactive } from "vue";
+import { computed, reactive, markRaw } from "vue";
 import type {
   DetectionBox,
   DeviceSnapshot,
@@ -9,6 +9,8 @@ import { request, session, logout, requireLogin } from "./state";
 
 export interface LiveFrame {
   frameId: number;
+  planId?: string | null;
+  planVersion?: number | null;
   receivedAt: string;
   width: number;
   height: number;
@@ -25,6 +27,7 @@ export const live = reactive({
   deviceId: (uni.getStorageSync("vision.device") as string) || "",
   frame: null as LiveFrame | null,
   frames: [] as LiveFrame[],
+  retainFrames: false,
   telemetry: null as Telemetry | null,
   runtimeState: "UNKNOWN" as DeviceSnapshot["runtimeState"],
   reportedState: {} as DeviceSnapshot["reportedState"],
@@ -39,6 +42,7 @@ export const live = reactive({
 let socket: UniNamespace.SocketTask | null = null;
 let retry: ReturnType<typeof setTimeout> | null = null;
 let heartbeat: ReturnType<typeof setInterval> | null = null;
+let snapshotTimer: ReturnType<typeof setInterval> | null = null;
 let authTimer: ReturnType<typeof setTimeout> | null = null;
 let stopped = true;
 let starting = false;
@@ -84,6 +88,9 @@ export function setDevice(id: string, persist = true) {
   live.frame = null;
   live.frames = [];
   live.telemetry = null;
+  live.runtimeState = "UNKNOWN";
+  live.reportedState = {};
+  lastStripAt = 0;
   live.fps = 0;
   live.lastFrameAt = 0;
   arrivals = [];
@@ -111,6 +118,12 @@ export async function refreshDevices() {
         ) ??
         list[0];
       if (preferred) setDevice(preferred.id);
+      else {
+        live.deviceId = "";
+        live.frame = null;
+        live.frames = [];
+        live.telemetry = null;
+      }
     }
     const selected = list.find((d) => d.id === live.deviceId);
     if (selected) {
@@ -137,10 +150,6 @@ function handle(event: PlatformEvent) {
       clearTimeout(authTimer);
       authTimer = null;
     }
-    if (!heartbeat)
-      heartbeat = setInterval(() => {
-        live.now = Date.now();
-      }, 1000);
     void refreshDevices();
     return;
   }
@@ -153,21 +162,16 @@ function handle(event: PlatformEvent) {
       if (session.deviceId) return;
       setDevice(event.entityId);
     }
-    live.frame = frame;
+    live.frame = markRaw(frame);
     live.lastFrameAt = Date.now();
-    live.now = live.lastFrameAt;
-    if (!live.frames.length || live.lastFrameAt - lastStripAt > 500) {
+    if (
+      live.retainFrames &&
+      (!live.frames.length || live.lastFrameAt - lastStripAt > 500)
+    ) {
       lastStripAt = live.lastFrameAt;
       live.frames = [...live.frames, frame].slice(-6);
     }
-    const now = Date.now();
-    arrivals = [...arrivals.filter((at) => now - at < 2000), now];
-    const span =
-      arrivals.length > 1
-        ? (arrivals[arrivals.length - 1]! - arrivals[0]!) / 1000
-        : 0;
-    live.fps =
-      span > 0 ? Math.round(((arrivals.length - 1) / span) * 10) / 10 : 0;
+    arrivals.push(live.lastFrameAt);
     return;
   }
   if (event.type === "device.telemetry") {
@@ -198,9 +202,14 @@ function handle(event: PlatformEvent) {
   }
   if (event.type === "device.inspection.completed") {
     live.completedAt = Date.now();
+    void refreshDevices();
     return;
   }
-  if (event.type === "device.status.changed") void refreshDevices();
+  if (
+    event.type === "device.status.changed" ||
+    event.type === "device.inspection.completed"
+  )
+    void refreshDevices();
 }
 
 function scheduleReconnect() {
@@ -214,6 +223,19 @@ function scheduleReconnect() {
 export function startLive() {
   if (!session.token) return;
   stopped = false;
+  if (!heartbeat)
+    heartbeat = setInterval(() => {
+      live.now = Date.now();
+      arrivals = arrivals.filter((at) => live.now - at < 2000);
+      const span =
+        arrivals.length > 1
+          ? (arrivals[arrivals.length - 1]! - arrivals[0]!) / 1000
+          : 0;
+      live.fps =
+        span > 0 ? Math.round(((arrivals.length - 1) / span) * 10) / 10 : 0;
+    }, 1000);
+  if (!snapshotTimer)
+    snapshotTimer = setInterval(() => void refreshDevices(), 5000);
   if (socket || starting) return;
   let task: UniNamespace.SocketTask;
   try {
@@ -244,7 +266,8 @@ export function startLive() {
   });
   task.onMessage((message) => {
     try {
-      handle(JSON.parse(String(message.data)) as PlatformEvent);
+      if (socket === task)
+        handle(JSON.parse(String(message.data)) as PlatformEvent);
     } catch {
       // 非 JSON 帧直接忽略，不让一帧坏数据拆掉整条连接。
     }
@@ -255,10 +278,6 @@ export function startLive() {
     starting = false;
     live.connecting = false;
     live.ready = false;
-    if (heartbeat) {
-      clearInterval(heartbeat);
-      heartbeat = null;
-    }
     if (authTimer) {
       clearTimeout(authTimer);
       authTimer = null;
@@ -284,6 +303,8 @@ export function stopLive() {
   retry = null;
   if (heartbeat) clearInterval(heartbeat);
   heartbeat = null;
+  if (snapshotTimer) clearInterval(snapshotTimer);
+  snapshotTimer = null;
   if (authTimer) clearTimeout(authTimer);
   authTimer = null;
   const task = socket;
@@ -303,6 +324,6 @@ export function frameUsable(maxAge = 3000) {
   return Boolean(
     live.frame &&
     liveDevice.value?.connectionState === "ONLINE" &&
-      Math.max(live.now, Date.now()) - live.lastFrameAt <= maxAge,
+    Math.max(live.now, Date.now()) - live.lastFrameAt <= maxAge,
   );
 }

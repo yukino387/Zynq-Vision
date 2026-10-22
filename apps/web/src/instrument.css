@@ -408,49 +408,8 @@ main {
   font-size: 13px;
   color: var(--muted);
 }
-.page-heading h1::before {
-  display: block;
-  content: var(--workspace-label);
-  font: 10px var(--mono);
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  margin-bottom: 8px;
-}
-main[data-page="overview"] {
-  --workspace-label: "管理 / 从方案到现场";
-}
-main[data-page="records"] {
-  --workspace-label: "02 / 判定与追溯";
-}
-main[data-page="data"][data-tab="tasks"] {
-  --workspace-label: "03 / 采样任务";
-}
-main[data-page="data"][data-tab="quality"] {
-  --workspace-label: "05 / 数据质量";
-}
-main[data-page="models"][data-tab="registry"] {
-  --workspace-label: "模型 / 候选与已验证版本";
-}
-main[data-page="models"][data-tab="training"] {
-  --workspace-label: "模型 / 训练与产出";
-}
-main[data-page="models"][data-tab="benchmarks"] {
-  --workspace-label: "模型 / 板端性能评估";
-}
-main[data-page="models"][data-tab="deployments"] {
-  --workspace-label: "模型 / 发布与回退";
-}
-main[data-page="diagnostics"] {
-  --workspace-label: "10 / 设备控制台";
-}
-main[data-page="system"] {
-  --workspace-label: "11 / 系统与维护";
-}
-main[data-page="access"] {
-  --workspace-label: "12 / 账号与访问";
-}
 .workspace-index {
-  font: 10px var(--mono);
+  font: 12px var(--font);
   letter-spacing: 0.09em;
   color: var(--muted);
   display: block;
@@ -537,7 +496,7 @@ tbody tr:hover {
 .tag,
 .status.chip {
   border-radius: 2px;
-  font-size: 10px;
+  font-size: 12px;
   padding: 3px 7px;
   line-height: 1.4;
   letter-spacing: 0.02em;
@@ -552,7 +511,7 @@ tbody tr:hover {
   background: var(--surface);
   padding: 12px;
   border: 1px solid var(--line);
-  font-size: 11px;
+  font-size: 13px;
 }
 .banner {
   border-radius: 0;
@@ -858,7 +817,9 @@ tbody tr:hover {
   font-size: 11px;
 }
 .target-number {
-  font: 10px var(--mono);
+  font: 12px var(--font);
+  max-width: 100px;
+  overflow-wrap: anywhere;
   background: var(--surface-3);
   padding: 3px;
 }
@@ -868,7 +829,7 @@ tbody tr:hover {
 }
 .detection-item small {
   display: block;
-  font-size: 9px;
+  font-size: 12px;
   color: var(--muted);
   margin-top: 3px;
 }
@@ -2583,4 +2544,150 @@ main[data-page="overview"] .loop .stage::before {
 }
 .console-controls > label select {
   white-space: normal;
+}
+
+/* ==========================================================================
+   全新工业 UI 组件体系与全局排版优化增强
+   ========================================================================== */
+
+/* 全局字阶与排版规范 */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font);
+  color: var(--ink);
+  letter-spacing: -0.015em;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+.mono {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* 统一工具栏排版体系 */
+.workbench-toolbar,
+.batch-toolbar,
+.access-toolbar,
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  padding: 10px 16px;
+  border-radius: var(--radius, 8px);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  box-sizing: border-box;
+}
+
+.toolbar-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field-label {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.product-info-badge {
+  background: var(--surface-2);
+  padding: 6px 12px;
+  border-radius: var(--radius, 6px);
+  border: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.product-info-badge .product-name {
+  color: var(--ink);
+}
+
+.access-toolbar {
+  margin: 16px 0;
+}
+
+.access-toolbar .search-input-wrap {
+  flex: 1;
+  min-width: 240px;
+}
+
+/* 抽屉表单统一排版 */
+.drawer-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.form-group {
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-label {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--ink);
+}
+
+.text-xs {
+  font-size: 11px;
+}
+
+.ml-2 {
+  margin-left: 8px;
+}
+
+.mt-2 {
+  margin-top: 8px;
+}
+
+.mt-3 {
+  margin-top: 12px;
+}
+
+.mt-4 {
+  margin-top: 16px;
+}
+
+.mb-2 {
+  margin-bottom: 8px;
+}
+
+/* 顶栏主题选择器精修 */
+.theme-select-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+
+.theme-select-wrap .ui-select-inner {
+  background: var(--surface-2);
+  border-color: transparent;
+  min-height: 32px;
+}
+
+.theme-select-wrap .ui-select-inner:hover {
+  border-color: var(--line-strong);
+}
+
+/* 表格内空状态与操作 */
+.empty-table-cell {
+  text-align: center;
+  padding: 36px 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.action-cell .row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }

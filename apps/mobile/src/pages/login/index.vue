@@ -68,7 +68,7 @@ async function submit() {
   <view class="login-page">
     <view class="brand">
       <view class="brand-symbol"><view /></view>
-      <text class="kicker">视觉物联网 / FIELD</text>
+      <text class="kicker">视觉物联网</text>
       <text class="brand-title">视觉采样<text class="brand-dot">.</text></text>
       <text class="brand-note"
         >板端画面、手机原图与检测复核，一台手机完成现场采样。</text

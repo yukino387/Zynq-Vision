@@ -11,6 +11,9 @@ foreach ($name in @('vision-engine','vision-panel')) {
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'manager.py') -Destination (Join-Path $prefix 'usr/local/bin/vision-manager.py')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'vision_auth.py') -Destination (Join-Path $prefix 'usr/local/bin/vision_auth.py')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'vision_mqtt.py') -Destination (Join-Path $prefix 'usr/local/bin/vision_mqtt.py')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'build/deps/python/paho') -Destination (Join-Path $prefix 'usr/local/bin') -Recurse -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'build/deps/python/paho_mqtt-2.1.0.dist-info/licenses/LICENSE.txt') -Destination (Join-Path $output 'licenses/paho-mqtt.txt')
 foreach ($name in @('vision-engine.service','vision-panel.service','vision-manager.service')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot "linux/$name") -Destination (Join-Path $prefix 'etc/systemd/system') }
 foreach ($name in @('vision_accel.c','vision_fb.c','vision_uapi.h','Makefile','vision-pl.dtsi','navigator-v3.9.dts','navigator-v3.9-usb.dtsi','kernel.config','uboot.config','build-kernel.sh','build-uboot.sh','build-modules.sh','build-rootfs.sh','build-initramfs.sh','build-sd-image.sh','install-rootfs.sh','rcS','udhcpc.script','inittab')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot "linux/$name") -Destination (Join-Path $output 'kernel') }
 $font = Join-Path $prefix 'usr/share/vision/simsun.ttc'

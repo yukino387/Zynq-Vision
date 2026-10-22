@@ -6,6 +6,8 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import sharp from "sharp";
 import { createHash } from "node:crypto";
+import { PassThrough } from "node:stream";
+import archiver from "archiver";
 import type { Source, BatchSnapshot } from "@vision/contracts";
 import { evaluateInspection, assessInspectionImage } from "@vision/shared";
 import { Db } from "../core/db.js";
@@ -597,5 +599,110 @@ export class SamplesService {
         });
       },
     );
+  }
+  /** Download selected samples without requiring annotations; PNG is decoded from the stored RGB565 frame. */
+  async frameExport(ids: string[]) {
+    const samples = await this.db.sample.findMany({
+      where: { id: { in: ids }, deletedAt: null },
+      include: { assets: true, plan: true },
+    });
+    if (samples.length !== ids.length)
+      throw new DomainError("NOT_FOUND", "部分图片不存在或已删除", 404);
+    const zip = archiver("zip", { zlib: { level: 5 } }),
+      output = new PassThrough();
+    zip.on("error", (error) => output.destroy(error));
+    zip.pipe(output);
+    void (async () => {
+      const manifest: Record<string, unknown>[] = [];
+      const used = new Set<string>();
+      for (const sample of samples) {
+        const raw = sample.assets.find((a) => a.kind === "RAW");
+        const preview = sample.assets.find((a) => a.kind === "PREVIEW");
+        const metadata = (sample.metadata ?? {}) as { frameId?: number };
+        let base = `frame_${String(metadata.frameId ?? sample.name.trim()).replace(/[^0-9A-Za-z_-]/g, "_")}`;
+        if (used.has(base)) base += `_${sample.id.slice(-6)}`;
+        used.add(base);
+        const entry = {
+          sampleId: sample.id,
+          name: sample.name,
+          frameId: metadata.frameId ?? null,
+          capturedAt: sample.capturedAt,
+          ...(sample.plan
+            ? {
+                planId: sample.plan.id,
+                classes:
+                  (sample.plan.rules as { classes?: string[] }).classes ?? [],
+              }
+            : {}),
+        };
+        if (raw) {
+          const data = await this.assets.read(raw.storageKey);
+          if (createHash("sha256").update(data).digest("hex") !== raw.sha256)
+            throw new DomainError("CHECKSUM_ERROR", "原图校验失败", 422);
+          const rgb565 =
+            raw.format === "RGB565_LE" ||
+            (sample.source === "BOARD" &&
+              raw.mimeType === "application/octet-stream");
+          if (rgb565) {
+            zip.append(
+              await sharp(decodeRgb565(data), {
+                raw: { width: 416, height: 416, channels: 3 },
+              })
+                .png({ compressionLevel: 6 })
+                .toBuffer(),
+              { name: `images/${base}.png` },
+            );
+            zip.append(data, { name: `raw/${base}.raw` });
+            manifest.push({
+              ...entry,
+              image: `images/${base}.png`,
+              raw: `raw/${base}.raw`,
+              rawSha256: raw.sha256,
+              width: raw.width,
+              height: raw.height,
+            });
+          } else {
+            const extension =
+              (
+                {
+                  "image/jpeg": ".jpg",
+                  "image/png": ".png",
+                  "image/webp": ".webp",
+                } as Record<string, string>
+              )[raw.mimeType] ?? ".bin";
+            zip.append(data, { name: `images/${base}${extension}` });
+            manifest.push({
+              ...entry,
+              image: `images/${base}${extension}`,
+              sha256: raw.sha256,
+              width: raw.width,
+              height: raw.height,
+            });
+          }
+        } else if (preview) {
+          const extension = preview.mimeType === "image/png" ? ".png" : ".jpg";
+          zip.append(await this.assets.read(preview.storageKey), {
+            name: `images/${base}${extension}`,
+          });
+          manifest.push({
+            ...entry,
+            image: `images/${base}${extension}`,
+            sha256: preview.sha256,
+            width: preview.width,
+            height: preview.height,
+          });
+        }
+      }
+      zip.append(
+        JSON.stringify(
+          { generatedAt: new Date().toISOString(), samples: manifest },
+          null,
+          2,
+        ),
+        { name: "manifest.json" },
+      );
+      await zip.finalize();
+    })().catch((error) => output.destroy(error));
+    return output;
   }
 }

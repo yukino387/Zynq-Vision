@@ -153,7 +153,7 @@ export const routes: RouteRecordRaw[] = [
       tabs: [
         { tab: "registry", label: "模型仓库" },
         { tab: "training", label: "训练任务" },
-        { tab: "deployments", label: "模型下发", roles: ["ADMIN"] },
+        { tab: "deployments", label: "开始检测", roles: ENGINEER },
       ],
     },
   },

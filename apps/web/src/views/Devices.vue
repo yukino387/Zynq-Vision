@@ -3,7 +3,7 @@ import {
   chinese,
   displayName,
   fieldLabel,
-  productClassesMatch,
+  deviceSyncText,
 } from "@vision/shared";
 import { ref, computed, watch, toRaw } from "vue";
 import { useRoute } from "vue-router";
@@ -11,7 +11,6 @@ import type { Named } from "../types";
 import type {
   DeviceSnapshot,
   DeviceState,
-  InspectionPlan,
   Model,
   ResidentModel,
 } from "@vision/contracts";
@@ -26,6 +25,7 @@ import SortableTh from "../components/SortableTh.vue";
 import Icon from "../components/Icon.vue";
 import Sparkline from "../components/Sparkline.vue";
 import DistributionBar from "../components/DistributionBar.vue";
+import MqttSettings from "../components/MqttSettings.vue";
 const route = useRoute(),
   devices = useDeviceStore(),
   notices = useNotificationStore(),
@@ -47,14 +47,10 @@ const tab = computed(() =>
   brightness = ref(0),
   targetModel = ref(""),
   targetPlan = ref(""),
-  plans = ref<InspectionPlan[]>([]),
-  productPlanId = ref(""),
-  productConfirm = ref(false),
-  assigning = ref(false),
   busy = ref(false);
 /** 遥测是微秒，界面按毫秒显示。 */
 const metric = (us: number | undefined) =>
-  us === undefined ? "—" : (us / 1000).toFixed(1);
+  us == null ? "未上报" : (us / 1000).toFixed(1) + " 毫秒";
 const legacy = (_d: DeviceSnapshot | null | undefined) => false;
 const modeName = (d: DeviceSnapshot | null | undefined) =>
   d?.executionMode === "SIMULATOR" ? "模拟设备" : "Linux 检测终端";
@@ -195,48 +191,10 @@ async function open(d: DeviceSnapshot) {
   selected.value = d;
   targetModel.value = d.desiredState.modelVersion ?? "";
   targetPlan.value = d.desiredState.planVersion ?? "";
-  productPlanId.value = d.terminal?.state?.product?.id ?? "";
-  productConfirm.value = false;
-  void ensurePlans();
   try {
     detail.value = await api(`/devices/${d.id}`);
   } catch (e) {
     notices.error(e);
-  }
-}
-async function ensurePlans() {
-  if (plans.value.length) return;
-  try {
-    plans.value = (
-      await api<{ items: InspectionPlan[] }>("/plans?pageSize=100")
-    ).items;
-  } catch (e) {
-    notices.error(e);
-  }
-}
-const compatiblePlans = computed(() => {
-  const classes = selected.value?.terminal?.state?.model?.classes;
-  if (!classes) return [];
-  return plans.value.filter((plan) =>
-    productClassesMatch(plan.rules.classes, classes),
-  );
-});
-async function assignProduct() {
-  if (!selected.value || !productPlanId.value) return;
-  assigning.value = true;
-  try {
-    await post(`/devices/${selected.value.id}/product`, {
-      planId: productPlanId.value,
-      confirm: productConfirm.value,
-    });
-    await devices.snapshot();
-    selected.value =
-      devices.devices.find((d) => d.id === selected.value?.id) ?? null;
-    notices.add("产品已分配到设备");
-  } catch (e) {
-    notices.error(e);
-  } finally {
-    assigning.value = false;
   }
 }
 /** 设备 SD 模型库。板子自己维护这份清单，平台只读它。 */
@@ -386,7 +344,12 @@ async function create() {
     <template v-if="devices.current?.terminal?.state">
       <p>
         模型：{{ devices.current.terminal.state.model?.version || "未下发" }} ·
-        产品：{{ devices.current.terminal.state.product?.name || "未分配" }} ·
+        产品：{{
+          devices.current.terminal.state.product?.product ||
+          devices.current.terminal.state.product?.name ||
+          "未分配"
+        }}
+        ·
         {{
           devices.current.terminal.state.production ? "自动检测中" : "已停止"
         }}
@@ -394,8 +357,12 @@ async function create() {
       <p>
         已检查 {{ devices.current.terminal.state.total }} · 待上传
         {{ devices.current.terminal.state.pendingSync }} · CPU
-        {{ devices.current.terminal.state.cpuPercent?.toFixed(1) ?? "—" }}% ·
-        内存
+        {{
+          devices.current.terminal.state.cpuPercent == null
+            ? "未上报"
+            : devices.current.terminal.state.cpuPercent.toFixed(1) + "%"
+        }}
+        · 内存
         {{ (devices.current.terminal.state.memoryUsed / 1048576).toFixed(1) }} /
         {{ (devices.current.terminal.state.memoryTotal / 1048576).toFixed(1) }}
         MiB
@@ -424,50 +391,51 @@ async function create() {
       <div class="cells telemetry-cells">
         <div>
           <small>采集</small
-          ><strong class="mono"
-            >{{ metric(devices.current?.telemetry?.captureUs)
-            }}<small class="unit">ms</small></strong
-          >
+          ><strong class="mono">{{
+            metric(devices.current?.telemetry?.captureUs)
+          }}</strong>
         </div>
         <div>
           <small>预处理</small
-          ><strong class="mono"
-            >{{ metric(devices.current?.telemetry?.conversionUs)
-            }}<small class="unit">ms</small></strong
-          >
+          ><strong class="mono">{{
+            metric(devices.current?.telemetry?.conversionUs)
+          }}</strong>
         </div>
         <div>
           <small>推理</small
-          ><strong class="mono"
-            >{{ metric(devices.current?.telemetry?.inferenceUs)
-            }}<small class="unit">ms</small></strong
-          >
+          ><strong class="mono">{{
+            metric(devices.current?.telemetry?.inferenceUs)
+          }}</strong>
         </div>
         <div>
           <small>传输</small
-          ><strong class="mono"
-            >{{ metric(devices.current?.telemetry?.transferUs)
-            }}<small class="unit">ms</small></strong
-          >
+          ><strong class="mono">{{
+            metric(devices.current?.telemetry?.transferUs)
+          }}</strong>
         </div>
         <div>
           <small>帧周期</small
-          ><strong class="mono"
-            >{{ metric(devices.current?.telemetry?.cycleUs)
-            }}<small class="unit">ms</small></strong
-          >
+          ><strong class="mono">{{
+            metric(devices.current?.telemetry?.cycleUs)
+          }}</strong>
         </div>
         <div>
           <small>帧率</small
           ><strong class="mono"
-            >{{ devices.current?.telemetry?.fps?.toFixed(2) ?? "—"
-            }}<small class="unit">fps</small></strong
+            >{{ devices.current?.telemetry?.fps?.toFixed(2) ?? "未上报"
+            }}<small v-if="devices.current?.telemetry?.fps != null" class="unit"
+              >帧/秒</small
+            ></strong
           >
         </div>
         <div>
           <small>错误码</small
           ><strong class="mono">{{
-            devices.current?.telemetry?.errorCode ?? "未上报"
+            devices.current?.telemetry?.errorCode == null
+              ? "未上报"
+              : devices.current.telemetry.errorCode === 0
+                ? "无故障"
+                : `故障码 ${devices.current.telemetry.errorCode}`
           }}</strong>
         </div>
       </div>
@@ -562,7 +530,6 @@ async function create() {
             <tr v-for="d in deviceRows" :key="d.id">
               <td class="device-cell">
                 <strong>{{ displayName(d.name) }}</strong
-                ><small class="mono">{{ d.id.slice(-10) }}</small
                 ><button class="table-action mobile-only" @click="open(d)">
                   详情
                 </button>
@@ -575,7 +542,9 @@ async function create() {
               <td class="mono col-model">
                 {{ d.reportedState.modelVersion ?? "未上报" }}
               </td>
-              <td class="col-sync"><Status :value="d.syncState" /></td>
+              <td class="col-sync">
+                <Status :value="d.syncState" :label="deviceSyncText(d)" />
+              </td>
               <td class="col-action action-cell">
                 <div class="row-actions">
                   <button class="table-action" @click="open(d)">
@@ -691,16 +660,17 @@ async function create() {
     ><div class="toolbar">
       <Status :value="selected.connectionState" /><Status
         :value="selected.runtimeState"
-      /><Status :value="selected.syncState" />
+      /><Status :value="selected.syncState" :label="deviceSyncText(selected)" />
     </div>
     <section v-if="!legacy(selected)" class="terminal-summary">
       <h3>{{ modeName(selected) }}</h3>
       <p>
-        模型和产品由平台下发；开始/停止自动检测与补检可在工作台或板端面板操作。
-      </p>
-      <p>
         当前模型：{{ selected.terminal?.state?.model?.version || "未下发" }} ·
-        当前产品：{{ selected.terminal?.state?.product?.name || "未分配" }}
+        当前产品：{{
+          selected.terminal?.state?.product?.product ||
+          selected.terminal?.state?.product?.name ||
+          "未分配"
+        }}
       </p>
       <p v-if="selected.terminal?.state">
         过件：{{
@@ -708,37 +678,20 @@ async function create() {
         }}
         · 待上传 {{ selected.terminal.state.pendingSync }}
       </p>
-      <div class="toolbar product-assign">
-        <label
-          >分配产品<select v-model="productPlanId" :disabled="assigning">
-            <option value="">选择产品</option>
-            <option
-              v-for="plan in compatiblePlans"
-              :key="plan.id"
-              :value="plan.id"
-            >
-              {{ displayName(plan.name) }} / V{{ plan.version }}
-            </option>
-          </select></label
-        >
-        <label class="confirm-line">
-          <input v-model="productConfirm" type="checkbox" />
-          停止当前生产并确认后切换
-        </label>
-        <button
-          class="primary"
-          :disabled="assigning || !productPlanId"
-          @click="assignProduct"
-        >
-          {{ assigning ? "分配中…" : "分配产品" }}
-        </button>
-      </div>
-      <p
-        v-if="selected.terminal?.state?.model && !compatiblePlans.length"
-        class="note"
+      <RouterLink
+        v-if="auth.engineer"
+        class="button-link primary"
+        :to="{
+          name: 'models',
+          params: { tab: 'deployments' },
+          query: {
+            deviceId: selected.id,
+            planId: selected.terminal?.state?.product?.id || undefined,
+          },
+        }"
+        @click="selected = null"
+        >更换产品与模型</RouterLink
       >
-        没有与当前模型类别顺序一致的产品，请先在产品配置中检查类别。
-      </p>
       <RouterLink
         to="/production"
         class="text-button"
@@ -749,6 +702,11 @@ async function create() {
         >查看生产批次</RouterLink
       >
     </section>
+    <MqttSettings
+      v-if="auth.engineer && !legacy(selected)"
+      :key="selected.id"
+      :device-id="selected.id"
+    />
     <p class="note" v-if="legacy(selected)">
       连接设备会接管图像接收，请先断开其他上位机。
     </p>
@@ -782,21 +740,21 @@ async function create() {
       </div>
       <div class="compare-row">
         <span>固件版本</span>
-        <b class="mono">—</b>
+        <b class="mono">不适用</b>
         <b class="mono">{{ selected.firmwareVersion ?? "未上报" }}</b>
       </div>
       <div v-if="firmware" class="compare-row">
         <span>固件槽位</span>
-        <b class="mono">—</b>
+        <b class="mono">不适用</b>
         <b class="mono"
-          >运行 {{ slotName(firmware.runningSlot) }} · active
-          {{ slotName(firmware.activeSlot) }} · pending
+          >运行 {{ slotName(firmware.runningSlot) }} · 已启用
+          {{ slotName(firmware.activeSlot) }} · 待启用
           {{ slotName(firmware.pendingSlot) }}</b
         >
       </div>
       <div v-if="firmware" class="compare-row">
         <span>试运行</span>
-        <b class="mono">—</b>
+        <b class="mono">不适用</b>
         <b class="mono"
           >{{ firmware.attempts }}/{{ firmware.maxAttempts }}
           <template v-if="firmware.flags & 16"> · 待确认</template>
@@ -879,7 +837,7 @@ async function create() {
     <template v-if="auth.engineer && legacy(selected)"
       ><h3 class="section-space">设备命令</h3>
       <label
-        >控制命令<select v-model="command">
+        >控制命令<UiSelect v-model="command">
           <option value="GET_STATUS">{{ chinese("GET_STATUS") }}</option>
           <option value="START_INSPECTION">
             {{ chinese("START_INSPECTION") }}
@@ -890,7 +848,7 @@ async function create() {
           <option v-if="selected.type === 'ZYNQ'" value="SET_BRIGHTNESS">
             调整亮度
           </option>
-        </select></label
+        </UiSelect></label
       ><label v-if="command === 'SET_BRIGHTNESS'"
         >亮度<input
           v-model.number="brightness"
@@ -901,7 +859,7 @@ async function create() {
       <template v-if="auth.admin">
         <h3 class="section-space">设置目标版本</h3>
         <label
-          >目标模型版本<select v-model="targetModel">
+          >目标模型版本<UiSelect v-model="targetModel">
             <option value="">未设置</option>
             <option
               v-for="m in residentModels"
@@ -910,7 +868,7 @@ async function create() {
             >
               {{ m.version }}
             </option>
-          </select></label
+          </UiSelect></label
         ><label>目标方案版本<input v-model="targetPlan" /></label
         ><button @click="action('desired')" :disabled="busy">
           保存目标版本
@@ -932,12 +890,12 @@ async function create() {
         }}<input v-model="serial" required /></label
       ><template v-if="tab !== 'stations'"
         ><label
-          >工位<select v-model="stationId">
+          >工位<UiSelect v-model="stationId">
             <option value="">未分配</option>
             <option v-for="s in stations" :key="s.id" :value="s.id">
               {{ displayName(s.name) }}
             </option>
-          </select></label
+          </UiSelect></label
         ></template
       ><button class="primary" :disabled="busy">创建</button>
     </form></Drawer

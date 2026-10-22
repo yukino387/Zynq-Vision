@@ -22,14 +22,44 @@ import { CommandsService } from "./commands.service.js";
 import { baseCapabilities } from "./transport.js";
 import { config } from "../config.js";
 import { planRulesSchema, acceptanceSchema } from "@vision/contracts";
+import { mqttConfigSchema } from "@vision/contracts";
 import { productClassesMatch } from "@vision/shared";
+import { manifestSchema } from "@vision/contracts";
+import { AssetsService } from "../assets/assets.service.js";
+import { deployTerminalModel } from "../deployments/terminal-deployment.js";
 @Controller("api/devices")
 export class DevicesController {
   constructor(
     @Inject(Db) private db: Db,
     @Inject(DevicesService) private devices: DevicesService,
     @Inject(CommandsService) private commands: CommandsService,
+    @Inject(AssetsService) private assets: AssetsService,
   ) {}
+  @Roles("ADMIN", "ENGINEER") @Get(":id/mqtt") async mqtt(
+    @Param("id") id: string,
+    @Req() req: Request,
+  ) {
+    const device = await this.db.device.findUniqueOrThrow({ where: { id } });
+    return (
+      await terminalRequest(device, "/mqtt", req.headers.authorization ?? "")
+    ).json();
+  }
+  @Roles("ADMIN") @Post(":id/mqtt") async configureMqtt(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+  ) {
+    const config = parse(mqttConfigSchema, body);
+    const device = await this.db.device.findUniqueOrThrow({ where: { id } });
+    return (
+      await terminalRequest(
+        device,
+        "/mqtt/config",
+        req.headers.authorization ?? "",
+        config,
+      )
+    ).json();
+  }
   @Get("snapshot") snapshots() {
     return this.devices.snapshots();
   }
@@ -145,6 +175,8 @@ export class DevicesController {
       z
         .object({
           planId: z.string().min(1),
+          modelId: z.string().min(1).optional(),
+          start: z.boolean().optional(),
           acceptance: acceptanceSchema.optional(),
           confirm: z.boolean().optional(),
         })
@@ -157,7 +189,7 @@ export class DevicesController {
     const status = await terminalStatus(this.db, device);
     if (!status.online || !status.state)
       throw new DomainError("UNAVAILABLE", "设备未连接，请等待设备上线", 409);
-    if (!status.state.model)
+    if (!status.state.model && !dto.modelId)
       throw new DomainError("INVALID_STATE", "请先下发模型，再分配产品", 409);
     const plan = await this.db.inspectionPlan.findUniqueOrThrow({
       where: { id: dto.planId },
@@ -165,10 +197,22 @@ export class DevicesController {
     if (plan.deletedAt)
       throw new DomainError("INVALID_STATE", "产品已删除", 409);
     const rules = parse(planRulesSchema, plan.rules);
-    if (!productClassesMatch(rules.classes, status.state.model.classes))
+    const selectedModel = dto.modelId
+      ? await this.db.model.findUniqueOrThrow({ where: { id: dto.modelId } })
+      : null;
+    if (selectedModel && selectedModel.status !== "APPROVED")
+      throw new DomainError(
+        "INVALID_STATE",
+        "请先在模型仓库批准此模型用于生产",
+        409,
+      );
+    const classes = selectedModel
+      ? parse(manifestSchema, selectedModel.manifest).classes
+      : status.state.model!.classes;
+    if (!productClassesMatch(rules.classes, classes))
       throw new DomainError(
         "MODEL_INCOMPATIBLE",
-        "产品类别及顺序必须与设备当前模型一致",
+        "所选模型的类别及顺序与产品不匹配，请重新选择兼容模型",
         422,
       );
     if (!rules.checks.some((check) => check.min > 0))
@@ -177,39 +221,122 @@ export class DevicesController {
         "自动过件需要至少一个必需类别；请把产品主体加入识别类别",
         422,
       );
-    const acceptance = dto.acceptance ?? { confidence: 0.7, qualityGate: true };
+    if (selectedModel && selectedModel.id !== status.state.model?.id) {
+      if (req.actor.role !== "ADMIN")
+        throw new DomainError("FORBIDDEN", "更换设备模型需要管理员操作", 403);
+      const installed = await deployTerminalModel(
+        this.db,
+        this.assets,
+        this.commands,
+        device,
+        selectedModel.id,
+        req.actor.id,
+        req.headers.authorization ?? "",
+        req.id,
+        dto.confirm ?? false,
+      );
+      if (!installed.state)
+        throw new DomainError(
+          "UNAVAILABLE",
+          "模型尚未确认生效。请查看应用记录，确认模型状态后再应用产品",
+          503,
+        );
+      status.state = installed.state as typeof status.state;
+    }
     const current = status.state.product;
-    if (
+    const acceptance =
+      dto.acceptance ??
+      (current?.id === plan.id && current.version === plan.version
+        ? current.acceptance
+        : { confidence: 0.7, qualityGate: true });
+    const unchanged = !!(
       current &&
       current.id === plan.id &&
       current.version === plan.version &&
       current.acceptance.confidence === acceptance.confidence &&
       current.acceptance.qualityGate === acceptance.qualityGate
-    )
-      return status.state;
-    if (status.state.production && !dto.confirm)
+    );
+    if (!unchanged && status.state.production && !dto.confirm)
       throw new DomainError(
         "DEVICE_BUSY",
         "请先停止自动检测并确认当前件已处理，再切换产品",
         409,
       );
-    return (
-      await terminalRequest(
-        device,
-        "/runtime/product",
-        req.headers.authorization ?? "",
-        {
-          planId: plan.id,
-          planName: plan.name,
-          planVersion: plan.version,
-          product: rules.product,
-          rules,
-          acceptance,
-          confirm: dto.confirm ?? false,
-        },
-        30000,
-      )
-    ).json();
+    let installed = unchanged
+      ? status.state
+      : await (
+          await terminalRequest(
+            device,
+            "/runtime/product",
+            req.headers.authorization ?? "",
+            {
+              planId: plan.id,
+              planName: rules.product,
+              planVersion: plan.version,
+              product: rules.product,
+              rules,
+              acceptance,
+              confirm: dto.confirm ?? false,
+            },
+            30000,
+          )
+        ).json();
+    if (dto.start && !installed.production) {
+      installed = await this.commands.run(
+        id,
+        "START_INSPECTION",
+        req.id,
+        async () =>
+          (
+            await terminalRequest(
+              device,
+              "/control",
+              req.headers.authorization ?? "",
+              {
+                type: "START_INSPECTION",
+              },
+            )
+          ).json(),
+      );
+    }
+    const metadata = device.metadata as Prisma.JsonObject;
+    const previous = metadata.terminal as Prisma.JsonObject;
+    const reported = Object.fromEntries(
+      [
+        "model",
+        "product",
+        "production",
+        "productionRunId",
+        "paused",
+        "fresh",
+        "runCounts",
+        "runTotal",
+        "total",
+        "counts",
+        "pendingSync",
+        "pendingRequestId",
+        "passagePhase",
+        "last",
+        "error",
+        "syncError",
+      ]
+        .filter((key) => key in installed)
+        .map((key) => [key, installed[key]]),
+    );
+    await this.db.device.update({
+      where: { id },
+      data: {
+        metadata: {
+          ...metadata,
+          terminal: {
+            ...previous,
+            ...reported,
+            receivedAt: new Date().toISOString(),
+          },
+        } as Prisma.InputJsonValue,
+      },
+    });
+    return installed;
   }
   /** 停止状态下的单件补检/调试；自动生产中由引擎拒绝。 */
   @Roles("ADMIN", "ENGINEER", "OPERATOR") @Post(":id/check") async check(

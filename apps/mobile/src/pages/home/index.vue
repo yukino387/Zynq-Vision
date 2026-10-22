@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { onShow } from "@dcloudio/uni-app";
+import { computed, ref } from "vue";
+import { onShow, onHide, onPullDownRefresh } from "@dcloudio/uni-app";
 import { chinese, displayName, statusTone } from "@vision/shared";
 import {
   session,
@@ -19,11 +19,13 @@ import {
   setDevice,
   startLive,
 } from "../../live";
+import DeviceRun from "../../components/DeviceRun.vue";
 import LiveFeed from "../../components/LiveFeed.vue";
 
 const taskList = ref<Task[]>([]),
   loading = ref(false),
-  error = ref("");
+  error = ref(""),
+  visible = ref(false);
 const pending = computed(
   () => queue.items.filter((i) => i.status !== "SYNCED").length,
 );
@@ -58,15 +60,20 @@ async function load() {
     loading.value = false;
   }
 }
-onShow(load);
-let refreshTimer: ReturnType<typeof setTimeout> | null = null;
-watch(
-  () => live.completedAt,
-  () => {
-    if (refreshTimer) clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => void load(), 500);
-  },
-);
+onShow(() => {
+  visible.value = true;
+  void load();
+});
+onHide(() => {
+  visible.value = false;
+});
+onPullDownRefresh(async () => {
+  try {
+    await load();
+  } finally {
+    uni.stopPullDownRefresh();
+  }
+});
 
 function openLive() {
   uni.navigateTo({ url: "/pages/live/index" });
@@ -95,53 +102,54 @@ function chooseDevice(id: string) {
   <view class="page">
     <view class="welcome">
       <view class="welcome-row">
-        <text class="eyebrow">现场任务 / FIELD</text>
+        <text class="eyebrow">现场工作台</text>
         <text
           class="connection"
           :class="{ online: session.online && session.serverAvailable }"
-          >●
+        >
           {{
             session.online && session.serverAvailable ? "已连接" : "离线模式"
           }}</text
         >
       </view>
       <text class="title">你好，{{ greeting }}</text>
-      <text class="subtitle">连接现场，捕捉每一处细节。</text>
     </view>
 
     <view class="live-card" @click="openLive">
       <view class="live-stage">
-        <LiveFeed minimal fit="aspectFit" />
+        <LiveFeed v-if="visible" minimal fit="aspectFit" />
       </view>
       <view class="live-foot">
         <view class="live-foot-copy">
           <text class="live-foot-title"
             >{{ displayName(liveDevice?.name ?? "未选择设备") }}
-            <text class="live-dot" :class="liveTone"
-              >● {{ liveLabel }}</text
-            ></text
+            <text class="live-dot" :class="liveTone">{{
+              liveLabel
+            }}</text></text
           >
           <text class="live-foot-note"
             >{{
               detections === null
-                ? "等待本帧推理输出"
+                ? "等待推理"
                 : detections.length
-                  ? `${detections.length} 处候选目标 · 待复核`
-                  : "本帧未检出缺陷"
+                  ? `${detections.length} 个画面目标`
+                  : "当前画面无目标"
             }}
             ·
             {{ live.fps.toFixed(1) }} FPS</text
           >
         </view>
-        <text class="live-foot-action">全屏 ↗</text>
+        <text class="live-foot-action">全屏查看</text>
       </view>
     </view>
+
+    <DeviceRun />
 
     <view class="quick-grid">
       <view class="quick" @click="capture">
         <image class="quick-icon" src="/static/action-camera.png" />
         <text class="quick-title">开始采样</text>
-        <text class="quick-note">板端 / 手机 / 同步</text>
+        <text class="quick-note">实时相机</text>
       </view>
       <view
         class="quick"
@@ -149,7 +157,7 @@ function chooseDevice(id: string) {
       >
         <image class="quick-icon" src="/static/action-records.png" />
         <text class="quick-title">检测记录</text>
-        <text class="quick-note">复核与证据</text>
+        <text class="quick-note">查看与复核</text>
       </view>
       <view class="quick" @click="uni.navigateTo({ url: '/pages/sync/index' })">
         <image class="quick-icon" src="/static/action-sync.png" />
@@ -161,16 +169,14 @@ function chooseDevice(id: string) {
     <view class="section-head">
       <text>当前任务</text>
       <text class="muted" @click="uni.switchTab({ url: '/pages/tasks/index' })"
-        >全部 →</text
+        >全部</text
       >
     </view>
     <view v-if="loading" class="empty">正在读取任务…</view>
     <view v-else-if="error" class="error" @click="load"
       >{{ error }} / 点击重试</view
     >
-    <view v-else-if="!taskList.length" class="empty"
-      >暂无任务，仍可进行独立采样。</view
-    >
+    <view v-else-if="!taskList.length" class="empty">暂无采样任务</view>
     <view
       v-for="t in taskList.slice(0, 3)"
       :key="t.id"
@@ -193,10 +199,10 @@ function chooseDevice(id: string) {
       <view class="row task-meta">
         <text class="note"
           >{{ chinese(t.status) }} ·
-          {{ session.taskId === t.id ? "当前选中" : "点按选择" }}</text
+          {{ session.taskId === t.id ? "当前选中" : "选择任务" }}</text
         >
         <text class="task-select">{{
-          session.taskId === t.id ? "继续采样 →" : "选择 →"
+          session.taskId === t.id ? "继续采样" : "选择"
         }}</text>
       </view>
     </view>
@@ -221,9 +227,9 @@ function chooseDevice(id: string) {
                 >实时源</text
               ></text
             >
-            <text class="status" :class="statusTone(d.connectionState)"
-              >● {{ chinese(d.connectionState) }}</text
-            >
+            <text class="status" :class="statusTone(d.connectionState)">{{
+              chinese(d.connectionState)
+            }}</text>
           </view>
           <text class="list-caption"
             >{{ chinese(d.runtimeState) }} · 模型
@@ -231,14 +237,12 @@ function chooseDevice(id: string) {
           >
         </view>
       </view>
-      <view v-if="!live.devices.length" class="empty"
-        >尚未注册设备。请工程师在 Web 端添加并连接。</view
-      >
+      <view v-if="!live.devices.length" class="empty">暂无设备</view>
     </view>
 
     <view class="footer-links">
       <text class="muted" @click="uni.navigateTo({ url: '/pages/pair/index' })"
-        >配对服务器 / 工位</text
+        >连接设置</text
       >
       <text
         class="muted"

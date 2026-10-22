@@ -18,7 +18,9 @@ import { useAppStore, type Theme } from "./stores/app";
 import { canAccess, navItems, roleDuties } from "./navigation";
 import type { RouteRecordRaw } from "vue-router";
 import AuthPanel from "./components/AuthPanel.vue";
+import ProductWorkflow from "./components/ProductWorkflow.vue";
 import Icon from "./components/Icon.vue";
+import { UiSelect, UiBadge, UiButton, UiThemeToggle } from "./components/ui";
 const navIcons: Record<string, string> = {
   overview: "dashboard",
   plans: "clipboard",
@@ -115,7 +117,8 @@ onUnmounted(() => {
   narrowScreen.removeEventListener("change", closeWideNavigation);
   if (sidebarOpen.value) document.body.style.overflow = previousOverflow;
 });
-const matches = (text: string) => text.includes(menuQuery.value.trim());
+const matches = (text: string) =>
+  text.toLocaleLowerCase().includes(menuQuery.value.trim().toLocaleLowerCase());
 const sidebarItems = computed(() =>
   nav.value
     .map((item) => ({
@@ -312,7 +315,9 @@ watch(
             />{{ entry.item.meta?.title }}</RouterLink
           >
         </template>
-        <p v-if="!sidebarItems.length" class="menu-empty">没有找到相关功能</p>
+        <p v-if="!sidebarItems.length" class="menu-empty">
+          没有找到相关功能 <button @click="menuQuery = ''">清空搜索</button>
+        </p>
       </nav>
       <div class="session">
         <span class="session-avatar" aria-hidden="true">{{
@@ -356,27 +361,28 @@ watch(
             aria-label="账号设置"
             title="账号设置"
             @click="choose"
-            ><Icon name="users" :size="16" /><span>账号设置</span></RouterLink
           >
-          <span class="connection-status"
-            ><span
-              class="connection-dot"
-              :class="devices.connected ? 'ok' : 'info'"
-            ></span
-            >{{ devices.connected ? "平台连接正常" : "平台连接中" }}</span
-          ><RouterLink v-if="auth.engineer" to="/system/health"
-            >系统状态</RouterLink
-          ><select
+            <Icon name="users" :size="15" />
+            <span>账号设置</span>
+          </RouterLink>
+          <UiBadge
+            :tone="devices.connected ? 'success' : 'warn'"
+            chip
+            dot
+            :pulse="!devices.connected"
+            size="sm"
+          >
+            {{ devices.connected ? "平台连接正常" : "平台连接中" }}
+          </UiBadge>
+          <UiButton
             v-if="auth.engineer"
-            class="theme-select"
-            :value="app.theme"
-            @change="onTheme"
-            aria-label="显示主题"
+            variant="ghost"
+            size="sm"
+            :to="{ path: '/system/health' }"
           >
-            <option value="system">跟随系统</option>
-            <option value="light">浅色</option>
-            <option value="dark">深色</option>
-          </select>
+            系统状态
+          </UiButton>
+          <UiThemeToggle />
         </div>
       </header>
       <main
@@ -385,6 +391,13 @@ watch(
         :data-page="String(route.name)"
         :data-tab="String(route.params.tab || route.meta.defaultTab || '')"
       >
+        <ProductWorkflow
+          v-if="
+            auth.engineer &&
+            ['plans', 'data', 'models'].includes(String(route.name)) &&
+            !(route.name === 'models' && route.params.tab === 'deployments')
+          "
+        />
         <!-- tab 切换也是路由切换，所以这一个过渡同时覆盖侧栏跳转和子页切换 -->
         <RouterView v-slot="{ Component }">
           <Transition name="page" mode="out-in">

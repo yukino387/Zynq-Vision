@@ -20,43 +20,47 @@ function onSize(event: Event) {
 }
 </script>
 <template>
-  <div class="pager">
-    <span class="total mono">共 {{ total }} 条</span>
+  <div v-if="pages > 1 || total > 20" class="pager" aria-label="列表分页">
+    <span class="total">共 {{ total }} 条</span>
     <label class="size">
       每页
-      <select :value="pageSize" @change="onSize" aria-label="每页条数">
-        <option v-for="s in sizes" :key="s" :value="s">{{ s }}</option>
-      </select>
-    </label>
-    <div class="steps">
-      <button
-        aria-label="第一页"
-        title="第一页"
-        :disabled="page <= 1"
-        @click="emit('update:page', 1)"
+      <UiSelect
+        :model-value="pageSize"
+        size="sm"
+        aria-label="每页条数"
+        @change="onSize"
       >
-        «</button
-      ><button
+        <option v-for="s in sizes" :key="s" :value="s">{{ s }}</option>
+      </UiSelect>
+    </label>
+    <div v-if="pages > 1" class="steps">
+      <button
         aria-label="上一页"
         :disabled="page <= 1"
         @click="emit('update:page', page - 1)"
       >
-        ‹</button
-      ><span class="mono pos">{{ page }} / {{ pages }}</span
+        上一页</button
+      ><span class="pos">第 {{ page }} 页，共 {{ pages }} 页</span
       ><button
         aria-label="下一页"
         :disabled="page >= pages"
         @click="emit('update:page', page + 1)"
       >
-        ›</button
-      ><button
-        aria-label="最后一页"
-        title="最后一页"
-        :disabled="page >= pages"
-        @click="emit('update:page', pages)"
-      >
-        »
+        下一页
       </button>
     </div>
   </div>
 </template>
+<style scoped>
+.pager,
+.steps {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.steps button,
+.pos {
+  white-space: nowrap;
+}
+</style>

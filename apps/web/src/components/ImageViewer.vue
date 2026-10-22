@@ -182,7 +182,12 @@ onUnmounted(() => {
               1:1</button
             ><button @click="showBoxes = !showBoxes">
               {{ showBoxes ? "隐藏框" : "显示框" }}</button
-            ><select v-if="assets" v-model="mode" aria-label="图像类型">
+            ><UiSelect
+              v-if="assets"
+              v-model="mode"
+              aria-label="图像类型"
+              size="sm"
+            >
               <option value="PREVIEW">预览图</option>
               <option
                 v-if="assets.some((a) => a.kind === 'MODEL_INPUT_PREVIEW')"
@@ -190,7 +195,7 @@ onUnmounted(() => {
               >
                 重建输入
               </option>
-            </select></template
+            </UiSelect></template
           ></template
         >
       </div>

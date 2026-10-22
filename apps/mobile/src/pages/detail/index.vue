@@ -168,12 +168,12 @@ async function save() {
           :key="i"
           class="detection"
         >
-          <text class="index mono">{{ String(i + 1).padStart(2, "0") }}</text>
+          <text class="index mono">{{ `目标 ${i + 1}` }}</text>
           <view class="det-copy">
             <text>{{ displayName(b.label) }}</text>
             <text class="mono det-pos"
-              >{{ Math.round(b.x1) }},{{ Math.round(b.y1) }} →
-              {{ Math.round(b.x2) }},{{ Math.round(b.y2) }}</text
+              >位置：{{ Math.round(b.x1) }},{{ Math.round(b.y1) }} 至
+              {{ Math.round(b.x2) }},{{ Math.round(b.y2) }} 像素</text
             >
           </view>
           <text class="score mono">{{ (b.confidence * 100).toFixed(1) }}%</text>

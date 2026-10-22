@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { chinese, displayName, statusTone } from "@vision/shared";
 import { ref, computed, watch } from "vue";
-import { onShow } from "@dcloudio/uni-app";
+import {
+  onShow,
+  onHide,
+  onUnload,
+  onPullDownRefresh,
+  onReachBottom,
+} from "@dcloudio/uni-app";
 import type { Page, Source } from "@vision/contracts";
 import { request, requireLogin, notify } from "../../state";
 import { live } from "../../live";
@@ -22,6 +28,7 @@ const records = ref<Inspection[]>([]),
   total = ref(0),
   loading = ref(false),
   error = ref(""),
+  visible = ref(false),
   filter = ref<"ALL" | "REVIEW" | "REAL">("ALL");
 const pending = computed(
   () => queue.items.filter((i) => i.status !== "SYNCED").length,
@@ -60,12 +67,32 @@ function switchFilter(value: "ALL" | "REVIEW" | "REAL") {
 function preview(item: Inspection) {
   return item.sample.assets?.find((a) => a.kind === "PREVIEW")?.id;
 }
-onShow(() => load());
+onShow(() => {
+  visible.value = true;
+  void load();
+});
+function leave() {
+  visible.value = false;
+  if (refreshTimer) clearTimeout(refreshTimer);
+}
+onHide(leave);
+onUnload(leave);
+onPullDownRefresh(async () => {
+  try {
+    await load();
+  } finally {
+    uni.stopPullDownRefresh();
+  }
+});
+onReachBottom(() => {
+  if (records.value.length < total.value) void load(true);
+});
 // 另一台设备完成检测时，列表自动回到第一页显示最新记录。
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   () => live.completedAt,
   () => {
+    if (!visible.value) return;
     if (refreshTimer) clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => void load(), 500);
   },
@@ -99,12 +126,12 @@ watch(
         class="filter"
         :class="{ active: filter === 'REAL' }"
         @click="switchFilter('REAL')"
-        >真实</text
+        >板端</text
       >
       <text
         class="filter-action"
         @click="uni.navigateTo({ url: '/pages/sync/index' })"
-        >{{ pending }} 待同步 →</text
+        >{{ pending }} 待同步</text
       >
     </view>
 
@@ -122,7 +149,6 @@ watch(
             ? "没有真实设备记录"
             : "暂无检测记录"
       }}</text>
-      <text class="hint">到「采样」拍一张，或连接板端后同步一次。</text>
     </view>
 
     <view
@@ -137,9 +163,9 @@ watch(
       </view>
       <view class="record-main">
         <view class="record-top">
-          <text class="status" :class="statusTone(i.result)"
-            >● {{ chinese(i.result) }}</text
-          >
+          <text class="status" :class="statusTone(i.result)">{{
+            chinese(i.result)
+          }}</text>
           <text class="mono time">{{
             new Date(i.createdAt).toLocaleString()
           }}</text>
@@ -150,7 +176,7 @@ watch(
           <text class="mono model">{{ i.modelVersion ?? "模型未上报" }}</text>
         </view>
       </view>
-      <text class="chevron">›</text>
+      <text class="chevron">详情</text>
     </view>
 
     <button

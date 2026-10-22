@@ -3,7 +3,9 @@
     {
       "path": "pages/home/index",
       "style": {
-        "navigationBarTitleText": "现场工作台"
+        "navigationBarTitleText": "现场工作台",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 120
       }
     },
     {
@@ -28,13 +30,17 @@
     {
       "path": "pages/tasks/index",
       "style": {
-        "navigationBarTitleText": "任务"
+        "navigationBarTitleText": "任务",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 120
       }
     },
     {
       "path": "pages/records/index",
       "style": {
-        "navigationBarTitleText": "记录"
+        "navigationBarTitleText": "记录",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 120
       }
     },
     {

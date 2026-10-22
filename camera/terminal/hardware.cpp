@@ -69,6 +69,7 @@ void Hardware::initialize_camera() {
     for(const auto& r:camera_output_registers){uint8_t value=0;if(!write_register(r.address,r.value)||!read_register(r.address,value)||value!=r.value)throw std::runtime_error("OV5640 mode verification failed");}
     delay(300000);
 }
+void Hardware::set_shading(std::vector<uint16_t> gains) {shading=std::move(gains);}
 void Hardware::load_model(const std::vector<uint8_t>& file,const std::string& version,const std::string& expected_payload,const std::string& expected_file) {
     if(!(conv[0]&4))throw std::runtime_error("Accelerator is busy; reset the PL before loading a model");
     if(file.size()!=128+weight_bytes+metadata_words*4 || sha256(file.data(),file.size())!=expected_file)throw std::runtime_error("Model file checksum mismatch");
@@ -154,6 +155,18 @@ uint64_t Hardware::prepare_capture(unsigned index) {
     std::atomic_thread_fence(std::memory_order_seq_cst);
     captured_pixels.resize(416*416);
     std::memcpy(captured_pixels.data(),buffer+pixels_offset+index*camera_bytes,camera_bytes);
+    if(!shading.empty()){
+        for(unsigned i=0;i<416u*416u;++i){
+            const uint16_t p=captured_pixels[i];
+            unsigned r=(p>>11)&31,g=(p>>5)&63,b=p&31;
+            r=(r<<3)|(r>>2);g=(g<<2)|(g>>4);b=(b<<3)|(b>>2);
+            const uint16_t* gain=&shading[i*3];
+            r=std::min(255u,(r*gain[0]+128)>>8);
+            g=std::min(255u,(g*gain[1]+128)>>8);
+            b=std::min(255u,(b*gain[2]+128)>>8);
+            captured_pixels[i]=uint16_t(((r>>3)<<11)|((g>>2)<<5)|(b>>3));
+        }
+    }
     // The previous pixels are cached now; rearm the other DMA buffer immediately,
     // as in the bare-metal pipeline, before preprocessing or the next inference.
     start_capture(index^1);

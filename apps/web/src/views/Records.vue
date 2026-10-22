@@ -44,10 +44,18 @@ applyTab();
       placeholder="搜索检测编号…"
       aria-label="搜索检测编号"
     /><button
+      v-if="auth.engineer"
       :class="{ busy: list.loading.value }"
       :disabled="list.loading.value"
     >
       查询</button
+    ><button
+      v-else
+      type="button"
+      :disabled="list.loading.value"
+      @click="list.load"
+    >
+      刷新记录</button
     ><span class="right inline-count">{{ list.total.value }} 条记录</span>
   </form>
 
@@ -57,8 +65,8 @@ applyTab();
     :empty="!list.items.value.length"
     :hint="
       tab === 'queue'
-        ? '所有待复核记录已处理，可返回工作台继续采样。'
-        : '还没有检测记录。'
+        ? '当前筛选下没有待复核记录，可返回工作台继续检测。'
+        : '当前筛选下没有检测记录。开始检测并完成一件产品后，可在这里查看结果。'
     "
     @retry="list.load"
     ><div class="panel table-wrap">
@@ -80,7 +88,9 @@ applyTab();
         </thead>
         <tbody>
           <tr v-for="i in list.items.value" :key="i.id">
-            <td v-if="auth.engineer" class="mono">{{ i.id.slice(-10) }}</td>
+            <td v-if="auth.engineer" class="mono" :title="i.id">
+              {{ i.id.slice(-10) }}
+            </td>
             <td>{{ new Date(i.createdAt).toLocaleString() }}</td>
             <td>
               <Status chip :value="i.metadata?.localResult || i.result" /> /
@@ -97,7 +107,7 @@ applyTab();
                       i.result === "ERROR" ||
                       i.reviewResult === "REVIEW"
                     ? "待复核"
-                    : "—"
+                    : "无需复核"
               }}
             </td>
             <td class="action-cell">

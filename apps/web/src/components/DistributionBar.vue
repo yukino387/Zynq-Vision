@@ -44,7 +44,7 @@ const percent = (value: number) =>
         <span class="sw" :class="s.tone"></span>
         <span class="nm">{{ s.label }}</span>
         <span class="vl mono">{{ s.value }}{{ unit }}</span>
-        <span class="pc mono">{{ total ? percent(s.value) + "%" : "—" }}</span>
+        <span v-if="total" class="pc mono">{{ percent(s.value) }}%</span>
       </li>
     </ul>
   </div>

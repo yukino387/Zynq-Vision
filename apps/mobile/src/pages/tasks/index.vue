@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { chinese, displayName } from "@vision/shared";
 import { ref } from "vue";
-import { onShow } from "@dcloudio/uni-app";
+import { onShow, onPullDownRefresh } from "@dcloudio/uni-app";
 import {
   session,
   tasks,
@@ -27,6 +27,13 @@ async function load() {
   }
 }
 onShow(load);
+onPullDownRefresh(async () => {
+  try {
+    await load();
+  } finally {
+    uni.stopPullDownRefresh();
+  }
+});
 function select(t: Task) {
   selectTask(t.id);
   uni.switchTab({ url: "/pages/capture/index" });
@@ -42,14 +49,14 @@ function select(t: Task) {
       </view>
       <text class="muted refresh" @click="load">刷新</text>
     </view>
-    <text class="subtitle">选中任务后，所有板端与手机采样都会归入该任务。</text>
+
     <view v-if="loading" class="empty">读取任务…</view>
     <view v-else-if="error" class="error" @click="load"
       >{{ error }} / 重试</view
     >
     <view v-else-if="!list.length" class="empty">
       <text>暂无任务</text>
-      <text class="hint">任务由管理员在 Web 端创建后下发到这里。</text>
+      <text class="hint">下拉刷新</text>
     </view>
     <view
       v-for="t in list"
@@ -89,7 +96,7 @@ function select(t: Task) {
           }"
       /></view>
       <text v-if="session.taskId === t.id" class="selected-note"
-        >当前任务 · 点按继续采样 →</text
+        >继续采样 ›</text
       >
     </view>
 
@@ -105,7 +112,7 @@ function select(t: Task) {
         <text class="list-title">独立采样</text>
         <text class="status">不关联任务</text>
       </view>
-      <text class="note">用于临时抽检；样本仍会保存并进入记录。</text>
+
       <text v-if="!session.taskId" class="selected-note">当前模式</text>
     </view>
   </view>

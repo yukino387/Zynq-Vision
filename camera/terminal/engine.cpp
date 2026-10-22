@@ -126,6 +126,9 @@ class Engine {
     double capture_ms=0,prepare_ms=0,conv_ms=0,forward_ms=0,post_ms=0,extract_ms=0;
     bool paused=true,production=false;
     Passage passage;
+    Passage inspection_window;
+    std::string inspection_request,inspection_piece;
+    uint64_t inspection_started=0,inspection_deadline=0;
     std::string pending_storage;
     std::map<std::string,Record> records;
     std::array<unsigned,4> total_counts{};
@@ -161,6 +164,7 @@ public:
     explicit Engine(fs::path root):root(std::move(root)) {
         fs::create_directories(this->root/"records");
         fs::create_directories(this->root/"model");
+        fs::create_directories(this->root/"inspection-requests");
         boot_id=read_text("/proc/sys/kernel/random/boot_id",64);while(!boot_id.empty() && std::isspace(boot_id.back()))boot_id.pop_back();
         for(const auto& entry:fs::directory_iterator(this->root/"records"))if(entry.path().extension()==".json") {
             try {
@@ -175,6 +179,26 @@ public:
             }catch(const std::exception&) {}
         }
         hardware.initialize_camera();
+        if(fs::exists(this->root/"shading.json")) {
+            try {
+                const auto document=json::parse(read_text(this->root/"shading.json"));
+                const unsigned grid=document.at("grid").get<unsigned>();const auto& gain=document.at("gain");
+                if(grid<2 || grid>64 || gain.size()!=grid)throw std::runtime_error("invalid grid");
+                std::vector<uint16_t> map(416u*416u*3);
+                auto value=[&](int y,int x,unsigned c){return gain.at(y).at(x).at(c).get<double>();};
+                for(unsigned y=0;y<416;++y) {
+                    const double fy=(y+.5)*grid/416-.5;const int y0=std::clamp(int(std::floor(fy)),0,int(grid)-1),y1=std::min(int(grid)-1,y0+1);const double ty=std::clamp(fy-y0,0.0,1.0);
+                    for(unsigned x=0;x<416;++x) {
+                        const double fx=(x+.5)*grid/416-.5;const int x0=std::clamp(int(std::floor(fx)),0,int(grid)-1),x1=std::min(int(grid)-1,x0+1);const double tx=std::clamp(fx-x0,0.0,1.0);
+                        for(unsigned c=0;c<3;++c) {
+                            const double value_at=(value(y0,x0,c)*(1-tx)+value(y0,x1,c)*tx)*(1-ty)+(value(y1,x0,c)*(1-tx)+value(y1,x1,c)*tx)*ty;
+                            map[(y*416+x)*3+c]=uint16_t(std::clamp(value_at,.25,4.0)*256+.5);
+                        }
+                    }
+                }
+                hardware.set_shading(std::move(map));
+            }catch(const std::exception& e){error="Color shading map invalid: "+std::string(e.what());paused=true;}
+        }
         try {
             if(fs::exists(this->root/"model"/"model.json"))set_model(json::parse(read_text(this->root/"model"/"model.json")));
         }catch(const std::exception& e){error=e.what();model=nullptr;paused=true;}
@@ -193,7 +217,7 @@ public:
             for(const auto& c:r.at("checks")){auto check=c;check["label"]=r.at("classes").at(c.at("classId").get<unsigned>());checks.push_back(check);}
             product_state={{"id",product.at("id")},{"name",product.at("name")},{"version",product.at("version")},{"product",r.at("product")},{"purpose",r.at("purpose")},{"region",r.at("region")},{"instructions",r.at("instructions")},{"checks",checks},{"postprocess",postprocess_json(rules.postprocess)},{"acceptance",product.at("acceptance")}};
         }
-        return {{"model",model_state},{"product",product_state},{"total",total},{"counts",counts},{"pendingSync",pending_count},{"last",last},{"error",error},{"syncError",sync_error},{"paused",paused},{"production",production},{"productionRunId",production_run.empty()?json(nullptr):json(production_run)},{"runCounts",counts_json(run_counts)},{"runTotal",run_counts[0]+run_counts[1]+run_counts[2]+run_counts[3]},{"passagePhase",production?passage.phase():"STOPPED"},{"passageSamples",passage.samples()},{"pendingRequestId",pending_storage.empty()?json(nullptr):json(pending_storage)},{"frameId",frame.id},{"fresh",frame.monotonic_ns && clock_ns()-frame.monotonic_ns<3000000000ULL},{"diagnostics",{{"capturedFrames",captured_frames},{"lastCaptureMs",captured_frames?json(capture_ms):json(nullptr)},{"hwPrepareMs",prepare_ms},{"hwConvMs",conv_ms},{"hwForwardMs",forward_ms},{"hwPostMs",post_ms},{"hwExtractMs",extract_ms},{"cameraInitialized",true},{"modelVersion",model.is_null()?json(nullptr):model.at("version")}}}};
+        return {{"model",model_state},{"product",product_state},{"total",total},{"counts",counts},{"pendingSync",pending_count},{"last",last},{"error",error},{"syncError",sync_error},{"paused",paused},{"production",production},{"productionRunId",production_run.empty()?json(nullptr):json(production_run)},{"runCounts",counts_json(run_counts)},{"runTotal",run_counts[0]+run_counts[1]+run_counts[2]+run_counts[3]},{"passagePhase",production?passage.phase():"STOPPED"},{"inspectionRequestId",inspection_request.empty()?json(nullptr):json(inspection_request)},{"passageSamples",passage.samples()},{"pendingRequestId",pending_storage.empty()?json(nullptr):json(pending_storage)},{"frameId",frame.id},{"fresh",frame.monotonic_ns && clock_ns()-frame.monotonic_ns<3000000000ULL},{"diagnostics",{{"capturedFrames",captured_frames},{"lastCaptureMs",captured_frames?json(capture_ms):json(nullptr)},{"hwPrepareMs",prepare_ms},{"hwConvMs",conv_ms},{"hwForwardMs",forward_ms},{"hwPostMs",post_ms},{"hwExtractMs",extract_ms},{"cameraInitialized",true},{"modelVersion",model.is_null()?json(nullptr):model.at("version")}}}};
     }
     json history(unsigned page,const std::string& filter) {
         std::lock_guard<std::mutex> lock(mutex);std::vector<const Record*> selected;
@@ -226,6 +250,7 @@ public:
     bool set_model(const json& descriptor) {
         std::lock_guard<std::mutex> hardware_lock(hardware_mutex);
         std::lock_guard<std::mutex> lock(mutex);
+        if(!inspection_request.empty())throw std::runtime_error("外部触发检测中");
         if(production)throw std::runtime_error("请先停止自动检测，再切换模型");
         if(!pending_storage.empty())throw std::runtime_error("请先核对未确认保存的记录");
         if(descriptor.at("formatVersion")!=1)throw std::runtime_error("Invalid model descriptor");
@@ -244,6 +269,7 @@ public:
     }
     void set_product(const json& descriptor) {
         std::lock_guard<std::mutex> lock(mutex);
+        if(!inspection_request.empty())throw std::runtime_error("外部触发检测中");
         if(production)throw std::runtime_error("请先停止自动检测，再切换产品");
         if(model.is_null())throw std::runtime_error("请先下发模型");
         if(!product_classes_match(descriptor.at("rules").at("classes").get<std::vector<std::string>>(),model.at("classes").get<std::vector<std::string>>()))throw std::runtime_error("产品类别及顺序必须与当前模型一致");
@@ -254,6 +280,7 @@ public:
     }
     void clear_product() {
         std::lock_guard<std::mutex> lock(mutex);
+        if(!inspection_request.empty())throw std::runtime_error("外部触发检测中");
         if(production)stop_production();
         product=nullptr;rules=Rules{};clear_product_file();reset_runtime();paused=true;
     }
@@ -261,6 +288,7 @@ public:
         std::lock_guard<std::mutex> hardware_lock(hardware_mutex);
         std::lock_guard<std::mutex> lock(mutex);
         if(enabled) {
+            if(!inspection_request.empty())throw std::runtime_error("外部触发检测中");
             if(production)return;
             if(model.is_null() || product.is_null() || !error.empty() || !pending_storage.empty())throw std::runtime_error("请先在平台部署模型并分配产品");
             if(paused || !frame.monotonic_ns || clock_ns()-frame.monotonic_ns>=3000000000ULL)throw std::runtime_error("等待有效图像后再开始自动检测");
@@ -303,6 +331,10 @@ public:
             if(!paused && !model.is_null() && error.empty()){
                 frame=std::move(next);frame_filter=detect_objects(frame.out0.data(),frame.out1.data(),rules.postprocess);frame_boxes=frame_filter.boxes;
                 tracker.update(frame_boxes,frame.monotonic_ns,rules.postprocess,frame.pixels.data(),rules.confidence);frame_decoded=true;
+                if(!inspection_request.empty()) {
+                    if(frame.monotonic_ns>inspection_started)inspection_window.observe_window(frame,filtered_decision(rules,frame_filter,frame));
+                    if(clock_ns()>=inspection_deadline)finish_inspection(false);
+                }
                 if(production && !product.is_null()) {
                     const auto decision=filtered_decision(rules,frame_filter,frame);
                     if(passage.observe(frame,frame_boxes,rules,decision))save_passage();
@@ -311,14 +343,40 @@ public:
             }
         }catch(const std::exception& e){
             std::lock_guard<std::mutex> lock(mutex);error=e.what();
+            if(!inspection_request.empty()) {
+                const auto path=root/"inspection-requests"/(inspection_request+".json");
+                try {auto job=json::parse(read_text(path));job["status"]="ERROR";job["error"]=error;durable_write(path,job.dump());}catch(const std::exception&){}
+                inspection_request.clear();inspection_window.reset();
+            }
             try{stop_production();}catch(const std::exception& storage){error+="; "+std::string(storage.what());}
             production=false;paused=true;frame=Frame{};frame_ready.notify_all();return false;
         }
         return true;
     }
+    json inspect(const json& command) {
+        std::lock_guard<std::mutex> lock(mutex);
+        const std::string request=command.at("requestId");
+        if(request.size()!=36 || request.find_first_not_of("0123456789abcdef-")!=std::string::npos)throw std::runtime_error("Invalid requestId");
+        const auto path=root/"inspection-requests"/(request+".json");
+        if(fs::exists(path)) {
+            auto job=json::parse(read_text(path));if(job.at("command")!=command)throw std::runtime_error("requestId 参数冲突");
+            return inspection_status_locked(request);
+        }
+        if(production || !inspection_request.empty())throw std::runtime_error("BUSY");
+        if(model.is_null() || product.is_null() || paused || !error.empty() || !pending_storage.empty())throw std::runtime_error("NOT_READY");
+        if(records.count(request))throw std::runtime_error("requestId 已用于其他检查");
+        if(command.contains("productId") && command.at("productId")!=product.at("id"))throw std::runtime_error("产品不匹配");
+        if(command.contains("productVersion") && command.at("productVersion")!=product.at("version"))throw std::runtime_error("产品版本不匹配");
+        const unsigned window_ms=command.value("windowMs",500u);if(window_ms<250 || window_ms>3000)throw std::runtime_error("windowMs must be 250..3000");
+        inspection_piece=command.value("pieceId",std::string());if(inspection_piece.size()>128)throw std::runtime_error("pieceId too long");
+        json job={{"requestId",request},{"status","RUNNING"},{"command",command}};durable_write(path,job.dump());
+        inspection_request=request;inspection_started=clock_ns();inspection_deadline=inspection_started+window_ms*1000000ULL;inspection_window.reset();return job;
+    }
+    json inspection_status(const std::string& request) {std::lock_guard<std::mutex> lock(mutex);return inspection_status_locked(request);}
     json check(const std::string& request) {
         std::lock_guard<std::mutex> hardware_lock(hardware_mutex);
         std::lock_guard<std::mutex> lock(mutex);
+        if(!inspection_request.empty())throw std::runtime_error("外部触发检测中");
         const auto found=records.find(request);if(found!=records.end()) {
             auto& record=found->second;
             if(!record.committed) {
@@ -338,6 +396,22 @@ public:
         return save_evidence(request,frame,filtered_decision(rules,frame_filter,frame));
     }
 private:
+    json inspection_status_locked(const std::string& request) {
+        if(request.size()!=36 || request.find_first_not_of("0123456789abcdef-")!=std::string::npos)throw std::runtime_error("Invalid requestId");
+        const auto path=root/"inspection-requests"/(request+".json");auto job=json::parse(read_text(path));
+        const auto saved=records.find(request);
+        if(saved!=records.end() && saved->second.committed){job["status"]="COMPLETED";job["result"]=saved->second.decision;}
+        else if(job.at("status")=="RUNNING" && inspection_request!=request){job["status"]="INTERRUPTED";job["error"]="检测进程已重启，需重新确认工件";durable_write(path,job.dump());}
+        return job;
+    }
+    void finish_inspection(bool interrupted) {
+        if(inspection_request.empty())return;
+        const auto path=root/"inspection-requests"/(inspection_request+".json");auto job=json::parse(read_text(path));
+        if(inspection_window.samples()) {
+            inspection_window.finish(interrupted);job["result"]=save_evidence(inspection_request,inspection_window.evidence(),inspection_window.decision(),&inspection_window);job["status"]="COMPLETED";
+        }else{job["status"]="ERROR";job["error"]="检测窗口内无有效新帧";}
+        durable_write(path,job.dump());inspection_request.clear();inspection_piece.clear();inspection_window.reset();sync_requested=true;
+    }
     json save_evidence(const std::string& request,const Frame& frame,const Decision& decision,const Passage* source=nullptr) {
         if(!frame.monotonic_ns || frame.pixels.size()!=416*416)throw std::runtime_error("No valid evidence frame");
         if(checked_frame==frame.monotonic_ns)throw std::runtime_error("This frame was already checked");
@@ -349,8 +423,10 @@ private:
             payload["passage"]={{"samples",source->samples()},{"votes",source->votes()},{"interrupted",source->interrupted()},
                 {"consensus",{{"algorithm","COUNT_VECTOR_V1"},{"mode",source->defect()?"PERSISTENT_DEFECT":"COUNT_VECTOR"},{"support",source->support()},{"consecutive",source->consecutive()},{"durationMs",source->span_ms()},{"patterns",source->patterns()},{"unstable",source->unstable()},{"counts",counts}}}};
         }
-        if(source)payload["productionRunId"]=production_run;
-        auto report=decision_json(decision,product);report["sequence"]=sequence;report["bootId"]=boot_id;report["productionRunId"]=source?json(production_run):json(nullptr);
+        if(source)payload["productionRunId"]=production_run.empty()?json(nullptr):json(production_run);
+        auto report=decision_json(decision,product);report["sequence"]=sequence;report["bootId"]=boot_id;report["productionRunId"]=source && !production_run.empty()?json(production_run):json(nullptr);
+        report["completedMonotonicNs"]=std::to_string(clock_ns());
+        if(request==inspection_request){report["external"]={{"requestId",request},{"pieceId",inspection_piece}};}
         const auto filtered=detect_objects(frame.out0.data(),frame.out1.data(),rules.postprocess);
         if(filtered.overflow || filtered.invalid)report["reason"]="目标过多或候选数据异常，请人工复核";
         else if(source && decision.result==Result::Review)report["reason"]="多帧数量不一致、证据不足或检测中断，请人工复核";
@@ -369,6 +445,7 @@ private:
         passage.committed();sync_requested=true;
     }
     void stop_production() {
+        finish_inspection(true);
         if(!production)return;
         production=false;
         passage.finish(true);
@@ -387,6 +464,8 @@ int main(int argc,char** argv) {
         Engine engine(argv[1]);httplib::Server server;server.new_task_queue=[] { return new httplib::ThreadPool(2); };server.set_payload_max_length(1024*1024);
         auto guard=[](auto action,httplib::Response& response){try{response.set_content(action().dump(),"application/json");}catch(const std::exception& e){response.status=409;response.set_content(json({{"error",e.what()}}).dump(),"application/json");}};
         server.Get("/state",[&](const auto&,auto& r){guard([&]{return engine.state();},r);});
+        server.Post("/inspect",[&](const auto& q,auto& r){guard([&]{return engine.inspect(json::parse(q.body));},r);});
+        server.Get("/inspect",[&](const auto& q,auto& r){guard([&]{return engine.inspection_status(q.get_param_value("requestId"));},r);});
         server.Get("/records",[&](const auto& q,auto& r){guard([&]{const auto page=q.has_param("page")?q.get_param_value("page"):"0";if(page.empty() || page.size()>7 || page.find_first_not_of("0123456789")!=std::string::npos)throw std::runtime_error("Invalid page");return engine.history(std::stoul(page),q.has_param("result")?q.get_param_value("result"):"");},r);});
         server.Get("/frame",[&](const auto& q,auto& r){try{
             uint32_t after=0;

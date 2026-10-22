@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { request, setServer, session, notify } from "../../state";
+import { setDevice } from "../../live";
 const content = ref(""),
   server = ref(session.server),
   status = ref(""),
@@ -44,7 +45,8 @@ async function pair() {
       session.deviceId = payload.deviceId ?? payload.defaultDeviceId ?? "";
       uni.setStorageSync("vision.station", session.stationId);
       uni.setStorageSync("vision.device", session.deviceId);
-      status.value = "工位/设备已选择。登录后会按权限访问服务器。";
+      if (session.deviceId) setDevice(session.deviceId);
+      status.value = "已选择工位 / 设备";
       server.value = session.server;
       paired.value = true;
       return;
@@ -70,7 +72,7 @@ async function pair() {
     session.stationId = result.stationId ?? "";
     uni.setStorageSync("vision.station", session.stationId);
     server.value = session.server;
-    status.value = "配对成功。请使用现场账号登录。";
+    status.value = "配对成功，请登录";
     paired.value = true;
   } catch (e) {
     status.value = e instanceof Error ? e.message : String(e);
@@ -91,18 +93,13 @@ function manual() {
 </script>
 <template>
   <view class="page">
-    <text class="eyebrow">连接现场 / CONNECT</text>
-    <text class="title">连接你的工作空间</text>
-    <text class="subtitle"
-      >扫描服务器或工位的二维码，让采样与现场保持同步。</text
-    >
+    <text class="eyebrow">连接现场</text>
+    <text class="title">连接现场</text>
+    <text class="subtitle">扫描服务器或工位二维码</text>
     <view class="card scan-card">
       <view class="scan-symbol"><view /></view>
       <text class="scan-title">扫码，一步连接</text>
-      <text class="note"
-        >在 Web 端「系统 → 移动端配对」生成二维码；连接服务器码 5
-        分钟内有效，工位/设备码用于快捷选择。</text
-      >
+
       <button class="primary" @click="scan" :loading="busy" :disabled="busy">
         扫描配对码
       </button>

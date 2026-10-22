@@ -4,8 +4,10 @@ import {
   displayName,
   errorMessage,
   terminalActivity,
+  deviceSyncText,
 } from "@vision/shared";
 import { ref, computed, onMounted, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import type { Inspection } from "../types";
 import { post } from "../api";
 import { useAuthStore } from "../stores/auth";
@@ -17,6 +19,13 @@ import Sparkline from "../components/Sparkline.vue";
 import ImageViewer from "../components/ImageViewer.vue";
 import Status from "../components/Status.vue";
 import Icon from "../components/Icon.vue";
+import { useProductStore } from "../stores/product";
+import ProductApplication from "../components/ProductApplication.vue";
+const workflow = useProductStore();
+const route = useRoute(),
+  router = useRouter(),
+  productSetup = ref(false);
+import { UiButton, UiSelect, UiCard, UiBadge, UiTable } from "../components/ui";
 
 const auth = useAuthStore(),
   devices = useDeviceStore(),
@@ -24,6 +33,33 @@ const auth = useAuthStore(),
   notices = useNotificationStore(),
   busy = ref(false),
   connecting = ref(false);
+watch(
+  () => route.query.setup,
+  (setup) => {
+    if (setup === "1" && auth.engineer) {
+      if (typeof route.query.deviceId === "string")
+        devices.selected = route.query.deviceId;
+      productSetup.value = true;
+    }
+  },
+  { immediate: true },
+);
+function prepareProduct() {
+  workflow.select(terminalState.value?.product?.id || workflow.id);
+  productSetup.value = true;
+}
+function closeProductSetup() {
+  productSetup.value = false;
+  void router.replace({
+    query: {
+      ...route.query,
+      setup: undefined,
+      planId: undefined,
+      modelId: undefined,
+      deviceId: undefined,
+    },
+  });
+}
 const clientId = crypto.randomUUID();
 let sequence = 0;
 const device = computed(() => devices.current),
@@ -100,7 +136,7 @@ const latency = computed(() =>
   ),
 );
 const metric = (v: number | null | undefined) =>
-  v == null ? "—" : (v / 1000).toFixed(2);
+  v == null ? "未上报" : (v / 1000).toFixed(2);
 /** 采样按钮为什么点不了，要说出来而不是只把它变灰。 */
 const captureBlocked = computed(() => {
   if (!device.value) return "没有选中设备。";
@@ -127,6 +163,9 @@ async function load() {
   }
 }
 onMounted(load);
+onMounted(() => {
+  if (auth.engineer) void workflow.load().catch(notices.error);
+});
 watch(
   () => devices.recent[0],
   (event) => {
@@ -140,7 +179,9 @@ async function capture() {
   try {
     await post<{ inspections: Inspection[] }>("/samples/capture", {
       deviceId: device.value.id,
-      planId: terminalState.value?.product?.id,
+      planId:
+        (auth.engineer ? workflow.current?.id : undefined) ||
+        terminalState.value?.product?.id,
       clientId,
       localSequence: ++sequence,
       idempotencyKey: crypto.randomUUID(),
@@ -210,7 +251,9 @@ async function checkOne() {
       <h1><Icon name="activity" :size="22" />现场工作台</h1>
       <p class="mono">
         {{ device ? displayName(device.name) : "（无设备）"
-        }}<template v-if="auth.engineer">
+        }}<template
+          v-if="auth.engineer && device?.executionMode !== 'LINUX_TERMINAL'"
+        >
           · {{ device?.protocolVersion ?? "协议版本未上报" }}</template
         >
       </p>
@@ -218,123 +261,202 @@ async function checkOne() {
     <div class="heading-actions">
       <Status :value="device?.connectionState" />
       <Status v-if="device" chip :value="device.runtimeState" />
-      <span v-if="auth.engineer" class="mono instrument-id">{{
-        device?.type ?? "无设备"
-      }}</span>
     </div>
   </div>
 
   <section class="workbench-toolbar">
-    <div class="toolbar-field">
-      <span>当前产品方案</span>
-      <b
-        >{{ terminalState?.product?.name || "未分配"
+    <div class="toolbar-field product-info-badge">
+      <span class="field-label">当前产品方案</span>
+      <b class="product-name"
+        >{{
+          terminalState?.product?.product ||
+          terminalState?.product?.name ||
+          "未分配"
         }}<template v-if="terminalState?.product">
           / V{{ terminalState.product.version }}</template
         ></b
       >
+      <UiButton
+        v-if="auth.engineer && terminalState?.product && !productSetup"
+        variant="text"
+        size="sm"
+        @click="prepareProduct"
+        >更换产品</UiButton
+      >
     </div>
-    <label class="toolbar-field device-field">
-      <span>检测设备</span>
-      <select v-model="devices.selected" aria-label="当前设备">
+    <div class="toolbar-field device-field">
+      <span class="field-label">检测设备</span>
+      <UiSelect v-model="devices.selected" aria-label="当前设备" size="md">
         <option v-if="!devices.devices.length" value="">暂无设备</option>
         <option v-for="d in devices.devices" :key="d.id" :value="d.id">
           {{ displayName(d.name) }}
         </option>
-      </select>
-    </label>
+      </UiSelect>
+    </div>
     <div class="toolbar-end">
       <div class="toolbar-actions" v-if="device">
-        <button
-          v-if="device.connectionState !== 'ONLINE' && auth.engineer"
-          class="primary"
+        <UiButton
+          v-if="
+            device.connectionState !== 'ONLINE' &&
+            auth.engineer &&
+            device.executionMode !== 'LINUX_TERMINAL'
+          "
+          variant="primary"
+          icon="network"
           :disabled="connecting"
-          :aria-busy="connecting"
+          :loading="connecting"
           @click="connect"
         >
-          <Icon name="network" :size="16" />
           {{ connecting ? "连接中…" : "连接设备" }}
-        </button>
+        </UiButton>
         <span
           v-else-if="device.connectionState !== 'ONLINE'"
           class="muted toolbar-hint"
-          >请联系管理员或维护人员连接设备</span
+          >等待设备心跳，请检查供电和网线</span
         >
-        <template v-else>
-          <button
-            v-if="!inspecting"
-            :disabled="connecting || !!activity.startBlocked"
-            :title="activity.startBlocked"
-            :aria-busy="connecting"
-            @click="control(true)"
+        <template v-else-if="!productSetup">
+          <UiButton
+            v-if="
+              auth.engineer &&
+              (!terminalState?.model || !terminalState?.product)
+            "
+            variant="primary"
+            @click="prepareProduct"
+            >选择产品并开始</UiButton
           >
-            <Icon name="play" :size="15" />开始自动检测
-          </button>
-          <button
+          <UiButton
             v-else
-            :disabled="connecting"
-            :aria-busy="connecting"
-            @click="control(false)"
+            :variant="inspecting ? 'secondary' : 'primary'"
+            :icon="inspecting ? 'pause' : 'play'"
+            :disabled="
+              connecting || busy || (!inspecting && !!activity.startBlocked)
+            "
+            :title="inspecting ? '' : activity.startBlocked"
+            :loading="connecting"
+            @click="control(!inspecting)"
           >
-            <Icon name="pause" :size="15" />停止自动检测
-          </button>
-          <RouterLink
-            v-if="auth.engineer"
-            :to="{ name: 'diagnostics' }"
-            class="text-button"
-          >
-            <Icon name="device" :size="14" />设备设置
-          </RouterLink>
+            {{ inspecting ? "停止检测" : "开始检测" }}
+          </UiButton>
         </template>
       </div>
-      <div class="toolbar-capture">
-        <span v-if="captureBlocked" class="muted capture-hint">{{
-          captureBlocked
-        }}</span>
-        <button
-          class="capture"
-          :class="{ busy }"
-          :aria-busy="busy"
-          @click="checkOne"
-          :disabled="busy || connecting || !!checkBlocked"
-          :title="checkBlocked || '停止自动检测后补检一件'"
-        >
-          <Icon name="activity" :size="17" />
+      <details
+        class="secondary-actions"
+        :open="!!(checkRequest || terminalState?.pendingRequestId)"
+      >
+        <summary>
           {{
             checkRequest || terminalState?.pendingRequestId
               ? "核对上次检查"
-              : "检查一件"
+              : "采样与补检"
           }}
-        </button>
-        <button
-          class="primary capture"
-          :class="{ busy }"
-          :aria-busy="busy"
-          @click="capture"
-          :disabled="busy || connecting || !!captureBlocked"
-          :title="captureBlocked"
-        >
-          <Icon name="camera" :size="17" />
-          {{ busy ? "处理中…" : "留存训练样本" }}
-        </button>
-      </div>
+        </summary>
+        <div class="toolbar-capture">
+          <span class="note"
+            >留样归属：{{
+              (auth.engineer ? workflow.current?.rules.product : undefined) ||
+              terminalState?.product?.product ||
+              terminalState?.product?.name ||
+              "请先在产品配置中选择产品"
+            }}（只保存训练图片，不计件）</span
+          >
+          <span v-if="captureBlocked" class="muted capture-hint">{{
+            captureBlocked
+          }}</span>
+          <UiButton
+            variant="secondary"
+            icon="activity"
+            :loading="busy"
+            @click="checkOne"
+            :disabled="busy || connecting || !!checkBlocked"
+            :title="checkBlocked || '停止自动检测后补检一件'"
+          >
+            {{
+              checkRequest || terminalState?.pendingRequestId
+                ? "核对上次检查"
+                : "检查一件"
+            }}
+          </UiButton>
+          <UiButton
+            variant="secondary"
+            icon="camera"
+            :loading="busy"
+            @click="capture"
+            :disabled="busy || connecting || !!captureBlocked"
+            :title="captureBlocked"
+          >
+            {{ busy ? "处理中…" : "留样" }}
+          </UiButton>
+          <UiButton
+            v-if="auth.engineer"
+            variant="ghost"
+            size="sm"
+            icon="device"
+            :to="{ name: 'diagnostics' }"
+            >设备设置</UiButton
+          >
+        </div>
+      </details>
     </div>
   </section>
 
+  <ProductApplication
+    v-if="productSetup && auth.engineer"
+    inline
+    @started="closeProductSetup"
+    @cancel="closeProductSetup"
+  />
+  <section
+    v-if="!productSetup"
+    class="panel section-space"
+    aria-label="当前检测步骤"
+  >
+    <div class="panel-body">
+      <strong>{{ activity.label }}</strong>
+      <p>{{ activity.hint }}</p>
+      <UiButton
+        v-if="
+          auth.engineer && (!terminalState?.model || !terminalState?.product)
+        "
+        variant="text"
+        @click="prepareProduct"
+        >配置检测产品</UiButton
+      >
+    </div>
+  </section>
   <details v-if="device?.error" class="error-box device-error-banner">
     <summary>
       <Icon name="alert" :size="15" />
-      {{
-        errorMessage(
-          /No matching UDP|timeout|timed out/i.test(device.error)
-            ? "DEVICE_TIMEOUT"
-            : "COMMAND_REJECTED",
-          device.error,
-        )
+      当前检测故障：{{
+        device.executionMode === "LINUX_TERMINAL"
+          ? device.error
+          : errorMessage(
+              /No matching UDP|timeout|timed out/i.test(device.error)
+                ? "DEVICE_TIMEOUT"
+                : "COMMAND_REJECTED",
+              device.error,
+            )
       }}
     </summary>
+    <p v-if="terminalState">
+      最近上报：{{ new Date(terminalState.receivedAt).toLocaleString() }} ·
+      <RouterLink :to="{ name: 'diagnostics' }">查看设备故障</RouterLink>
+    </p>
     <pre v-if="auth.engineer">{{ device.error }}</pre>
     <p v-else class="note">请联系维护人员处理。</p>
+  </details>
+  <details v-if="terminalState?.syncError" class="section-space">
+    <summary>
+      记录上传受阻 · 全机 {{ terminalState.pendingSync }} 条等待同步
+    </summary>
+    <p>
+      本机保存的记录会继续自动重试上传。最近上报：{{
+        new Date(terminalState.receivedAt).toLocaleString()
+      }}。
+    </p>
+    <pre>{{ terminalState.syncError }}</pre>
+    <RouterLink v-if="auth.engineer" :to="{ name: 'diagnostics' }"
+      >检查设备与平台连接</RouterLink
+    >
   </details>
 
   <div class="workbench-grid">
@@ -346,7 +468,7 @@ async function checkOne() {
             >{{ held ? "帧回看" : "实时图像" }}</span
           ><span v-if="auth.engineer" class="mono"
             >{{ shown ? `${shown.width} × ${shown.height}` : "等待图像源"
-            }}<span v-if="shown"> / #{{ shown.frameId }}</span></span
+            }}<span v-if="shown"> · 图像帧 {{ shown.frameId }}</span></span
           >
         </div>
         <ImageViewer
@@ -368,10 +490,16 @@ async function checkOne() {
                 ? "正在查看缓存在此页面的历史帧"
                 : "设备连续采集"
           }}</span
-          ><button v-if="held" class="return-live" @click="held = null">
-            返回实时画面</button
-          ><time v-if="auth.engineer" class="mono">{{
-            shown ? new Date(shown.receivedAt).toLocaleTimeString() : "—"
+          ><UiButton
+            v-if="held"
+            variant="primary"
+            size="sm"
+            icon="refresh"
+            @click="held = null"
+          >
+            返回实时画面 </UiButton
+          ><time v-if="auth.engineer && shown" class="mono">{{
+            new Date(shown.receivedAt).toLocaleTimeString()
           }}</time>
         </div>
       </section>
@@ -379,7 +507,14 @@ async function checkOne() {
       <section v-if="auth.engineer" class="frame-filmstrip">
         <div class="filmstrip-head">
           <b>连续帧</b><small>每秒留取 · 最近 8 帧</small
-          ><button v-if="held" @click="held = null">实时</button>
+          ><UiButton
+            v-if="held"
+            variant="secondary"
+            size="sm"
+            @click="held = null"
+          >
+            返回实时
+          </UiButton>
         </div>
         <div class="filmstrip-track">
           <button
@@ -403,7 +538,7 @@ async function checkOne() {
                       : 'no-target'
                 "
               ></i
-              >#{{ frame.frameId }}</span
+              >图像帧 {{ frame.frameId }}</span
             >
           </button>
           <div v-if="!frames.length" class="filmstrip-empty">
@@ -432,38 +567,54 @@ async function checkOne() {
           <div>
             <small>帧率</small
             ><strong
-              >{{ device?.telemetry?.fps?.toFixed(2) ?? "—"
-              }}<em>FPS</em></strong
+              >{{ device?.telemetry?.fps?.toFixed(2) ?? "未上报"
+              }}<em v-if="device?.telemetry?.fps != null">帧/秒</em></strong
             >
           </div>
           <div>
             <small>推理耗时</small
             ><strong
-              >{{ metric(device?.telemetry?.inferenceUs) }}<em>ms</em></strong
+              >{{ metric(device?.telemetry?.inferenceUs)
+              }}<em v-if="device?.telemetry?.inferenceUs != null"
+                >毫秒</em
+              ></strong
             >
           </div>
           <div>
             <small>采集</small
             ><strong
-              >{{ metric(device?.telemetry?.captureUs) }}<em>ms</em></strong
+              >{{ metric(device?.telemetry?.captureUs)
+              }}<em v-if="device?.telemetry?.captureUs != null"
+                >毫秒</em
+              ></strong
             >
           </div>
           <div>
             <small>预处理</small
             ><strong
-              >{{ metric(device?.telemetry?.conversionUs) }}<em>ms</em></strong
+              >{{ metric(device?.telemetry?.conversionUs)
+              }}<em v-if="device?.telemetry?.conversionUs != null"
+                >毫秒</em
+              ></strong
             >
           </div>
           <div>
             <small>传输</small
             ><strong
-              >{{ metric(device?.telemetry?.transferUs) }}<em>ms</em></strong
+              >{{ metric(device?.telemetry?.transferUs)
+              }}<em v-if="device?.telemetry?.transferUs != null"
+                >毫秒</em
+              ></strong
             >
           </div>
           <div>
             <small>错误码</small
             ><strong :class="{ 'tone-crit': device?.telemetry?.errorCode }">{{
-              device?.telemetry?.errorCode ?? "—"
+              device?.telemetry?.errorCode == null
+                ? "未上报"
+                : device.telemetry.errorCode === 0
+                  ? "无故障"
+                  : `故障码 ${device.telemetry.errorCode}`
             }}</strong>
           </div>
         </div>
@@ -473,14 +624,20 @@ async function checkOne() {
     <aside class="result-inspector workbench-side">
       <div class="live-verdict">
         <span class="verdict-caption"
-          >最近已保存单件 · 机器原判<template v-if="last">
-            · #{{ last.sequence }}</template
+          >{{
+            last?.productionRunId &&
+            last.productionRunId !== terminalState?.productionRunId
+              ? "最近历史批次单件"
+              : terminalState?.productionRunId
+                ? "本批次最近保存单件"
+                : "最近单件/补检"
+          }}
+          · 机器原判<template v-if="last">
+            · 第 {{ last.sequence }} 件</template
           ></span
         >
-        <strong>{{ last ? chinese(last.result) : "尚无单件记录" }}</strong>
-        <span>{{
-          last?.reason || "画面中的目标框用于定位；以单件记录的方案判定为准。"
-        }}</span>
+        <strong>{{ last ? chinese(last.result) : "尚未完成单件" }}</strong>
+        <span>{{ last?.reason || activity.hint }}</span>
         <p v-for="finding in last?.findings || []" :key="finding.classId">
           {{ finding.label }}：确认 {{ finding.count }}，待确认
           {{ finding.uncertain }}，要求 {{ finding.min }}–{{ finding.max }} ·
@@ -514,16 +671,12 @@ async function checkOne() {
           件
         </p>
         <p class="mono runtime-line">
-          待同步：{{ terminalState.pendingSync }} · 最近原判：
-          {{ terminalState.last ? chinese(terminalState.last.result) : "—" }}
+          全机待上传：{{ terminalState.pendingSync }} 条（含历史批次和补检） ·
+          最近原判：
+          {{
+            terminalState.last ? chinese(terminalState.last.result) : "尚无结果"
+          }}
         </p>
-        <RouterLink
-          v-if="auth.engineer"
-          :to="{ name: 'diagnostics' }"
-          class="text-button"
-        >
-          设备与产品方案配置
-        </RouterLink>
       </section>
       <section v-if="terminalState" class="side-card">
         <div class="side-card-title">
@@ -543,8 +696,7 @@ async function checkOne() {
             name: 'production',
             query: { run: terminalState.productionRunId || undefined },
           }"
-          >批次 {{ terminalState.productionRunId?.slice(0, 8) || "尚未开始" }} ·
-          查看汇总与复核</RouterLink
+          >查看当前批次汇总与复核</RouterLink
         >
         <p class="note">
           本机原判包含待同步记录；人工处理结果见 Web 批次汇总。
@@ -577,10 +729,8 @@ async function checkOne() {
       </section>
       <div class="inspector-section">
         <h3>
-          当前帧识别对象（非单件结论）
-          <span class="mono">{{
-            String(detections?.length ?? 0).padStart(2, "0")
-          }}</span>
+          当前画面目标（仅定位，不计件）
+          <span class="mono">{{ `${detections?.length ?? 0} 个` }}</span>
         </h3>
         <div class="detection-list">
           <div
@@ -590,14 +740,17 @@ async function checkOne() {
           >
             <span class="target-number">{{
               box.trackId
-                ? `#${box.trackId}${box.trackConfirmed ? "" : "?"}`
-                : String(i + 1).padStart(2, "0")
+                ? `跟踪 ${box.trackId}${box.trackConfirmed ? "" : "（确认中）"}`
+                : `目标 ${i + 1}`
             }}</span>
             <div>
               <b>{{ displayName(box.label) }}</b
               ><small v-if="auth.engineer" class="mono"
-                >{{ Math.round(box.x1) }},{{ Math.round(box.y1) }} →
-                {{ Math.round(box.x2) }},{{ Math.round(box.y2) }}</small
+                >位置：左上 {{ Math.round(box.x1) }},{{
+                  Math.round(box.y1)
+                }}；右下 {{ Math.round(box.x2) }},{{
+                  Math.round(box.y2)
+                }}</small
               >
             </div>
             <strong class="mono"
@@ -620,7 +773,7 @@ async function checkOne() {
         }}</b
         ><small
           >{{ chinese(device?.runtimeState) }} ·
-          {{ chinese(device?.syncState) }}</small
+          {{ deviceSyncText(device) }}</small
         >
       </div>
 
@@ -631,74 +784,85 @@ async function checkOne() {
     </aside>
   </div>
 
-  <section class="panel section-space recent-panel">
-    <div class="panel-head">
-      <h3><Icon name="clock" /> 最近检测</h3>
-      <div class="panel-head-actions row-actions">
-        <span class="mono">{{ queue.length }} 条</span>
-        <RouterLink
-          :to="{ name: 'records', params: { tab: 'all' } }"
-          class="table-action"
-          >全部记录</RouterLink
-        >
+  <UiCard padding="none" class="recent-inspections-card">
+    <template #header>
+      <div class="panel-head-title">
+        <Icon name="clock" :size="17" />
+        <h3>最近检测</h3>
       </div>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th v-if="auth.engineer">检测编号</th>
-            <th>时间</th>
-            <th v-if="auth.engineer">来源</th>
-            <th v-if="auth.engineer">模型</th>
-            <th>平台核验 / 人工结论</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="i in queue" :key="i.id">
-            <td v-if="auth.engineer" class="mono">{{ i.id.slice(-10) }}</td>
-            <td>{{ new Date(i.createdAt).toLocaleTimeString() }}</td>
-            <td v-if="auth.engineer">
-              <span
-                class="tag"
-                :class="{ simulated: i.source === 'SIMULATION' }"
-                >{{ chinese(i.source) }}</span
-              >
-            </td>
-            <td
-              v-if="auth.engineer"
-              class="mono"
-              :class="{ muted: !i.modelVersion }"
+      <div class="panel-head-actions">
+        <UiBadge tone="neutral" chip class="mono"
+          >{{ queue.length }} 条</UiBadge
+        >
+        <UiButton
+          variant="outline"
+          size="sm"
+          :to="{ name: 'records', params: { tab: 'all' } }"
+        >
+          全部记录
+        </UiButton>
+      </div>
+    </template>
+
+    <UiTable compact hover>
+      <thead>
+        <tr>
+          <th v-if="auth.engineer">检测编号</th>
+          <th>时间</th>
+          <th v-if="auth.engineer">来源</th>
+          <th v-if="auth.engineer">模型</th>
+          <th>平台核验 / 人工结论</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="i in queue" :key="i.id">
+          <td v-if="auth.engineer" class="mono font-semibold" :title="i.id">
+            {{ i.id.slice(-10) }}
+          </td>
+          <td class="mono">{{ new Date(i.createdAt).toLocaleTimeString() }}</td>
+          <td v-if="auth.engineer">
+            <UiBadge
+              :tone="i.source === 'SIMULATION' ? 'warn' : 'info'"
+              chip
+              size="sm"
             >
-              {{ i.modelVersion ?? "未上报" }}
-            </td>
-            <td>
-              <Status chip :value="i.result" /> /
-              <Status v-if="i.reviewResult" :value="i.reviewResult" /><span
-                v-else
-                >未复核</span
-              >
-            </td>
-            <td class="action-cell">
-              <div class="row-actions">
-                <RouterLink
-                  class="table-action"
-                  :to="{ name: 'inspection', params: { id: i.id } }"
-                  >查看</RouterLink
-                >
-              </div>
-            </td>
-          </tr>
-          <tr v-if="!queue.length">
-            <td :colspan="auth.engineer ? 6 : 3" class="empty">
-              暂无已保存检测
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </section>
+              {{ chinese(i.source) }}
+            </UiBadge>
+          </td>
+          <td
+            v-if="auth.engineer"
+            class="mono"
+            :class="{ muted: !i.modelVersion }"
+          >
+            {{ i.modelVersion ?? "未上报" }}
+          </td>
+          <td>
+            <Status chip :value="i.result" /> /
+            <Status v-if="i.reviewResult" :value="i.reviewResult" /><span
+              v-else
+              class="text-muted"
+              >未复核</span
+            >
+          </td>
+          <td class="action-cell">
+            <UiButton
+              variant="text"
+              size="sm"
+              :to="{ name: 'inspection', params: { id: i.id } }"
+            >
+              查看详情
+            </UiButton>
+          </td>
+        </tr>
+        <tr v-if="!queue.length">
+          <td :colspan="auth.engineer ? 6 : 3" class="empty-table-cell">
+            暂无已保存检测记录
+          </td>
+        </tr>
+      </tbody>
+    </UiTable>
+  </UiCard>
 </template>
 
 <style scoped>
@@ -793,8 +957,16 @@ async function checkOne() {
 }
 .toolbar-capture {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+}
+.secondary-actions > summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+.secondary-actions[open] .toolbar-capture {
+  margin-top: 10px;
 }
 .toolbar-capture .capture-hint {
   display: block;

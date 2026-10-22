@@ -27,20 +27,17 @@ function save() {
   <view class="page">
     <view class="head-row">
       <view>
-        <text class="eyebrow">离线优先 / QUEUE</text>
+        <text class="eyebrow">本地样本</text>
         <text class="title">同步队列</text>
       </view>
       <text class="mono total">{{ queue.items.length }}</text>
     </view>
-    <text class="subtitle"
-      >手机原图先保存在本机，联网后自动补传。请在同步完成前保留应用数据。</text
-    >
 
     <view class="status-card">
       <view class="status-copy">
-        <text class="status" :class="session.online ? 'ok' : 'warn'"
-          >● {{ session.online ? "网络可用" : "离线模式" }}</text
-        >
+        <text class="status" :class="session.online ? 'ok' : 'warn'">{{
+          session.online ? "网络可用" : "离线模式"
+        }}</text>
         <text class="status-note"
           >{{ pending }} 个待同步 · {{ failed }} 个需重试</text
         >
@@ -60,7 +57,7 @@ function save() {
       v-if="!session.token"
       class="error"
       @click="uni.navigateTo({ url: '/pages/login/index' })"
-      >登录后继续同步，点此登录 →</view
+      >登录后继续同步，点此登录</view
     >
     <text v-else-if="pending && !eligible" class="note"
       >待同步样本属于其他服务器，请先切回对应服务器。</text
@@ -68,7 +65,6 @@ function save() {
 
     <view v-if="!queue.items.length" class="empty">
       <text>暂无本地样本</text>
-      <text class="hint">离线采样会先存在本机，联网后在这里补传。</text>
     </view>
 
     <view
@@ -85,20 +81,18 @@ function save() {
         }}</text>
       </view>
       <view class="item-meta">
-        <text class="mono">手机样本 / {{ item.id.slice(-8) }}</text>
-        <text class="mono">重试 {{ item.attempts }}</text>
+        <text class="mono">手机留样</text>
+        <text v-if="item.attempts > 0" class="mono"
+          >已尝试上传 {{ item.attempts }} 次</text
+        >
       </view>
-      <text class="list-caption"
-        >{{
-          item.serverId
-            ? `服务器记录 ${item.serverId.slice(-8)}`
-            : "等待服务器确认"
-        }}<text v-if="item.captureSetClientId">
-          · 采样组 {{ item.captureSetClientId.slice(-6) }}</text
-        ></text
-      >
+      <text class="list-caption">{{
+        item.serverId ? "已上传到服务器" : "等待服务器确认"
+      }}</text>
       <text v-if="item.error" class="error inline">{{ item.error }}</text>
-      <text class="note">{{ item.metadata.note || "无备注" }}</text>
+      <text v-if="item.metadata.note" class="note">{{
+        item.metadata.note
+      }}</text>
       <view class="item-actions">
         <button
           v-if="item.serverId && item.server === session.server"

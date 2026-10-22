@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from "vue";
+import { ref, onMounted, nextTick, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import type {
   InspectionPlan,
   PlanRules,
@@ -10,10 +11,23 @@ import { api, post } from "../api";
 import { useAuthStore } from "../stores/auth";
 import { useNotificationStore } from "../stores/notifications";
 import Drawer from "../components/Drawer.vue";
+import { useProductStore } from "../stores/product";
 import AsyncState from "../components/AsyncState.vue";
+import {
+  UiButton,
+  UiCard,
+  UiBadge,
+  UiInput,
+  UiSelect,
+  UiEmpty,
+  UiModal,
+} from "../components/ui";
 
 const auth = useAuthStore(),
-  notices = useNotificationStore();
+  router = useRouter(),
+  route = useRoute(),
+  notices = useNotificationStore(),
+  workflow = useProductStore();
 const plans = ref<InspectionPlan[]>([]),
   loading = ref(false),
   error = ref(""),
@@ -21,8 +35,7 @@ const plans = ref<InspectionPlan[]>([]),
 const editing = ref(false),
   detail = ref<InspectionPlan | null>(null),
   deleting = ref<InspectionPlan | null>(null);
-const name = ref(""),
-  product = ref(""),
+const product = ref(""),
   purpose = ref<PlanRules["purpose"]>("PRESENCE"),
   instructions = ref(""),
   conditions = ref("");
@@ -56,9 +69,35 @@ async function load() {
   }
 }
 onMounted(load);
+watch(
+  [
+    plans,
+    () => route.query.edit,
+    () => route.query.inspect,
+    () => route.query.create,
+  ],
+  () => {
+    if (route.query.create === "1" && auth.admin) open();
+    else {
+      const plan = plans.value.find((item) => item.id === route.query.planId);
+      if (!plan) return;
+      if (route.query.edit === "1" && auth.admin) open(plan);
+      else if (route.query.inspect === "1") detail.value = plan;
+      else return;
+    }
+    void router.replace({
+      query: {
+        ...route.query,
+        edit: undefined,
+        inspect: undefined,
+        create: undefined,
+      },
+    });
+  },
+  { immediate: true },
+);
 function open(plan?: Pick<InspectionPlan, "name" | "rules">) {
   postprocess.value = postprocessSchema.parse(plan?.rules.postprocess ?? {});
-  name.value = plan?.name ?? "";
   product.value = plan?.rules.product ?? "";
   purpose.value = plan?.rules.purpose ?? "PRESENCE";
   instructions.value = plan?.rules.instructions ?? "";
@@ -141,13 +180,26 @@ async function save() {
           : {}),
       })),
     };
-    detail.value = await post<InspectionPlan>("/plans", {
-      name: name.value || product.value,
+    const saved = await post<InspectionPlan>("/plans", {
+      name: product.value,
       rules,
     });
     editing.value = false;
-    await load();
-    notices.add("方案版本已保存，可以安排采样");
+    detail.value = null;
+    await workflow.load();
+    workflow.select(saved.id);
+    notices.add("产品规则已保存，请确认后应用并开始检测");
+    await router.push({
+      name: route.query.returnTo === "workbench" ? "workbench" : "models",
+      params:
+        route.query.returnTo === "workbench" ? {} : { tab: "deployments" },
+      query: {
+        planId: saved.id,
+        deviceId: route.query.deviceId,
+        modelId: route.query.modelId,
+        ...(route.query.returnTo === "workbench" ? { setup: "1" } : {}),
+      },
+    });
   } catch (e) {
     notices.error(e);
   } finally {
@@ -198,100 +250,145 @@ async function remove() {
   <div class="page-heading">
     <div>
       <h1>产品配置</h1>
-      <p>先说明检查什么、怎样摆放、什么算合格，再为这个方案采样和准备模型。</p>
+      <p>
+        定义检查对象、摆放要求、合格数量规则，再为方案组织采样与验证兼容模型。
+      </p>
     </div>
-    <button v-if="auth.admin" class="primary" @click="open()">
-      新建检查方案
-    </button>
+    <div class="heading-actions">
+      <UiButton v-if="auth.admin" variant="primary" icon="scan" @click="open()">
+        新建检查方案
+      </UiButton>
+    </div>
   </div>
-  <section v-if="scenarios.length" class="panel section-space">
-    <h2>常见应用场景 · 服务端配置</h2>
-    <p class="note">
-      这些是可编辑的规则起点。保存方案并分配兼容模型后，Web 与 HDMI
-      执行同一份规则。
-    </p>
+
+  <UiCard v-if="scenarios.length" padding="md" class="section-space">
+    <template #header>
+      <div>
+        <h2 class="section-card-title">常用产品模板</h2>
+        <p class="note">
+          这些是可编辑的规则起点。保存方案并分配兼容模型后，Web 与 HDMI
+          终端执行同一份规则。
+        </p>
+      </div>
+      <UiButton
+        variant="secondary"
+        size="sm"
+        icon="refresh"
+        :loading="loading"
+        @click="load"
+      >
+        刷新模板
+      </UiButton>
+    </template>
+
     <div class="plan-grid">
-      <article
+      <UiCard
         v-for="scenario in scenarios"
         :key="scenario.id"
-        class="plan-card"
+        hover
+        padding="md"
+        class="scenario-card"
       >
         <h3>{{ scenario.name }}</h3>
-        <p>{{ scenario.description }}</p>
-        <button
-          v-if="auth.admin"
-          @click="open({ name: scenario.name, rules: scenario.rules })"
-        >
-          以此配置方案
-        </button>
-      </article>
+        <p class="scenario-desc">{{ scenario.description }}</p>
+        <div class="scenario-footer">
+          <UiButton
+            v-if="auth.admin"
+            variant="outline"
+            size="sm"
+            @click="open({ name: scenario.name, rules: scenario.rules })"
+          >
+            使用此模板
+          </UiButton>
+        </div>
+      </UiCard>
     </div>
-    <button @click="load" :disabled="loading">刷新服务端场景</button>
-  </section>
+  </UiCard>
+
   <div class="plan-intro">
-    <div>
+    <div class="intro-block">
       <b>同一工位，适配不同产品</b>
       <p>
         外观缺陷、液面位置、数量检查都从方案开始。类别和数量由你定义，模型仍须满足设备支持的模板。
       </p>
     </div>
-    <div>
+    <div class="intro-block">
       <b>应用到终端后生效</b>
       <p>保存的是采样与验收依据。将产品规则与已验证模型应用到终端后生效。</p>
     </div>
   </div>
+
   <AsyncState :loading="loading" :error="error" @retry="load">
-    <section v-if="!plans.length" class="plan-empty">
-      <h2>从你的第一个产品开始</h2>
-      <p>
-        例如：包装盒需要盒体、吸管和标签；托盘需要一盒饮品和两件配件。类别不必沿用钢材缺陷名称。
-      </p>
-      <ol>
-        <li>填写产品和检查目标</li>
-        <li>写清合格数量、检查区域和摆放要求</li>
-        <li>导入或拍摄图片，完成标注后训练</li>
-      </ol>
-      <button v-if="auth.admin" class="primary" @click="open()">
-        新增第一个产品
-      </button>
-      <p v-else>请管理员创建检查方案，维护人员可以查看并协助验证。</p>
-    </section>
-    <div class="plan-grid">
-      <article v-for="plan in plans" :key="plan.id" class="plan-card">
-        <div class="plan-card-head">
-          <span>{{ purposes[plan.rules.purpose] ?? "已有方案" }}</span
-          ><span>V{{ plan.version }} · 已保存</span>
-        </div>
-        <h2>{{ plan.name }}</h2>
-        <p>{{ plan.rules.product }}</p>
-        <ul>
+    <UiCard v-if="!plans.length" padding="lg" class="plan-empty-card">
+      <UiEmpty
+        icon="clipboard"
+        title="从你的第一个产品开始"
+        description="例如：包装盒需要盒体、吸管和标签；托盘需要一盒饮品和两件配件。类别不必沿用默认名称。"
+      >
+        <template #actions>
+          <UiButton
+            v-if="auth.admin"
+            variant="primary"
+            icon="scan"
+            @click="open()"
+          >
+            新增第一个产品方案
+          </UiButton>
+          <span v-else class="text-muted"
+            >请管理员创建检查方案，维护人员可以查看并协助验证。</span
+          >
+        </template>
+      </UiEmpty>
+    </UiCard>
+
+    <div v-else class="plan-grid">
+      <UiCard
+        v-for="plan in plans"
+        :key="plan.id"
+        hover
+        padding="md"
+        class="plan-card"
+      >
+        <template #header>
+          <div class="plan-card-head">
+            <UiBadge tone="neutral" chip size="sm">
+              {{ purposes[plan.rules.purpose] ?? "已有方案" }}
+            </UiBadge>
+            <UiBadge tone="forest" chip size="sm">
+              V{{ plan.version }} · 已保存
+            </UiBadge>
+          </div>
+        </template>
+
+        <h2 class="plan-name">{{ plan.rules.product }}</h2>
+        <p class="plan-product">
+          V{{ plan.version }} · {{ purposes[plan.rules.purpose] }}
+        </p>
+
+        <ul class="plan-class-list">
           <li v-for="(label, id) in plan.rules.classes" :key="id">
-            <b>{{ label }}</b
-            ><span>{{ ruleText(plan, id) }}</span>
+            <b>{{ label }}</b>
+            <span>{{ ruleText(plan, id) }}</span>
           </li>
         </ul>
+
         <div class="row-actions section-space">
-          <button class="table-action" @click="detail = plan">查看配置</button
-          ><RouterLink
-            v-if="auth.admin"
-            class="table-action"
+          <UiButton variant="secondary" size="sm" @click="detail = plan">
+            查看配置
+          </UiButton>
+          <UiButton
+            variant="primary"
+            size="sm"
             :to="{
-              name: 'data',
-              params: { tab: 'annotation' },
+              name: 'models',
+              params: { tab: 'deployments' },
               query: { planId: plan.id },
             }"
-            >准备样本 →</RouterLink
           >
-          <button
-            v-if="auth.admin"
-            class="table-action danger"
-            :disabled="busy"
-            @click="requestDelete(plan)"
-          >
-            删除方案版本
-          </button>
+            使用此产品
+          </UiButton>
         </div>
-      </article>
+      </UiCard>
     </div>
   </AsyncState>
   <Drawer v-if="editing" title="配置产品" @close="editing = false"
@@ -304,19 +401,13 @@ async function remove() {
           required
           maxlength="120"
       /></label>
-      <details>
-        <summary>配置名称（可选）</summary>
-        <label
-          >名称<input v-model="name" :placeholder="product" maxlength="120"
-        /></label>
-      </details>
       <label
-        >检查目标<select v-model="purpose">
+        >检查目标<UiSelect v-model="purpose">
           <option value="PRESENCE">部件齐全：检查必需部件是否存在</option>
           <option value="COUNT">数量与配装：检查种类、数量</option>
           <option value="APPEARANCE">可见外观：检查指定异常是否出现</option>
           <option value="POSITION">位置范围：检查液面或部件的合格位置</option>
-        </select></label
+        </UiSelect></label
       >
       <h3>需要识别的对象与合格数量</h3>
       <p class="note">
@@ -413,10 +504,10 @@ async function remove() {
         </p>
         <div class="plan-region">
           <label
-            >包含框处理<select v-model="postprocess.algorithm">
+            >包含框处理<UiSelect v-model="postprocess.algorithm">
               <option value="BOX_FILTER_V3">置信度优先</option>
               <option value="BOX_FILTER_V2">小框优先（原版本）</option>
-            </select></label
+            </UiSelect></label
           >
           <label
             >重叠去重 IoU<input
@@ -532,70 +623,100 @@ async function remove() {
         </div>
       </details>
       <div class="form-actions section-space">
-        <button class="primary" :disabled="busy">
-          {{ busy ? "保存中…" : "保存方案版本" }}</button
-        ><button type="button" @click="editing = false">取消</button>
+        <UiButton
+          variant="primary"
+          type="submit"
+          :disabled="busy"
+          :loading="busy"
+        >
+          {{ busy ? "保存中…" : "保存并继续 →" }}
+        </UiButton>
+        <UiButton variant="secondary" type="button" @click="editing = false">
+          取消
+        </UiButton>
       </div>
     </form></Drawer
   >
   <Drawer
     v-if="detail && !editing"
-    :title="`${detail.name} · V${detail.version}`"
+    :title="`${detail.rules.product} · V${detail.version}`"
     @close="detail = null"
-    ><p class="tag">已保存的方案版本</p>
+  >
+    <UiBadge tone="forest" chip size="sm" class="mb-2"
+      >规则已保存 · 应用到设备后生效</UiBadge
+    >
     <h3>{{ detail.rules.product }}</h3>
-    <p>{{ purposes[detail.rules.purpose] }}</p>
+    <p class="plan-purpose-desc">{{ purposes[detail.rules.purpose] }}</p>
     <div
       v-for="(label, id) in detail.rules.classes"
       :key="id"
       class="list-line"
     >
-      <b>{{ label }}</b
-      ><span>{{ ruleText(detail, id) }}</span>
+      <b>{{ label }}</b>
+      <span>{{ ruleText(detail, id) }}</span>
     </div>
-    <h3>工人采样指引</h3>
+    <h3 class="mt-4">工人采样指引</h3>
     <p class="plan-instructions">{{ detail.rules.instructions }}</p>
-    <p>{{ detail.rules.conditions || "未补充成像条件" }}</p>
+    <p class="plan-conditions">
+      {{ detail.rules.conditions || "未补充成像条件" }}
+    </p>
     <p class="note">
-      类别、数量与位置范围随方案下发。请在设备配置中分配此版本，设备当前方案以现场工作台为准。
+      确认规则后，直接应用并开始检测。缺少兼容模型时，应用页会提供准备入口。
     </p>
     <div class="form-actions">
-      <RouterLink
-        v-if="auth.admin"
-        class="button-link primary"
+      <UiButton
+        variant="primary"
         :to="{
-          name: 'data',
-          params: { tab: 'annotation' },
+          name: 'models',
+          params: { tab: 'deployments' },
           query: { planId: detail.id },
         }"
         @click="detail = null"
-        >为此方案准备样本</RouterLink
-      ><button v-if="auth.admin" @click="open(detail)">修改并保存新版本</button>
-      <button
+        >使用此产品</UiButton
+      >
+      <UiButton v-if="auth.admin" variant="secondary" @click="open(detail)">
+        修改并保存新版本
+      </UiButton>
+      <UiButton
         v-if="auth.admin"
-        class="danger"
+        variant="danger"
         :disabled="busy"
         @click="requestDelete(detail)"
       >
         删除方案版本
-      </button>
-    </div></Drawer
-  >
-  <Drawer
-    v-if="deleting"
+      </UiButton>
+    </div>
+  </Drawer>
+
+  <!-- 删除确认弹窗 -->
+  <UiModal
+    :model-value="Boolean(deleting)"
     title="删除方案版本"
     @close="!busy && (deleting = null)"
   >
-    <p>确认删除“{{ deleting.name }} / V{{ deleting.version }}”？</p>
-    <p class="note">
-      此版本将从方案列表和新任务选项中移除。已关联任务继续使用原版本，已有图片、标注、数据集和检测记录保留。其他方案版本不受影响。
-    </p>
-    <div class="form-actions">
-      <button class="danger" :disabled="busy" @click="remove">
-        {{ busy ? "正在删除…" : "确认删除" }}</button
-      ><button :disabled="busy" @click="deleting = null">取消</button>
-    </div>
-  </Drawer>
+    <template v-if="deleting">
+      <p>
+        确认删除“<b>{{ deleting.name }} / V{{ deleting.version }}</b
+        >”？
+      </p>
+      <p class="note">
+        此版本将从方案列表和新任务选项中移除。已关联任务继续使用原版本，已有图片、标注、数据集和检测记录保留。其他方案版本不受影响。
+      </p>
+    </template>
+    <template #footer>
+      <UiButton variant="secondary" :disabled="busy" @click="deleting = null">
+        取消
+      </UiButton>
+      <UiButton
+        variant="danger"
+        :disabled="busy"
+        :loading="busy"
+        @click="remove"
+      >
+        {{ busy ? "正在删除…" : "确认删除" }}
+      </UiButton>
+    </template>
+  </UiModal>
 </template>
 <style scoped>
 .plan-intro {

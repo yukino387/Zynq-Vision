@@ -7,6 +7,8 @@ import { useAuthStore } from "../stores/auth";
 import { useNotificationStore } from "../stores/notifications";
 import AsyncState from "../components/AsyncState.vue";
 import Icon from "../components/Icon.vue";
+import { UiButton, UiCard, UiInput, UiBadge } from "../components/ui";
+
 interface Profile {
   id: string;
   name: string;
@@ -27,6 +29,7 @@ const currentPassword = ref(""),
   newPassword = ref(""),
   confirmation = ref(""),
   passwordError = ref("");
+
 async function load() {
   loading.value = true;
   loadError.value = "";
@@ -40,6 +43,7 @@ async function load() {
   }
 }
 onMounted(load);
+
 async function saveProfile() {
   saving.value = true;
   try {
@@ -53,6 +57,7 @@ async function saveProfile() {
     saving.value = false;
   }
 }
+
 async function changePassword() {
   passwordError.value = "";
   if (newPassword.value !== confirmation.value) {
@@ -83,123 +88,173 @@ async function changePassword() {
   }
 }
 </script>
+
 <template>
   <div class="page-heading">
     <div>
       <h1>账号设置</h1>
       <p>管理个人资料和登录密码。</p>
     </div>
-    <RouterLink v-if="auth.admin" class="button-link" to="/access/users"
-      >管理所有账号 <span aria-hidden="true">→</span></RouterLink
-    >
+    <div v-if="auth.admin" class="heading-actions">
+      <UiButton variant="outline" size="sm" to="/access/users">
+        管理所有账号
+      </UiButton>
+    </div>
   </div>
+
   <AsyncState :loading="loading" :error="loadError" @retry="load">
     <div v-if="profile" class="account-grid">
-      <section class="panel account-card">
-        <header>
+      <!-- 个人资料卡片 -->
+      <UiCard padding="lg" class="account-card">
+        <header class="account-header">
           <span class="account-icon"><Icon name="users" :size="22" /></span>
           <div>
             <h2>个人资料</h2>
-            <p>姓名用于页面显示及操作记录。</p>
+            <p>姓名用于页面顶栏显示及操作追溯记录。</p>
           </div>
         </header>
+
         <dl class="account-facts">
-          <div>
+          <div class="fact-row">
             <dt>登录账号</dt>
-            <dd>{{ profile.username }}</dd>
+            <dd class="mono font-semibold">{{ profile.username }}</dd>
           </div>
-          <div>
+          <div class="fact-row">
             <dt>当前角色</dt>
-            <dd>{{ chinese(profile.role) }}</dd>
+            <dd>
+              <UiBadge tone="info" chip size="sm">{{
+                chinese(profile.role)
+              }}</UiBadge>
+            </dd>
           </div>
-          <div>
+          <div class="fact-row">
             <dt>加入时间</dt>
-            <dd>{{ new Date(profile.createdAt).toLocaleDateString() }}</dd>
+            <dd class="mono text-muted">
+              {{ new Date(profile.createdAt).toLocaleDateString() }}
+            </dd>
           </div>
         </dl>
-        <form @submit.prevent="saveProfile">
-          <label
-            >姓名<input
+
+        <form @submit.prevent="saveProfile" class="form-content">
+          <div class="form-group">
+            <label class="form-label" for="account-name-input">姓名</label>
+            <UiInput
+              id="account-name-input"
               v-model="name"
               autocomplete="name"
               required
-              maxlength="60"
+              :maxlength="60"
               :disabled="saving"
-          /></label>
+              block
+              placeholder="输入你的显示姓名"
+            />
+          </div>
           <div class="form-actions">
-            <button
-              class="primary"
+            <UiButton
+              type="submit"
+              variant="primary"
               :disabled="saving || !name.trim() || name.trim() === profile.name"
-              :aria-busy="saving"
+              :loading="saving"
             >
               {{ saving ? "保存中…" : "保存资料" }}
-            </button>
+            </UiButton>
           </div>
         </form>
-      </section>
-      <section class="panel account-card">
-        <header>
+      </UiCard>
+
+      <!-- 修改密码卡片 -->
+      <UiCard padding="lg" class="account-card">
+        <header class="account-header">
           <span class="account-icon"><Icon name="audit" :size="22" /></span>
           <div>
             <h2>修改密码</h2>
-            <p>修改后，所有设备上的旧登录会话都会失效。</p>
+            <p>修改成功后，所有设备上的旧登录会话都会失效。</p>
           </div>
         </header>
-        <form @submit.prevent="changePassword">
-          <fieldset :disabled="changing">
-            <label
-              >当前密码<input
+
+        <form @submit.prevent="changePassword" class="form-content">
+          <fieldset :disabled="changing" class="form-fieldset">
+            <div class="form-group">
+              <label class="form-label" for="pwd-current">当前密码</label>
+              <UiInput
+                id="pwd-current"
                 v-model="currentPassword"
                 :type="showPasswords ? 'text' : 'password'"
                 autocomplete="current-password"
                 required
-                maxlength="200"
-                placeholder="输入当前登录密码"
-            /></label>
-            <label
-              >新密码<input
+                :maxlength="200"
+                placeholder="输入当前使用的登录密码"
+                block
+              />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="pwd-new">新密码</label>
+              <UiInput
+                id="pwd-new"
                 v-model="newPassword"
                 :type="showPasswords ? 'text' : 'password'"
                 autocomplete="new-password"
                 required
-                minlength="8"
-                maxlength="72"
-                placeholder="至少 8 位"
-            /></label>
-            <label
-              >确认新密码<input
+                :minlength="8"
+                :maxlength="72"
+                placeholder="至少 8 位（字母、数字与符号组合）"
+                block
+              />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="pwd-confirm">确认新密码</label>
+              <UiInput
+                id="pwd-confirm"
                 v-model="confirmation"
                 :type="showPasswords ? 'text' : 'password'"
                 autocomplete="new-password"
                 required
-                minlength="8"
-                maxlength="72"
+                :minlength="8"
+                :maxlength="72"
                 placeholder="再次输入新密码"
-            /></label>
-            <label class="check-row"
-              ><input v-model="showPasswords" type="checkbox" />显示密码</label
-            >
-            <p class="note">
-              建议使用字母、数字和符号的组合，并避免与其他平台共用密码。
+                block
+              />
+            </div>
+
+            <div class="check-row">
+              <input
+                id="show-pass-check"
+                v-model="showPasswords"
+                type="checkbox"
+              />
+              <label for="show-pass-check">显示密码明文</label>
+            </div>
+
+            <p class="pwd-tip">
+              建议使用包含大小写字母、数字和符号的强密码，并避免与其他平台共用密码。
             </p>
-            <p v-if="passwordError" class="error-box" role="alert">
-              {{ passwordError }}
-            </p>
+
+            <div v-if="passwordError" class="error-banner" role="alert">
+              <Icon name="alert" :size="16" />
+              <span>{{ passwordError }}</span>
+            </div>
+
             <div class="form-actions">
-              <button
-                class="primary"
-                :disabled="changing"
-                :aria-busy="changing"
+              <UiButton
+                type="submit"
+                variant="primary"
+                :disabled="
+                  changing || !currentPassword || !newPassword || !confirmation
+                "
+                :loading="changing"
               >
                 {{ changing ? "更新中…" : "修改密码并重新登录" }}
-              </button>
+              </UiButton>
             </div>
           </fieldset>
         </form>
-      </section>
+      </UiCard>
     </div>
   </AsyncState>
 </template>
+
 <style scoped>
 .account-grid {
   display: grid;
@@ -208,24 +263,28 @@ async function changePassword() {
   align-items: start;
   max-width: 1120px;
 }
-.account-card {
-  padding: 26px;
-}
-.account-card header {
+
+.account-header {
   display: flex;
   gap: 14px;
   align-items: flex-start;
-  margin-bottom: 24px;
+  margin-bottom: 22px;
 }
-.account-card h2 {
+
+.account-header h2 {
   font-size: 18px;
-  margin: 0 0 5px;
+  font-weight: 650;
+  margin: 0 0 4px;
+  color: var(--ink);
 }
-.account-card header p {
+
+.account-header p {
   margin: 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted);
+  line-height: 1.4;
 }
+
 .account-icon {
   width: 42px;
   height: 42px;
@@ -233,66 +292,126 @@ async function changePassword() {
   place-items: center;
   border-radius: 10px;
   color: var(--forest);
-  background: color-mix(in srgb, var(--forest) 8%, var(--surface));
+  background: color-mix(in srgb, var(--forest) 10%, var(--surface));
   flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--forest) 20%, transparent);
 }
+
 .account-facts {
   margin: 0 0 24px;
-  border-block: 1px solid var(--line);
-  padding: 12px 0;
-}
-.account-facts > div {
-  display: flex;
-  gap: 16px;
-  justify-content: space-between;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
   padding: 8px 0;
+}
+
+.fact-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
   font-size: 13px;
 }
-.account-facts dt {
+
+.fact-row dt {
   color: var(--muted);
   flex-shrink: 0;
 }
-.account-facts dd {
+
+.fact-row dd {
   margin: 0;
-  overflow-wrap: anywhere;
   text-align: right;
+  color: var(--ink);
 }
-.account-card label {
-  margin: 0 0 18px;
+
+.font-semibold {
+  font-weight: 600;
 }
-.account-card input {
-  width: 100%;
+
+.text-muted {
+  color: var(--muted);
 }
-.account-card .check-row {
+
+.form-content {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
 }
-.account-card .check-row input {
-  width: auto;
-}
-.account-card fieldset {
+
+.form-fieldset {
   border: 0;
   padding: 0;
   margin: 0;
-  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
-.account-card .form-actions {
-  margin: 24px 0 0;
+
+.form-group {
+  margin-bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
-.account-card .note {
+
+.form-label {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--ink);
+}
+
+.check-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 14px;
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.check-row input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: var(--forest);
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
+
+.check-row label {
+  cursor: pointer;
+  margin: 0;
+}
+
+.pwd-tip {
   font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+  margin: 0 0 16px;
 }
+
+.error-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--crit-bg, #f5e0da);
+  border: 1px solid var(--crit-line, #d9a097);
+  color: var(--red, #b6372a);
+  padding: 10px 14px;
+  border-radius: var(--radius, 6px);
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.form-actions {
+  margin-top: 8px;
+  display: flex;
+}
+
 @media (max-width: 1000px) {
   .account-grid {
     grid-template-columns: 1fr;
-    max-width: 680px;
-    gap: 18px;
-  }
-}
-@media (max-width: 600px) {
-  .account-card {
-    padding: 20px;
+    max-width: 640px;
+    gap: 20px;
   }
 }
 </style>

@@ -8,6 +8,7 @@ export interface QueuedSample {
   localSequence: number;
   capturedAt: string;
   taskId?: string;
+  planId?: string;
   captureSetClientId?: string;
   source: "MOBILE";
   metadata: Record<string, unknown>;
@@ -96,6 +97,7 @@ export async function enqueue(
     localSequence: sequence,
     capturedAt: new Date().toISOString(),
     taskId: session.taskId || undefined,
+    planId: typeof metadata.planId === "string" ? metadata.planId : undefined,
     captureSetClientId,
     source: "MOBILE",
     metadata,
@@ -132,6 +134,7 @@ async function upload(item: QueuedSample) {
           localSequence: item.localSequence,
           capturedAt: item.capturedAt,
           taskId: item.taskId,
+          planId: item.planId,
           captureSetClientId: item.captureSetClientId,
           metadata: item.metadata,
         }),

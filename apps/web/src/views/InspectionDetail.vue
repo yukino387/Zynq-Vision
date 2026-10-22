@@ -68,7 +68,6 @@ async function saved(next: boolean) {
     <div>
       <h1>单件详情</h1>
       <p v-if="inspection" :class="{ mono: auth.engineer }">
-        <span v-if="auth.engineer"># {{ inspection.id.slice(-10) }} · </span>
         {{ new Date(inspection.createdAt).toLocaleString("zh-CN") }}
       </p>
     </div>

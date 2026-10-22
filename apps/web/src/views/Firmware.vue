@@ -80,7 +80,7 @@ const currentFile = computed(() =>
       作业和配套模型通过平台在线领取；界面、检测服务和系统镜像尚不支持网页升级。
     </p>
     <label
-      >检测终端<select v-model="devices.selected">
+      >检测终端<UiSelect v-model="devices.selected">
         <option v-if="!devices.devices.length" value="">暂无设备</option>
         <option
           v-for="device in devices.devices"
@@ -89,7 +89,7 @@ const currentFile = computed(() =>
         >
           {{ device.name }}
         </option>
-      </select></label
+      </UiSelect></label
     >
     <p v-if="devices.current">
       <Status :value="devices.current.connectionState" /> ·
@@ -235,9 +235,9 @@ const currentFile = computed(() =>
       <dt>SHA-256</dt>
       <dd class="mono">{{ currentFile?.sha256 }}</dd>
       <dt>文件</dt>
-      <dd>{{ currentFile?.asset?.originalName || "—" }}</dd>
+      <dd>{{ currentFile?.asset?.originalName || "尚未选择文件" }}</dd>
       <dt>备注</dt>
-      <dd>{{ currentFile?.notes || "—" }}</dd>
+      <dd>{{ currentFile?.notes || "未填写说明" }}</dd>
     </dl>
     <template v-if="tab === 'deployments'"
       ><h3>历史执行证据</h3>

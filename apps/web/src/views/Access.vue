@@ -10,6 +10,14 @@ import Drawer from "../components/Drawer.vue";
 import AsyncState from "../components/AsyncState.vue";
 import Pager from "../components/Pager.vue";
 import type { Named } from "../types";
+import {
+  UiButton,
+  UiInput,
+  UiSelect,
+  UiCard,
+  UiBadge,
+  UiTable,
+} from "../components/ui";
 const route = useRoute(),
   auth = useAuthStore(),
   notices = useNotificationStore();
@@ -201,46 +209,89 @@ async function resetUserPassword() {
 </script>
 <template>
   <div class="page-heading">
-    <h1>{{ tab === "codes" ? "注册码管理" : "用户管理" }}</h1>
-    <button v-if="tab === 'codes'" class="primary" @click="form = true">
-      签发注册码</button
-    ><template v-else>
-      <button class="primary" @click="newUser = true">新建账号</button>
-      <RouterLink
-        class="button-link"
-        :to="{
-          name: 'access',
-          params: { tab: 'codes' },
-          query: { invite: '1' },
-        }"
-        >签发注册码</RouterLink
-      >
-    </template>
-  </div>
-  <section class="permissions-summary">
-    <h2>职责与权限</h2>
-    <div class="role-cards">
-      <article>
-        <b>操作员 · 现场执行</b>
-        <p>
-          按任务采样、查看结果、提交复核意见。不能审核训练数据、修改方案或发布模型。
-        </p>
-      </article>
-      <article>
-        <b>管理员 · 业务负责人</b>
-        <p>
-          配置和删除产品方案、管理采样任务及业务数据、审核并冻结数据、批准发布与回退、管理人员。具有工程师和操作员的全部业务能力。
-        </p>
-      </article>
-      <article>
-        <b>工程师 · 开发与维护</b>
-        <p>
-          连接和诊断设备、采样和标注、整理草稿数据集、训练与评估。不能管理方案与采样任务、删除原始图片或整个数据集、执行正式审核和发布。
-        </p>
-      </article>
+    <div>
+      <h1>{{ tab === "codes" ? "注册码管理" : "用户管理" }}</h1>
+      <p>
+        管理系统成员、分配操作员/工程师/管理员权限，并签发一次性成员注册邀请码。
+      </p>
     </div>
+    <div class="heading-actions">
+      <UiButton
+        v-if="tab === 'codes'"
+        variant="primary"
+        icon="pairing"
+        @click="form = true"
+      >
+        签发注册码
+      </UiButton>
+      <template v-else>
+        <UiButton variant="primary" icon="users" @click="newUser = true">
+          新建账号
+        </UiButton>
+        <UiButton
+          variant="outline"
+          :to="{
+            name: 'access',
+            params: { tab: 'codes' },
+            query: { invite: '1' },
+          }"
+        >
+          签发注册码
+        </UiButton>
+      </template>
+    </div>
+  </div>
+
+  <UiCard padding="lg" class="permissions-card">
+    <template #header>
+      <div>
+        <h2 class="permissions-title">职责与权限矩阵</h2>
+        <p class="permissions-sub">
+          明确界定生产现场、技术维护与业务管理的权限边界
+        </p>
+      </div>
+    </template>
+
+    <div class="role-cards">
+      <UiCard hover padding="md" class="role-card">
+        <template #header>
+          <div class="role-card-header">
+            <b>操作员</b>
+            <UiBadge tone="info" chip size="sm">现场执行</UiBadge>
+          </div>
+        </template>
+        <p>
+          按任务执行采样、查看实时结果、提交复核意见。不能审核训练数据、修改方案或发布模型。
+        </p>
+      </UiCard>
+
+      <UiCard hover padding="md" class="role-card">
+        <template #header>
+          <div class="role-card-header">
+            <b>管理员</b>
+            <UiBadge tone="forest" chip size="sm">业务负责人</UiBadge>
+          </div>
+        </template>
+        <p>
+          配置和删除产品方案、管理采样任务及业务数据、审核并冻结数据、批准发布与回退、管理人员。
+        </p>
+      </UiCard>
+
+      <UiCard hover padding="md" class="role-card">
+        <template #header>
+          <div class="role-card-header">
+            <b>工程师</b>
+            <UiBadge tone="warn" chip size="sm">开发与维护</UiBadge>
+          </div>
+        </template>
+        <p>
+          连接和诊断设备、采样和标注、整理草稿数据集、训练与评估。不能管理方案与审核正式发布。
+        </p>
+      </UiCard>
+    </div>
+
     <div class="table-wrap section-space">
-      <table>
+      <UiTable compact hover>
         <thead>
           <tr>
             <th>操作范围</th>
@@ -251,86 +302,135 @@ async function resetUserPassword() {
         </thead>
         <tbody>
           <tr v-for="row in permissions" :key="row[0]">
-            <td v-for="(value, index) in row" :key="index">{{ value }}</td>
+            <td class="font-semibold">{{ row[0] }}</td>
+            <td>{{ row[1] }}</td>
+            <td>{{ row[2] }}</td>
+            <td>{{ row[3] }}</td>
           </tr>
         </tbody>
-      </table>
+      </UiTable>
     </div>
-    <p class="note">
-      注册码只能创建操作员或工程师账号，且每个注册码只能注册一个账号；管理员账号只能由现有管理员在用户管理中直接创建。当前为角色级权限，尚未提供按人员隔离工位数据的绑定授权。
+
+    <p class="note mt-3">
+      *
+      注册码只能创建操作员或工程师账号，且每个注册码仅支持使用一次；管理员账号由现有管理员直接在用户管理中创建。
     </p>
-  </section>
-  <form class="toolbar" @submit.prevent="list.filter">
-    <input
-      v-model="list.search.value"
-      :placeholder="tab === 'codes' ? '搜索用途备注' : '搜索用户姓名'"
-      aria-label="搜索"
-    /><button>搜索</button
-    ><button type="button" @click="list.load">刷新</button>
+  </UiCard>
+
+  <form class="access-toolbar" @submit.prevent="list.filter">
+    <div class="search-input-wrap">
+      <UiInput
+        v-model="list.search.value"
+        icon="search"
+        clearable
+        :placeholder="tab === 'codes' ? '搜索用途备注' : '搜索用户姓名或账号'"
+        aria-label="搜索"
+        block
+      />
+    </div>
+    <UiButton type="submit" variant="primary">搜索</UiButton>
+    <UiButton
+      type="button"
+      variant="secondary"
+      icon="refresh"
+      @click="list.load"
+      >刷新</UiButton
+    >
   </form>
+
   <AsyncState
     :loading="list.loading.value"
     :error="list.error.value"
     :empty="!list.items.value.length"
     @retry="list.load"
   >
-    <div class="panel table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>{{ tab === "codes" ? "用途备注" : "用户" }}</th>
-            <th>{{ tab === "codes" ? "注册码前缀" : "账号" }}</th>
-            <th>{{ tab === "codes" ? "角色 · 有效期至" : "角色" }}</th>
-            <th>状态</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="r in list.items.value" :key="r.id">
-            <td>{{ tab === "codes" ? r.label : r.name }}</td>
-            <td class="mono">
-              {{ tab === "codes" ? `${r.prefix}…` : r.username }}
-            </td>
-            <td>
-              <template v-if="tab === 'codes'">
-                <span class="tag">{{ chinese(r.role) }}</span>
-                {{ new Date(String(r.expiresAt)).toLocaleString() }}
-              </template>
-              <template v-else>{{ chinese(r.role) }}</template>
-            </td>
-            <td>
-              <span
-                class="tag"
-                :class="{ crit: tab === 'users' && r.disabled }"
-                >{{
-                  tab === "codes" ? status(r) : r.disabled ? "已停用" : "正常"
-                }}</span
+    <UiTable hover>
+      <thead>
+        <tr>
+          <th>{{ tab === "codes" ? "用途备注" : "用户" }}</th>
+          <th>{{ tab === "codes" ? "注册码前缀" : "账号" }}</th>
+          <th>{{ tab === "codes" ? "角色 · 有效期至" : "角色" }}</th>
+          <th>状态</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="r in list.items.value" :key="r.id">
+          <td class="font-semibold">
+            {{ tab === "codes" ? r.label : r.name }}
+          </td>
+          <td class="mono">
+            {{ tab === "codes" ? `${r.prefix}…` : r.username }}
+          </td>
+          <td>
+            <template v-if="tab === 'codes'">
+              <UiBadge tone="info" chip size="sm">{{
+                chinese(r.role)
+              }}</UiBadge>
+              <span class="mono text-muted text-xs ml-2">{{
+                new Date(String(r.expiresAt)).toLocaleString()
+              }}</span>
+            </template>
+            <template v-else>
+              <UiBadge
+                :tone="
+                  r.role === 'ADMIN'
+                    ? 'forest'
+                    : r.role === 'ENGINEER'
+                      ? 'warn'
+                      : 'info'
+                "
+                chip
+                size="sm"
               >
-            </td>
-            <td class="action-cell">
-              <div class="row-actions">
-                <button
-                  v-if="tab === 'codes' && status(r) === '可使用'"
-                  class="table-action danger"
-                  @click="revoke(r)"
-                  :disabled="busy"
-                >
-                  撤销</button
-                ><button
-                  v-else-if="tab === 'users' && r.id !== auth.user?.id"
-                  class="table-action"
-                  @click="edit(r)"
-                >
-                  管理</button
-                ><span v-else class="muted">{{
-                  r.id === auth.user?.id ? "当前账号" : "—"
-                }}</span>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+                {{ chinese(r.role) }}
+              </UiBadge>
+            </template>
+          </td>
+          <td>
+            <UiBadge
+              :tone="
+                tab === 'codes'
+                  ? status(r) === '可使用'
+                    ? 'success'
+                    : 'neutral'
+                  : r.disabled
+                    ? 'crit'
+                    : 'success'
+              "
+              size="sm"
+              dot
+            >
+              {{ tab === "codes" ? status(r) : r.disabled ? "已停用" : "正常" }}
+            </UiBadge>
+          </td>
+          <td class="action-cell">
+            <div class="row-actions">
+              <UiButton
+                v-if="tab === 'codes' && status(r) === '可使用'"
+                variant="danger"
+                size="sm"
+                @click="revoke(r)"
+                :disabled="busy"
+              >
+                撤销
+              </UiButton>
+              <UiButton
+                v-else-if="tab === 'users' && r.id !== auth.user?.id"
+                variant="outline"
+                size="sm"
+                @click="edit(r)"
+              >
+                管理
+              </UiButton>
+              <span v-else class="text-muted text-xs">{{
+                r.id === auth.user?.id ? "当前账号" : "其他账号"
+              }}</span>
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </UiTable>
   </AsyncState>
   <Pager
     :page="list.page.value"
@@ -344,121 +444,202 @@ async function resetUserPassword() {
     "
     @update:page-size="list.setPageSize"
   />
-  <Drawer v-if="form" title="签发注册码" @close="form = false"
-    ><form @submit.prevent="issue">
-      <label
-        >用途备注<input
+  <Drawer v-if="form" title="签发注册码" @close="form = false">
+    <form @submit.prevent="issue" class="drawer-form">
+      <div class="form-group">
+        <label class="form-label">用途备注</label>
+        <UiInput
           v-model="label"
           required
-          maxlength="100"
-          placeholder="例如：一号工位新操作员" /></label
-      ><label
-        >账号角色<select v-model="codeRole">
+          :maxlength="100"
+          placeholder="例如：一号工位新操作员"
+          block
+        />
+      </div>
+      <div class="form-group">
+        <label class="form-label">账号角色</label>
+        <UiSelect v-model="codeRole" block>
           <option value="OPERATOR">操作员（采样与反馈）</option>
           <option value="ENGINEER">工程师（设备、标注与训练）</option>
-        </select></label
-      ><label
-        >有效天数<input
+        </UiSelect>
+      </div>
+      <div class="form-group">
+        <label class="form-label">有效天数</label>
+        <UiInput
           v-model.number="days"
           type="number"
-          min="1"
-          max="30"
+          :min="1"
+          :max="30"
           required
-      /></label>
+          block
+        />
+      </div>
       <p class="note">
         每个注册码只能注册一个账号。管理员账号不在注册码范围内，请在用户管理中直接创建。
       </p>
-      <button class="primary" :disabled="busy">确认签发</button>
-    </form></Drawer
-  >
-  <Drawer v-if="issued" title="注册码已签发" @close="issued = ''"
-    ><p>
-      请复制并交给新用户，关闭后不再显示完整注册码。该注册码只能创建<strong>{{
-        chinese(issuedRole)
-      }}</strong
+      <div class="form-actions mt-3">
+        <UiButton
+          type="submit"
+          variant="primary"
+          :disabled="busy"
+          :loading="busy"
+        >
+          确认签发注册码
+        </UiButton>
+      </div>
+    </form>
+  </Drawer>
+
+  <Drawer v-if="issued" title="注册码已签发" @close="issued = ''">
+    <p>
+      请复制并转交给新用户，抽屉关闭后将不再显示完整注册码。该注册码只能创建<strong
+        >{{ chinese(issuedRole) }}</strong
       >账号。
     </p>
-    <label>注册码<input class="mono" :value="issued" readonly /></label
-    ><button class="primary" @click="copy">复制注册码</button></Drawer
-  >
-  <Drawer v-if="newUser" title="新建账号" @close="newUser = false"
-    ><form @submit.prevent="createUser">
-      <label
-        >姓名<input
+    <div class="form-group mt-3">
+      <label class="form-label">注册码</label>
+      <UiInput
+        class="mono font-semibold"
+        :model-value="issued"
+        readonly
+        block
+      />
+    </div>
+    <div class="form-actions mt-3">
+      <UiButton variant="primary" icon="clipboard" @click="copy">
+        复制注册码
+      </UiButton>
+    </div>
+  </Drawer>
+
+  <Drawer v-if="newUser" title="新建账号" @close="newUser = false">
+    <form @submit.prevent="createUser" class="drawer-form">
+      <div class="form-group">
+        <label class="form-label">姓名</label>
+        <UiInput
           v-model="newName"
           required
-          maxlength="60"
-          autocomplete="off" /></label
-      ><label
-        >登录账号<input
+          :maxlength="60"
+          autocomplete="off"
+          placeholder="用户姓名"
+          block
+        />
+      </div>
+      <div class="form-group">
+        <label class="form-label">登录账号</label>
+        <UiInput
           v-model.trim="newUsername"
           required
-          pattern="[a-zA-Z0-9][a-zA-Z0-9_.-]{2,39}"
-          title="3 至 40 位字母、数字、下划线、短横线或点"
-          maxlength="40"
-          autocomplete="off" /></label
-      ><label
-        >初始密码<input
+          :maxlength="40"
+          autocomplete="off"
+          placeholder="英文、数字、下划线组合"
+          block
+        />
+      </div>
+      <div class="form-group">
+        <label class="form-label">初始密码</label>
+        <UiInput
           v-model="newPassword"
           required
           type="password"
-          minlength="8"
-          maxlength="100"
+          :minlength="8"
+          :maxlength="100"
           autocomplete="new-password"
-          placeholder="至少 8 位" /></label
-      ><label
-        >账号角色<select v-model="newRole">
+          placeholder="至少 8 位初始密码"
+          block
+        />
+      </div>
+      <div class="form-group">
+        <label class="form-label">账号角色</label>
+        <UiSelect v-model="newRole" block>
           <option value="OPERATOR">操作员（采样与反馈）</option>
           <option value="ENGINEER">工程师（设备、标注与训练）</option>
           <option value="ADMIN">管理员（人员、审核与发布）</option>
-        </select></label
-      >
+        </UiSelect>
+      </div>
       <p class="note">创建的账号可立即登录；请通过安全渠道转交初始密码。</p>
-      <button class="primary" :disabled="busy">创建账号</button>
-    </form></Drawer
-  >
-  <Drawer v-if="user" :title="`管理用户：${user.name}`" @close="user = null"
-    ><form @submit.prevent="saveUser">
-      <label
-        >角色<select v-model="role">
+      <div class="form-actions mt-3">
+        <UiButton
+          type="submit"
+          variant="primary"
+          :disabled="busy"
+          :loading="busy"
+        >
+          创建新账号
+        </UiButton>
+      </div>
+    </form>
+  </Drawer>
+
+  <Drawer v-if="user" :title="`管理用户：${user.name}`" @close="user = null">
+    <form @submit.prevent="saveUser" class="drawer-form">
+      <div class="form-group">
+        <label class="form-label">角色权限</label>
+        <UiSelect v-model="role" block>
           <option value="OPERATOR">工人（采样与反馈）</option>
           <option value="ENGINEER">技术维护人员（设备、标注与训练）</option>
           <option value="ADMIN">管理员</option>
-        </select></label
-      ><label class="check-row"
-        ><input v-model="disabled" type="checkbox" />停用账号</label
-      ><button class="primary" :disabled="busy">保存更改</button>
+        </UiSelect>
+      </div>
+      <div class="check-row">
+        <input id="user-disabled-chk" v-model="disabled" type="checkbox" />
+        <label for="user-disabled-chk">停用此账号</label>
+      </div>
+      <div class="form-actions mt-2">
+        <UiButton
+          type="submit"
+          variant="primary"
+          :disabled="busy"
+          :loading="busy"
+        >
+          保存更改
+        </UiButton>
+      </div>
     </form>
+
     <details v-if="user.id !== auth.user?.id" class="password-reset">
       <summary>重置此账号的密码</summary>
       <p class="note">
         用于协助忘记密码的用户。重置后，该账号的所有旧登录会话失效，需使用新密码重新登录。
       </p>
-      <form @submit.prevent="resetUserPassword">
-        <label
-          >新密码<input
+      <form @submit.prevent="resetUserPassword" class="drawer-form mt-2">
+        <div class="form-group">
+          <label class="form-label">新密码</label>
+          <UiInput
             v-model="resetPassword"
             type="password"
             autocomplete="new-password"
             required
-            minlength="8"
-            maxlength="72"
+            :minlength="8"
+            :maxlength="72"
             placeholder="至少 8 位"
             :disabled="busy"
-        /></label>
-        <label
-          >确认新密码<input
+            block
+          />
+        </div>
+        <div class="form-group">
+          <label class="form-label">确认新密码</label>
+          <UiInput
             v-model="resetConfirmation"
             type="password"
             autocomplete="new-password"
             required
-            minlength="8"
-            maxlength="72"
+            :minlength="8"
+            :maxlength="72"
             :disabled="busy"
-        /></label>
-        <button :disabled="busy" :aria-busy="busy">
-          {{ busy ? "重置中…" : "重置密码并使旧会话失效" }}
-        </button>
+            block
+          />
+        </div>
+        <div class="form-actions mt-2">
+          <UiButton
+            type="submit"
+            variant="secondary"
+            :disabled="busy"
+            :loading="busy"
+          >
+            重置密码并使旧会话失效
+          </UiButton>
+        </div>
       </form>
     </details>
     <p v-else class="note section-space">

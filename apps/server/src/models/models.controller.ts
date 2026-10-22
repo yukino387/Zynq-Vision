@@ -32,6 +32,27 @@ import { listing, page } from "../core/list.js";
 import { ModelsService } from "./models.service.js";
 import { DatasetsService } from "../datasets/datasets.service.js";
 import { AssetsService } from "../assets/assets.service.js";
+async function productTrainingSamples(
+  db: Pick<Prisma.TransactionClient, "sample">,
+  planId: string,
+) {
+  return db.sample.findMany({
+    where: {
+      planId,
+      deletedAt: null,
+      source: { not: "SIMULATION" },
+      status: { notIn: ["REJECTED", "NEEDS_WORK"] },
+    },
+    select: {
+      id: true,
+      annotations: {
+        orderBy: { version: "desc" },
+        take: 1,
+        select: { status: true },
+      },
+    },
+  });
+}
 function normalizeClasses(raw: string): string[] {
   if (!raw.trim()) return [...DEFAULT_CLASSES];
   let value: unknown;
@@ -252,6 +273,35 @@ export class TrainingsController {
     @Inject(Db) private db: Db,
     @Inject(DatasetsService) private datasets: DatasetsService,
   ) {}
+  @Get("readiness") async readiness(@Query("planId") planId: string) {
+    const plan = await this.db.inspectionPlan.findUniqueOrThrow({
+      where: { id: planId, deletedAt: null },
+    });
+    const candidates = await productTrainingSamples(this.db, plan.id);
+    const total = await this.db.sample.count({
+      where: {
+        planId: plan.id,
+        deletedAt: null,
+        source: { not: "SIMULATION" },
+      },
+    });
+    const annotated = candidates.filter(
+      (sample) => sample.annotations[0]?.status === "COMPLETE",
+    ).length;
+    return {
+      planId: plan.id,
+      total,
+      annotated,
+      pending: candidates.length - annotated,
+      excluded: total - candidates.length,
+      minimum: 2,
+      ready: annotated >= 2,
+      message:
+        annotated >= 2
+          ? `${annotated} 张已完成标注的图片可用于训练`
+          : `还需 ${2 - annotated} 张已完成标注的真实图片，当前 ${annotated} 张`,
+    };
+  }
   @Get() async list(@Query() query: unknown) {
     const { q, args } = listing(query, [
       "name",
@@ -305,15 +355,7 @@ export class TrainingsController {
         const plan = await tx.inspectionPlan.findUniqueOrThrow({
           where: { id: dto.planId, deletedAt: null },
         });
-        const samples = await tx.sample.findMany({
-          where: {
-            planId: plan.id,
-            deletedAt: null,
-            source: { not: "SIMULATION" },
-            status: { notIn: ["REJECTED", "NEEDS_WORK"] },
-          },
-          include: { annotations: { orderBy: { version: "desc" }, take: 1 } },
-        });
+        const samples = await productTrainingSamples(tx, plan.id);
         const ids = samples
           .filter((s) => s.annotations[0]?.status === "COMPLETE")
           .map((s) => s.id);

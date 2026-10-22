@@ -73,27 +73,27 @@ const state = computed(() => {
     return {
       key: "empty",
       label: "未选择设备",
-      detail: "在下方选择一台已连接的设备",
+      detail: "请选择设备",
     };
   if (device.value.connectionState !== "ONLINE")
     return {
       key: "offline",
       label: "设备离线",
-      detail: "请工程师在 Web 端连接设备后回到这里",
+      detail: "等待设备上线",
     };
   if (live.error)
     return { key: "error", label: "实时连接异常", detail: live.error };
   if (!live.ready)
     return {
       key: "connecting",
-      label: "正在连接实时画面",
-      detail: live.connecting ? "等待服务器响应…" : "连接已断开，正在重试…",
+      label: "连接中…",
+      detail: live.connecting ? "" : "正在重连",
     };
   if (!frame.value)
     return {
       key: "waiting",
       label: "等待第一帧",
-      detail: "设备已连接，画面到达后会立即显示",
+      detail: "",
     };
   if (!fresh.value)
     return {
@@ -164,13 +164,13 @@ function expand() {
       <view class="live-chip" :class="state.key"
         ><view class="dot" /><text>{{ state.label }}</text></view
       >
-      <text v-if="frame" class="hud-mono"
+      <text v-if="frame && !minimal" class="hud-mono"
         >{{ frame.width }} × {{ frame.height }} ·
         {{ held ? "回看" : `${live.fps.toFixed(1)} FPS` }}</text
       >
     </view>
 
-    <view v-if="state.key !== 'live'" class="state-panel">
+    <view v-if="state.key !== 'live' && !held" class="state-panel">
       <view v-if="state.key === 'connecting'" class="spinner" />
       <text class="state-title">{{ state.label }}</text>
       <text class="state-detail">{{ state.detail }}</text>
@@ -187,14 +187,14 @@ function expand() {
         >
       </view>
       <view class="hud-right">
-        <text v-if="frame" class="hud-mono">#{{ frame.frameId }}</text>
+        <text v-if="frame" class="hud-mono">图像帧 {{ frame.frameId }}</text>
         <text v-if="ageText()" class="hud-mono muted">{{ ageText() }}</text>
       </view>
     </view>
 
     <view v-if="!minimal && frame && detections !== null" class="verdict-chip">
       <text v-if="detections.length" class="warn"
-        >{{ detections.length }} 处候选 · 待复核</text
+        >{{ detections.length }} 个画面目标，不计件</text
       >
       <text v-else class="clear">本帧未检出</text>
     </view>

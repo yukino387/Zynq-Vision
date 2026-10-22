@@ -17,6 +17,7 @@
     "usingComponents": true,
     "modules": {
       "Camera": {},
+      "LivePusher": {},
       "Barcode": {}
     },
     "safearea": {
@@ -33,6 +34,7 @@
         "abiFilters": ["arm64-v8a", "armeabi-v7a", "x86"],
         "permissions": [
           "<uses-permission android:name=\"android.permission.CAMERA\"/>",
+          "<uses-permission android:name=\"android.permission.RECORD_AUDIO\"/>",
           "<uses-permission android:name=\"android.permission.INTERNET\"/>",
           "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>"
         ]

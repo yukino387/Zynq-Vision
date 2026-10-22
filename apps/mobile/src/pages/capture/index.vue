@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
 import { onShow, onHide } from "@dcloudio/uni-app";
+import { motionSummary, displayName } from "@vision/shared";
 import {
-  motionSummary,
-  chinese,
-  displayName,
-  statusTone,
-} from "@vision/shared";
-import { session, request, notify, uid, captureIdentity } from "../../state";
+  session,
+  request,
+  notify,
+  uid,
+  captureIdentity,
+  selectTask,
+} from "../../state";
 import { enqueue, syncQueue, queue } from "../../queue";
 import {
   live,
@@ -25,7 +27,7 @@ const stored = uni.getStorageSync("vision.captureMode") as Mode;
 const mode = ref<Mode>(
   stored === "BOARD" || stored === "MOBILE" || stored === "SYNC"
     ? stored
-    : "BOARD",
+    : "MOBILE",
 );
 const camera = ref<InstanceType<typeof CameraSurface> | null>(null),
   motion = ref<{
@@ -38,7 +40,7 @@ const camera = ref<InstanceType<typeof CameraSurface> | null>(null),
   busy = ref(false),
   error = ref(""),
   lastResult = ref(""),
-  lastInspection = ref<{ id: string; result: string } | null>(null),
+  lastSample = ref(""),
   visible = ref(false),
   showSettings = ref(false),
   lastShot = ref(""),
@@ -47,10 +49,9 @@ const camera = ref<InstanceType<typeof CameraSurface> | null>(null),
 const modes = [
   { key: "BOARD", label: "板端" },
   { key: "MOBILE", label: "手机" },
-  { key: "SYNC", label: "同步" },
+  { key: "SYNC", label: "双机" },
 ] as const;
-const device = computed(() => liveDevice.value),
-  detections = computed(() => live.frame?.detections ?? null);
+const device = computed(() => liveDevice.value);
 const modeLabel = computed(
   () => modes.find((item) => item.key === mode.value)?.label ?? "板端",
 );
@@ -74,34 +75,27 @@ const posture = computed(() => {
 const pending = computed(
   () => queue.items.filter((i) => i.status !== "SYNCED").length,
 );
-const verdict = computed(() => {
-  if (mode.value === "MOBILE") return null;
-  if (!live.frame) return { text: "等待设备画面", detail: "连接后自动显示" };
-  if (detections.value === null)
-    return { text: "仅图像", detail: "本帧没有推理输出" };
-  if (detections.value.length)
-    return {
-      text: "待复核",
-      detail: `${detections.value.length} 处候选目标`,
-      candidate: true,
-    };
-  return { text: "未检出缺陷", detail: "本帧没有候选目标" };
-});
 const captureBlocked = computed(() => {
-  if (busy.value) return "正在保存采样…";
+  if (busy.value) return "保存中…";
+  if (mode.value !== "BOARD" && !camera.value?.active)
+    return camera.value?.error || "等待相机就绪";
   if (mode.value === "MOBILE") return "";
-  if (!device.value) return "请先在任务与设备中选择设备";
-  if (device.value.connectionState !== "ONLINE")
-    return "设备离线；请工程师在 Web 端连接设备";
-  if (!frameUsable()) return "等待设备返回完整画面";
+  if (!device.value) return "请选择设备";
+  if (!device.value.capabilities.capture) return "设备不支持采样";
+  if (device.value.connectionState !== "ONLINE") return "设备离线";
+  if (!frameUsable()) return "等待实时画面";
   return "";
 });
-const shutterHint = computed(() => {
-  if (captureBlocked.value) return captureBlocked.value;
-  if (mode.value === "SYNC") return "手机与板端各拍一张，归入同一采样组";
-  if (mode.value === "BOARD") return "保存设备当前帧与检测记录";
-  return "保存原始图像到本机，联网后同步";
-});
+const shutterHint = computed(
+  () =>
+    captureBlocked.value || (mode.value === "SYNC" ? "双机留样" : "轻点拍摄"),
+);
+function releaseShot() {
+  // #ifdef H5
+  if (lastShot.value.startsWith("blob:")) URL.revokeObjectURL(lastShot.value);
+  // #endif
+  lastShot.value = "";
+}
 
 let accel = { x: 0, y: 0, z: 0 };
 const gyro = (v: { x: number; y: number; z: number }) => {
@@ -133,20 +127,25 @@ function openTasks() {
   showSettings.value = false;
   uni.switchTab({ url: "/pages/tasks/index" });
 }
+function openLastSample() {
+  if (lastSample.value)
+    uni.navigateTo({ url: `/pages/sample/index?id=${lastSample.value}` });
+  else openSync();
+}
 function openLive() {
   uni.navigateTo({ url: "/pages/live/index" });
 }
 
 watch(mode, (value) => {
   uni.setStorageSync("vision.captureMode", value);
-  lastInspection.value = null;
+  lastSample.value = "";
   lastResult.value = "";
   error.value = "";
   if (value !== "MOBILE") void refreshDevices();
 });
 
 onShow(async () => {
-  visible.value = true;
+  visible.value = !!session.token;
   uni.hideTabBar({ animation: false, fail: () => {} });
   if (!session.token) {
     uni.navigateTo({ url: "/pages/login/index" });
@@ -174,6 +173,7 @@ onShow(async () => {
 onHide(() => {
   visible.value = false;
   camera.value?.stop();
+  releaseShot();
   showSettings.value = false;
   uni.showTabBar({ animation: false, fail: () => {} });
   try {
@@ -193,7 +193,8 @@ function pickDevice() {
   }
   uni.showActionSheet({
     itemList: live.devices.map(
-      (d) => `${displayName(d.name)} · ${chinese(d.connectionState)}`,
+      (d) =>
+        `${displayName(d.name)} · ${d.connectionState === "ONLINE" ? "在线" : "离线"}`,
     ),
     success: (result) => {
       const next = live.devices[result.tapIndex];
@@ -205,25 +206,24 @@ async function board(captureSetClientId?: string) {
   if (!device.value?.capabilities.capture)
     throw new Error("设备不支持采样或尚未选择设备");
   const identity = captureIdentity("mobile-board");
-  return request<{ id: string; inspections: { id: string; result: string }[] }>(
-    "/samples/capture",
-    "POST",
-    {
-      deviceId: device.value.id,
-      clientId: identity.clientId,
-      idempotencyKey: uid(),
-      localSequence: identity.localSequence,
-      taskId: session.taskId || undefined,
-      captureSetClientId,
-    },
-  );
+  return request<{ id: string }>("/samples/capture", "POST", {
+    deviceId: device.value.id,
+    clientId: identity.clientId,
+    idempotencyKey: uid(),
+    localSequence: identity.localSequence,
+    taskId: session.taskId || undefined,
+    captureSetClientId,
+    planId: session.taskId
+      ? undefined
+      : device.value.terminal?.state?.product?.id,
+  });
 }
 async function capture() {
   if (busy.value || captureBlocked.value) return;
   busy.value = true;
   error.value = "";
   lastResult.value = "";
-  lastInspection.value = null;
+  lastSample.value = "";
   const capturing = mode.value;
   const captureSet = capturing === "SYNC" ? uid() : undefined;
   try {
@@ -234,6 +234,7 @@ async function capture() {
         flash.value = false;
       }, 140);
       const path = await camera.value.capture();
+      releaseShot();
       lastShot.value = path;
       const system = uni.getSystemInfoSync();
       await enqueue(
@@ -242,10 +243,13 @@ async function capture() {
           orientation: system.deviceOrientation ?? "UNKNOWN",
           deviceModel: system.model,
           appVersion: "0.2.0",
+          planId: session.taskId
+            ? undefined
+            : device.value?.terminal?.state?.product?.id,
           imu: imuAvailable.value ? motion.value : null,
           imuAvailable: imuAvailable.value,
           cameraMetadata: {
-            method: "system camera or browser getUserMedia",
+            method: "live camera snapshot",
             timestamp: new Date().toISOString(),
           },
           note: "",
@@ -253,14 +257,14 @@ async function capture() {
         },
         captureSet,
       );
-      lastResult.value = "手机原图已保存到本地队列";
+      lastResult.value = "手机样本已保存";
       if (session.online) void syncQueue();
     }
     if (capturing !== "MOBILE") {
       if (!frameUsable())
         throw new Error("设备画面不可用；等待实时画面恢复后再采样");
       const sample = await board(captureSet);
-      lastInspection.value = sample.inspections[0] ?? null;
+      lastSample.value = sample.id;
       lastResult.value += `${lastResult.value ? " · " : ""}板端采样已保存`;
     }
     try {
@@ -268,7 +272,10 @@ async function capture() {
     } catch {
       // 桌面浏览器没有震动。
     }
-    uni.showToast({ title: "采样已保存", icon: "success" });
+    uni.showToast({ title: "已保存", icon: "success" });
+    setTimeout(() => {
+      lastResult.value = "";
+    }, 2500);
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
     notify(e);
@@ -280,596 +287,286 @@ async function capture() {
 
 <template>
   <view class="capture-page">
-    <view class="camera-stage">
-      <view v-if="flash" class="flash-overlay" />
-      <LiveFeed
-        v-if="mode !== 'MOBILE'"
-        minimal
-        fit="aspectFit"
-        expandable
-        @expand="openLive"
-      />
-      <CameraSurface v-else-if="visible" ref="camera" />
-      <view v-if="mode === 'SYNC' && visible" class="pip">
-        <CameraSurface ref="camera" />
-        <text class="pip-label">手机</text>
-      </view>
-
-      <view v-if="mode === 'MOBILE'" class="guide-frame">
-        <view class="corner tl" /><view class="corner tr" />
-        <view class="corner bl" /><view class="corner br" />
-        <text>采样区域</text>
-      </view>
-
-      <view class="top-bar">
-        <view class="top-left">
-          <button class="close-btn" aria-label="返回首页" @click="goHome">
-            ×
-          </button>
-          <view class="top-copy">
-            <text class="top-title">现场采样</text>
-            <text class="top-sub"
-              >{{ modeLabel }} ·
-              {{
-                session.online && session.serverAvailable
-                  ? "已连接"
-                  : "离线模式"
-              }}</text
-            >
-          </view>
-        </view>
-        <view class="top-actions">
-          <button
-            v-if="mode === 'MOBILE' && camera?.torchSupported"
-            class="round-btn"
-            :class="{ on: camera?.torchOn }"
-            aria-label="闪光灯"
-            @click="camera?.toggleTorch()"
-          >
-            ☀
-          </button>
-          <button class="task-btn" @click="showSettings = true">
-            <text>{{ session.taskId ? "已关联任务" : "独立采样" }}</text>
-          </button>
-        </view>
-      </view>
-
-      <view class="source-chip">
-        <view
-          class="source-dot"
-          :class="
-            mode === 'MOBILE' ? 'live' : statusTone(device?.connectionState)
-          "
-        />
-        <text class="source-name">{{ sourceName }}</text>
-        <text
-          v-if="mode !== 'MOBILE' && device?.connectionState === 'ONLINE'"
-          class="source-meta mono"
-          >{{ live.fps.toFixed(1) }}fps</text
-        >
-      </view>
-
-      <view
-        v-if="mode !== 'MOBILE' && verdict"
-        class="verdict-overlay"
-        :class="{ candidate: verdict.candidate }"
+    <view class="top-bar">
+      <button class="round" aria-label="返回首页" @click="goHome">×</button>
+      <view class="heading"
+        ><text>采样</text><text class="muted-copy">{{ sourceName }}</text></view
       >
-        <text class="verdict-text">{{ verdict.text }}</text>
-        <text class="verdict-detail">{{ verdict.detail }}</text>
-      </view>
-
-      <view v-if="mode !== 'BOARD'" class="posture-chip" :class="posture.tone">
-        <view class="posture-dot" /><text>{{ posture.label }}</text>
-      </view>
-
-      <view
-        v-if="error || lastInspection || lastResult"
-        class="result-overlay"
-        :class="{ error: !!error }"
-        @click="
-          lastInspection &&
-          uni.navigateTo({
-            url: `/pages/detail/index?id=${lastInspection.id}`,
-          })
-        "
-      >
-        <view v-if="error" class="result-copy">
-          <text v-if="lastResult" class="result-kicker">{{ lastResult }}</text>
-          <text class="result-text">{{ error }}</text>
-        </view>
-        <template v-else-if="lastInspection">
-          <view class="result-copy">
-            <text class="result-kicker">板端采样已保存</text>
-            <text class="result-title"
-              >检测结果 {{ chinese(lastInspection.result) }}</text
-            >
-          </view>
-          <text class="result-link">查看 →</text>
-        </template>
-        <text v-else class="result-text">{{ lastResult }}</text>
-      </view>
+      <button class="task-btn" :disabled="busy" @click="showSettings = true">
+        {{ session.taskId ? "当前任务" : "任务 / 设备" }}
+      </button>
     </view>
-
+    <view class="source-row">
+      <text class="source-label"
+        >{{ modeLabel }} ·
+        {{
+          mode === "MOBILE"
+            ? camera?.active
+              ? "实时取景"
+              : "准备中"
+            : frameUsable()
+              ? "实时"
+              : "等待画面"
+        }}</text
+      >
+      <button
+        v-if="mode !== 'BOARD' && camera?.torchSupported"
+        class="light-btn"
+        @click="camera?.toggleTorch()"
+      >
+        {{ camera?.torchOn ? "关灯" : "补光" }}
+      </button>
+      <text v-else-if="mode !== 'BOARD' && imuAvailable" class="source-label">{{
+        posture.label
+      }}</text>
+    </view>
+    <view class="viewfinder">
+      <LiveFeed v-if="visible && mode !== 'MOBILE'" minimal fit="aspectFit" />
+      <CameraSurface
+        v-if="visible && !showSettings && mode === 'MOBILE'"
+        ref="camera"
+      />
+      <view v-if="flash" class="flash" />
+    </view>
+    <view v-if="mode === 'SYNC'" class="pip">
+      <CameraSurface v-if="visible && !showSettings" ref="camera" />
+    </view>
     <view class="camera-controls">
+      <view
+        class="feedback"
+        :class="{ error: !!error }"
+        @click="openLastSample"
+      >
+        <text>{{ error || lastResult }}</text
+        ><text v-if="lastSample && lastResult">查看 ›</text>
+      </view>
       <view class="mode-switch">
-        <text
+        <button
           v-for="m in modes"
           :key="m.key"
           :class="{ active: mode === m.key }"
+          :disabled="busy"
           @click="setMode(m.key)"
-          >{{ m.label }}</text
         >
+          {{ m.label }}
+        </button>
       </view>
       <view class="shutter-row">
-        <button class="side-slot" @click="openSync">
-          <image
-            v-if="lastShot"
-            :src="lastShot"
-            class="last-shot"
-            mode="aspectFill"
-          />
-          <template v-else>
-            <text class="side-num mono">{{ pending }}</text>
-            <text class="side-label">待同步</text>
-          </template>
+        <button class="side" aria-label="最近采样" @click="openLastSample">
+          <image v-if="lastShot" :src="lastShot" mode="aspectFill" />
+          <text v-else>{{ pending ? `${pending} 待上传` : "样本" }}</text>
         </button>
         <button
           class="shutter"
-          :disabled="busy || !!captureBlocked"
+          :disabled="!!captureBlocked"
           :loading="busy"
-          aria-label="采样快门"
+          aria-label="拍摄样本"
           @click="capture"
         >
           <view />
         </button>
         <button
-          class="side-slot"
-          @click="
-            mode === 'MOBILE' && camera?.active ? camera.flip() : openRecords()
-          "
+          class="side"
+          :disabled="busy"
+          :aria-label="mode === 'BOARD' ? '检测记录' : '翻转相机'"
+          @click="mode === 'BOARD' ? openRecords() : camera?.flip()"
         >
-          <text class="side-symbol">{{
-            mode === "MOBILE" && camera?.active ? "⇄" : "记录"
-          }}</text>
-          <text class="side-label">{{
-            mode === "MOBILE" && camera?.active ? "翻转" : "检测记录"
-          }}</text>
+          <text>{{ mode === "BOARD" ? "记录" : "⇄" }}</text>
         </button>
       </view>
       <text class="shutter-hint">{{ shutterHint }}</text>
     </view>
-
     <view
       v-if="showSettings"
       class="sheet-backdrop"
       @click="showSettings = false"
     />
     <view v-if="showSettings" class="settings-sheet">
-      <view class="sheet-head">
-        <text>任务与设备</text>
-        <text class="sheet-done" @click="showSettings = false">完成</text>
-      </view>
-      <view class="sheet-row" @click="pickDevice">
-        <text class="sheet-label">采样设备</text>
-        <text class="sheet-value">{{
-          mode === "MOBILE"
-            ? "手机相机"
-            : displayName(device?.name ?? "选择设备")
-        }}</text>
-      </view>
-      <button class="sheet-action" @click="openTasks">
-        {{ session.taskId ? "更换关联任务" : "选择采样任务" }} →
+      <view class="sheet-head"
+        ><text>任务与设备</text
+        ><button @click="showSettings = false">完成</button></view
+      >
+      <button class="sheet-row" @click="pickDevice">
+        <text>板端设备</text
+        ><text>{{ displayName(device?.name ?? "选择设备") }} ›</text>
       </button>
-      <text class="sheet-note">{{
-        session.taskId
-          ? "当前采样会归入已选任务"
-          : "未关联任务，样本将作为独立采样保存"
-      }}</text>
-      <view class="sheet-links">
-        <text @click="openSync">{{ pending }} 个待同步 →</text>
-        <text @click="openRecords">检测记录 →</text>
-        <text v-if="mode !== 'MOBILE'" @click="openLive">实时画面 →</text>
-      </view>
+      <button class="sheet-row" @click="openTasks">
+        <text>采样任务</text
+        ><text>{{ session.taskId ? "更换任务" : "独立采样" }} ›</text>
+      </button>
+      <button v-if="session.taskId" class="sheet-row" @click="selectTask('')">
+        取消关联任务
+      </button>
+      <button class="sheet-row" @click="openSync">
+        <text>本地队列</text><text>{{ pending }} 待上传 ›</text>
+      </button>
+      <button v-if="mode !== 'MOBILE'" class="sheet-row" @click="openLive">
+        设备工作台 ›
+      </button>
     </view>
   </view>
 </template>
 
 <style scoped>
 .capture-page {
-  position: relative;
   height: 100vh;
-  min-height: 100vh;
+  height: 100dvh;
+  position: relative;
   overflow: hidden;
   background: #102b36;
   color: #f0f8fa;
 }
-.camera-stage {
-  position: absolute;
-  inset: 0;
-  background: #102b36;
+.top-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: calc(12px + env(safe-area-inset-top)) 16px 8px;
+}
+.round {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  background: #ffffff12;
+  color: white;
+  font-size: 28px;
+}
+.heading {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  font-size: 17px;
+  font-weight: 600;
+}
+.muted-copy {
+  font-size: 11px;
+  font-weight: 400;
+  color: #aac6d0;
   overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
-.flash-overlay {
+.task-btn {
+  padding: 10px 12px;
+  background: #ffffff12;
+  color: white;
+  min-height: 44px;
+  font-size: 12px;
+}
+.source-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 20px;
+  min-height: 38px;
+}
+.source-label {
+  color: #aac6d0;
+  font-size: 12px;
+}
+.light-btn {
+  background: transparent;
+  color: #71ddc8;
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.viewfinder {
+  position: absolute;
+  top: calc(126px + env(safe-area-inset-top));
+  bottom: calc(252px + env(safe-area-inset-bottom));
+  left: 0;
+  right: 0;
+}
+.flash {
   position: absolute;
   inset: 0;
-  z-index: 30;
-  background: #ffffff;
+  background: #ffffff99;
   pointer-events: none;
-  animation: shutter-flash 140ms ease-out;
-}
-@keyframes shutter-flash {
-  from {
-    opacity: 0.95;
-  }
-  to {
-    opacity: 0;
-  }
-}
-.camera-stage :deep(.hud-top) {
-  display: none;
-}
-.camera-stage :deep(.live-feed) {
-  background: #102b36;
 }
 .pip {
   position: absolute;
-  right: 14px;
-  top: calc(122px + env(safe-area-inset-top));
-  width: 116px;
-  height: 116px;
-  border: 1px solid #ffffff66;
+  top: calc(130px + env(safe-area-inset-top));
+  right: 16px;
+  width: 100px;
+  height: 130px;
+  border-radius: 12px;
   overflow: hidden;
-  background: #102b36;
-  z-index: 4;
-}
-.pip-label {
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  background: #102b36cc;
-  color: #d9e9ed;
-  font-size: 11px;
-  padding: 2px 5px;
-}
-.guide-frame {
-  position: absolute;
-  left: 8%;
-  top: 16%;
-  width: 84%;
-  aspect-ratio: 1 / 1;
-  border: 1px solid #e5ebd640;
-  pointer-events: none;
-  z-index: 2;
-}
-.guide-frame > text {
-  position: absolute;
-  left: 9px;
-  top: 9px;
-  font:
-    9px Consolas,
-    monospace;
-  letter-spacing: 1px;
-  color: #dfe7d2;
-  background: #17343eb0;
-  padding: 3px 5px;
-}
-.corner {
-  position: absolute;
-  width: 22px;
-  height: 22px;
-  border: 2px solid #f0f8facc;
-}
-.corner.tl {
-  left: -1px;
-  top: -1px;
-  border-right: 0;
-  border-bottom: 0;
-}
-.corner.tr {
-  right: -1px;
-  top: -1px;
-  border-left: 0;
-  border-bottom: 0;
-}
-.corner.bl {
-  left: -1px;
-  bottom: -1px;
-  border-right: 0;
-  border-top: 0;
-}
-.corner.br {
-  right: -1px;
-  bottom: -1px;
-  border-left: 0;
-  border-top: 0;
-}
-.top-bar {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  z-index: 6;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: calc(12px + env(safe-area-inset-top)) 16px 34px;
-  background: linear-gradient(#000000b8 0%, #00000066 55%, transparent 100%);
-  pointer-events: none;
-}
-.top-left,
-.top-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  pointer-events: auto;
-}
-.top-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.top-title {
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.3px;
-}
-.top-sub {
-  font-size: 11px;
-  color: #b8c4ad;
-}
-.close-btn,
-.round-btn {
-  width: 38px;
-  height: 38px;
-  min-height: 38px;
-  padding: 0;
-  border-radius: 50%;
-  border: 1px solid #ffffff38;
-  background: #102b3666;
-  color: #f0f8fa;
-  font-size: 22px;
-  line-height: 36px;
-  text-align: center;
-}
-.round-btn {
-  font-size: 16px;
-}
-.round-btn.on {
-  background: #f28b61;
-  border-color: #f28b61;
-  color: #17343e;
-}
-.task-btn {
-  min-height: 38px;
-  padding: 0 14px;
-  border-radius: 19px;
-  border: 1px solid #ffffff38;
-  background: #102b3666;
-  color: #f0f8fa;
-  font-size: 11px;
-}
-.source-chip {
-  position: absolute;
-  left: 16px;
-  top: calc(76px + env(safe-area-inset-top));
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  max-width: calc(100% - 120px);
-  padding: 5px 8px;
-  background: #102b36b8;
-  border: 1px solid #ffffff24;
-  font-size: 11px;
-  color: #c9dfe5;
-}
-.source-dot {
-  width: 6px;
-  height: 6px;
-  background: #8d978a;
-  flex: none;
-}
-.source-dot.live,
-.source-dot.ok {
-  background: #71ddc8;
-}
-.source-dot.warn {
-  background: #e0b764;
-}
-.source-dot.crit {
-  background: #d9765c;
-}
-.source-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.source-meta {
-  color: #8db0bd;
-  white-space: nowrap;
-}
-.verdict-overlay {
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  bottom: 226px;
-  z-index: 4;
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 8px 11px;
-  background: #102b36c4;
-  border-left: 3px solid #71ddc8;
-  backdrop-filter: blur(6px);
-}
-.verdict-overlay.candidate {
-  border-left-color: #e0b764;
-  background: #3b3326d0;
-}
-.verdict-text {
-  font-size: 14px;
-  font-weight: 600;
-}
-.verdict-overlay.candidate .verdict-text {
-  color: #e8c27c;
-}
-.verdict-detail {
-  font-size: 11px;
-  color: #aac6d0;
-}
-.posture-chip {
-  position: absolute;
-  right: 16px;
-  top: calc(76px + env(safe-area-inset-top));
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 8px;
-  background: #102b36b8;
-  border: 1px solid #ffffff24;
-  font-size: 11px;
-  color: #c9dfe5;
-}
-.posture-dot {
-  width: 6px;
-  height: 6px;
-  background: #a7b596;
-}
-.posture-chip.stable .posture-dot {
-  background: #71ddc8;
-}
-.posture-chip.motion .posture-dot,
-.posture-chip.tilt .posture-dot {
-  background: #efb761;
-}
-.result-overlay {
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  bottom: 286px;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px;
-  background: #eef2e8e8;
-  color: #17343e;
-  border-left: 3px solid #8fb47d;
-  backdrop-filter: blur(6px);
-}
-.result-overlay.error {
-  background: #f3e1dae8;
-  border-left-color: #a5321a;
-}
-.result-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.result-kicker {
-  font-size: 11px;
-  color: #637d87;
-}
-.result-title {
-  font-size: 12px;
-}
-.result-text {
-  font-size: 11px;
-  line-height: 1.6;
-}
-.result-link {
-  font-size: 11px;
-  color: #087f82;
-  white-space: nowrap;
+  border: 1px solid #ffffff44;
 }
 .camera-controls {
   position: absolute;
+  bottom: 0;
   left: 0;
   right: 0;
-  bottom: 0;
-  z-index: 7;
-  padding: 48px 20px calc(16px + env(safe-area-inset-bottom));
-  background: linear-gradient(
-    transparent 0%,
-    #0b2029b8 30%,
-    #0b2029f2 65%,
-    #0b2029 100%
-  );
+  padding: 0 24px calc(18px + env(safe-area-inset-bottom));
+  background: #102b36;
+}
+.feedback {
+  min-height: 38px;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  align-items: center;
+  color: #71ddc8;
+  font-size: 12px;
+}
+.feedback.error {
+  color: #ffb5a5;
 }
 .mode-switch {
   display: flex;
   justify-content: center;
-  gap: 2px;
-  margin-bottom: 16px;
+  gap: 6px;
+  margin: 8px 0 20px;
 }
-.mode-switch text {
-  min-width: 58px;
-  min-height: 30px;
-  line-height: 30px;
-  padding: 0 12px;
-  text-align: center;
-  font-size: 11px;
+.mode-switch button {
+  padding: 8px 18px;
+  min-height: 38px;
+  border-radius: 20px;
+  background: transparent;
   color: #aac6d0;
-  border: 1px solid #ffffff2e;
-  background: #102b3666;
+  font-size: 13px;
 }
-.mode-switch text.active {
-  background: #f0f8fa;
-  color: #17343e;
-  border-color: #f0f8fa;
+.mode-switch button.active {
+  background: #ffffff1c;
+  color: #71ddc8;
   font-weight: 600;
 }
 .shutter-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: space-around;
+  gap: 18px;
 }
-.side-slot {
-  width: 66px;
-  height: 66px;
-  min-height: 66px;
+.side {
+  width: 60px;
+  height: 60px;
+  min-height: 60px;
   padding: 0;
-  border: 1px solid #ffffff38;
-  border-radius: 12px;
-  background: #102b3666;
-  color: #d9e9ed;
+  background: #ffffff0d;
+  color: white;
+  border-radius: 16px;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  font-size: 13px;
   overflow: hidden;
 }
-.side-num {
-  font-size: 19px;
-  line-height: 1.1;
-}
-.side-label {
-  font-size: 11px;
-  color: #aac6d0;
-}
-.side-symbol {
-  font-size: 16px;
-  line-height: 1.2;
-}
-.last-shot {
-  width: 100%;
-  height: 100%;
-  display: block;
+.side image {
+  width: 60px;
+  height: 60px;
 }
 .shutter {
-  width: 84px;
-  height: 84px;
-  min-height: 84px;
+  width: 80px;
+  height: 80px;
+  min-height: 80px;
   border-radius: 50%;
-  border: 2px solid #f28b61;
+  border: 3px solid white;
+  padding: 5px;
   background: transparent;
-  padding: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -878,21 +575,18 @@ async function capture() {
   width: 100%;
   height: 100%;
   border-radius: 50%;
-  background: #f28b61;
+  background: white;
 }
 .shutter:active:not([disabled]) view {
-  background: #076b6e;
-  transform: scale(0.96);
-}
-.shutter[disabled] {
-  opacity: 0.4;
+  transform: scale(0.9);
+  background: #71ddc8;
 }
 .shutter-hint {
   display: block;
-  margin-top: 12px;
   text-align: center;
-  font-size: 11px;
   color: #aac6d0;
+  margin-top: 16px;
+  font-size: 12px;
 }
 .sheet-backdrop {
   position: absolute;
@@ -902,170 +596,54 @@ async function capture() {
 }
 .settings-sheet {
   position: absolute;
+  bottom: 0;
   left: 0;
   right: 0;
-  bottom: 0;
   z-index: 21;
-  padding: 18px 20px calc(20px + env(safe-area-inset-bottom));
-  background: #ffffff;
-  color: #17343e;
-  border-radius: 14px 14px 0 0;
-}
-.sheet-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #dce6e9;
-  font-size: 15px;
-  font-weight: 600;
-}
-.sheet-done {
-  font-size: 11px;
-  color: #087f82;
-  font-weight: 400;
-}
-.sheet-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 0;
-  border-bottom: 1px solid #e6edef;
-}
-.sheet-label {
-  font-size: 11px;
-  color: #637d87;
-}
-.sheet-value {
-  font-size: 12px;
-  text-align: right;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.sheet-action {
-  width: 100%;
-  margin-top: 14px;
-  border: 1px solid #dce6e9;
-  background: #f7fafb;
-  color: #365661;
-  font-size: 12px;
-  min-height: 46px;
-  text-align: left;
-  padding: 0 13px;
-}
-.sheet-note {
-  display: block;
-  margin-top: 9px;
-  font-size: 11px;
-  color: #637d87;
-  line-height: 1.6;
-}
-.sheet-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 16px;
-  margin-top: 16px;
-  font-size: 11px;
-  color: #087f82;
-}
-
-.capture-page {
-  height: 100vh;
-  height: 100dvh;
-  min-height: 0;
-}
-.task-btn {
-  min-height: 44px;
-  border-radius: 22px;
-  font-size: 12px;
-}
-.close-btn,
-.round-btn {
-  min-height: 44px;
-  min-width: 44px;
-}
-.source-chip,
-.posture-chip {
-  border-radius: 20px;
-  padding: 7px 10px;
-}
-.source-chip {
-  max-width: calc(100% - 148px);
-}
-.verdict-overlay {
-  border-radius: 12px;
-  bottom: calc(246px + env(safe-area-inset-bottom));
-}
-.result-overlay {
-  border-radius: 12px;
-  bottom: calc(306px + env(safe-area-inset-bottom));
-}
-.result-overlay.error {
-  color: #ab443f;
-}
-.mode-switch {
-  gap: 6px;
-}
-.mode-switch text {
-  border-radius: 22px;
-  min-height: 44px;
-  line-height: 42px;
-  min-width: 70px;
-  font-size: 13px;
-}
-.side-slot {
-  border-radius: 18px;
-}
-.shutter {
-  box-shadow: 0 0 0 6px #f28b6110;
-}
-.shutter[disabled] {
-  background: transparent;
-}
-.shutter-hint {
-  font-size: 12px;
-  min-height: 20px;
-}
-.settings-sheet {
+  padding: 12px 20px calc(24px + env(safe-area-inset-bottom));
   border-radius: 24px 24px 0 0;
-  max-height: 82%;
-  overflow-y: auto;
+  background: white;
+  color: #17343e;
+}
+.sheet-head,
+.sheet-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 .sheet-head {
-  padding-bottom: 16px;
+  font-size: 17px;
+  font-weight: 650;
+  padding-bottom: 10px;
 }
-.sheet-done {
-  padding: 8px 0 8px 18px;
-  font-size: 13px;
+.sheet-head button {
+  background: transparent;
+  color: #087f82;
 }
 .sheet-row {
-  padding: 18px 0;
-}
-.sheet-label,
-.sheet-note {
-  font-size: 12px;
-}
-.sheet-value,
-.sheet-action {
+  width: 100%;
+  padding: 16px 0;
+  background: white;
+  border-top: 1px solid #edf1f3;
+  border-radius: 0;
   font-size: 14px;
+  text-align: left;
 }
-.sheet-links {
-  font-size: 13px;
-  gap: 10px 20px;
-}
-.sheet-links > text {
-  padding: 8px 0;
-}
-@media (max-height: 680px) {
-  .guide-frame {
-    top: 21%;
-    width: 66%;
-    left: 17%;
+@media (max-height: 640px) {
+  .viewfinder {
+    top: calc(110px + env(safe-area-inset-top));
+    bottom: calc(220px + env(safe-area-inset-bottom));
   }
-  .camera-controls {
-    padding-top: 30px;
+  .mode-switch {
+    margin: 0 0 10px;
+  }
+  .shutter {
+    width: 68px;
+    height: 68px;
+    min-height: 68px;
+  }
+  .feedback {
+    min-height: 30px;
   }
 }
 </style>

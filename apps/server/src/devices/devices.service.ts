@@ -202,7 +202,7 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
             lastSeenAt: terminal.lastSeenAt,
             firmwareVersion: null,
             protocolVersion: null,
-            error: state?.error || state?.syncError || null,
+            error: state?.error || null,
           };
         }
         const t = this.transport(d.id),

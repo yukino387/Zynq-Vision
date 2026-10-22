@@ -100,7 +100,6 @@ async function raw() {
     ><span v-if="inspection.source === 'SIMULATION'" class="tag simulated"
       >模拟数据</span
     ><template v-if="auth.engineer"
-      ><span class="mono"># {{ inspection.id.slice(-10) }}</span
       ><button
         class="right"
         @click="raw"
@@ -128,7 +127,7 @@ async function raw() {
           params: { tab: 'annotation' },
           query: { sampleId: inspection.sampleId },
         }"
-        >用本件证据继续标注与训练 →</RouterLink
+        >用本件证据继续标注与训练</RouterLink
       >
       <div v-if="decision?.findings.length" class="table-wrap">
         <table aria-label="逐项判定依据">
@@ -167,6 +166,8 @@ async function raw() {
       <details v-if="auth.engineer" class="section-space">
         <summary>技术信息</summary>
         <dl class="key-values">
+          <dt>检测记录编号</dt>
+          <dd>{{ inspection.id }}</dd>
           <dt>帧编号</dt>
           <dd>{{ inspection.frameId ?? "未上报" }}</dd>
           <dt>模型版本</dt>
@@ -184,7 +185,7 @@ async function raw() {
             }}
           </dd>
           <dt>设备编号</dt>
-          <dd>{{ inspection.deviceId ?? "—" }}</dd>
+          <dd>{{ inspection.deviceId ?? "未关联设备" }}</dd>
           <dt>记录时间</dt>
           <dd>{{ new Date(inspection.createdAt).toLocaleString() }}</dd>
         </dl>
@@ -209,16 +210,19 @@ async function raw() {
       </template>
       <template v-else>
         <label
-          >最终处理结论<select v-model="finalResult" aria-label="最终处理结论">
+          >最终处理结论<UiSelect
+            v-model="finalResult"
+            aria-label="最终处理结论"
+          >
             <option value="">仅追加意见，保持原处理状态</option>
             <option value="PASS">符合要求</option>
             <option value="FAIL">不符合要求</option>
             <option value="REVIEW">仍待复核</option>
-          </select></label
+          </UiSelect></label
         >
         <div class="form-grid">
           <label
-            >审核结论<select v-model="verdict">
+            >审核结论<UiSelect v-model="verdict">
               <option value="" disabled>请选择</option>
               <option
                 v-for="[value, label] in verdicts"
@@ -227,7 +231,7 @@ async function raw() {
               >
                 {{ label }}
               </option>
-            </select></label
+            </UiSelect></label
           ><label v-if="auth.engineer" class="check-row"
             ><input type="checkbox" v-model="hard" />加入困难样本</label
           >

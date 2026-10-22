@@ -4,7 +4,10 @@ import type { Role, DeviceSnapshot, Page, Task } from "@vision/contracts";
 export function uid() {
   return (
     globalThis.crypto?.randomUUID?.() ??
-    `mobile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
+    "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (character) => {
+      const value = Math.floor(Math.random() * 16);
+      return (character === "x" ? value : (value & 3) | 8).toString(16);
+    })
   );
 }
 /** 板端采样身份：同一台手机固定 clientId，localSequence 递增。
@@ -88,6 +91,7 @@ export async function request<T>(
   path: string,
   method: "GET" | "POST" = "GET",
   data?: unknown,
+  timeout = 12000,
 ): Promise<T> {
   let received = false;
   try {
@@ -99,7 +103,7 @@ export async function request<T>(
         authorization: `Bearer ${session.token}`,
         "content-type": "application/json",
       },
-      timeout: 12000,
+      timeout,
     });
     received = true;
     session.serverAvailable = response.statusCode < 500;

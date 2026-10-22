@@ -4,10 +4,12 @@ import { createRouter, createWebHashHistory } from "vue-router";
 import App from "./App.vue";
 import { routes, canAccess, landingFor } from "./navigation";
 import { useAuthStore } from "./stores/auth";
+import * as UiComponents from "./components/ui";
 import "@vision/design-tokens/tokens.css";
 import "./style.css";
 import "./workspace.css";
 import "./instrument.css";
+
 const pinia = createPinia();
 const router = createRouter({
   history: createWebHashHistory(),
@@ -29,4 +31,15 @@ router.beforeEach(async (to) => {
   }
   return true;
 });
-createApp(App).use(pinia).use(router).mount("#app");
+
+const app = createApp(App);
+app.use(pinia).use(router);
+
+// 注册设计好的 UI 组件套件
+for (const [name, component] of Object.entries(UiComponents)) {
+  if (name.startsWith("Ui")) {
+    app.component(name, component as any);
+  }
+}
+
+app.mount("#app");

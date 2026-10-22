@@ -16,6 +16,9 @@ import AsyncState from "../components/AsyncState.vue";
 import SortableTh from "../components/SortableTh.vue";
 import Pager from "../components/Pager.vue";
 import Drawer from "../components/Drawer.vue";
+import ProductApplication from "../components/ProductApplication.vue";
+import { useProductStore } from "../stores/product";
+const workflow = useProductStore();
 
 const canRollback = (id: unknown) =>
   devices.devices.some((d) => d.id === id && d.capabilities.modelUpdate);
@@ -30,6 +33,25 @@ const route = useRoute(),
   notices = useNotificationStore();
 const tab = computed(() =>
   String(route.params.tab || route.meta.defaultTab || "registry"),
+);
+const filterStatuses = computed(
+  () =>
+    ({
+      registry: ["CANDIDATE", "APPROVED"],
+      training: ["QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"],
+      deployments: [
+        "DOWNLOADING",
+        "VERIFYING",
+        "VERIFIED",
+        "ACTIVATING",
+        "SELF_TEST",
+        "ACTIVE",
+        "SUPERSEDED",
+        "FAILED",
+        "ROLLED_BACK",
+      ],
+      benchmarks: ["QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"],
+    })[tab.value] ?? [],
 );
 const endpoint = computed(
     () =>
@@ -67,6 +89,47 @@ const trainingOptions = ref<TrainingOptions>({
   amp: true,
   workers: 4,
 });
+type Readiness = {
+  planId: string;
+  total: number;
+  annotated: number;
+  pending: number;
+  excluded: number;
+  minimum: number;
+  ready: boolean;
+  message: string;
+};
+const readiness = ref<Readiness | null>(null),
+  readinessError = ref("");
+watch(
+  [() => tab.value, () => workflow.id],
+  () => {
+    if (tab.value === "training") productId.value = workflow.id;
+  },
+  { immediate: true },
+);
+watch(
+  [productId, () => tab.value],
+  async ([id, currentTab]) => {
+    readiness.value = null;
+    readinessError.value = "";
+    if (currentTab !== "training" || !id) return;
+    workflow.select(id);
+    if (route.query.planId !== id)
+      void router.replace({ query: { ...route.query, planId: id } });
+    try {
+      const result = await api<Readiness>(
+        `/trainings/readiness?planId=${encodeURIComponent(id)}`,
+      );
+      if (productId.value === id && tab.value === "training")
+        readiness.value = result;
+    } catch (e) {
+      if (productId.value === id)
+        readinessError.value = e instanceof Error ? e.message : String(e);
+    }
+  },
+  { immediate: true },
+);
 const approvalNote = ref("");
 watch(
   () => detail.value?.id,
@@ -97,7 +160,15 @@ const chosenDataset = computed(() =>
 );
 const trainableDataset = (dataset: Dataset) => dataset._count.items >= 2;
 const trainingBlocker = computed(() => {
-  if (tab.value === "training") return productId.value ? "" : "请选择训练产品";
+  if (tab.value === "training")
+    return !productId.value
+      ? "先在上方选择准备训练的产品"
+      : readinessError.value ||
+          (!readiness.value
+            ? "正在统计当前产品的训练图片…"
+            : readiness.value.ready
+              ? ""
+              : readiness.value.message);
   if (productId.value) return "";
   const dataset = chosenDataset.value;
   if (!dataset) return "还没有真实数据集。先选择已标注图片并加入数据集。";
@@ -148,7 +219,7 @@ const detailView = computed(() => {
     ...row,
     error: tab.value === "training" ? trainingError(row.error) : row.error,
     stage: stageText(row),
-    progress: row.progress === undefined ? "—" : `${row.progress}%`,
+    progress: row.progress == null ? "进度未上报" : `${row.progress}%`,
   };
 });
 const detailFields = computed(() =>
@@ -157,7 +228,11 @@ const detailFields = computed(() =>
     : ["name", "stage", "progress", "error"],
 );
 const text = (r: Named, k: string) =>
-  typeof r[k] === "object" ? JSON.stringify(r[k]) : String(r[k] ?? "—");
+  r[k] == null
+    ? ""
+    : typeof r[k] === "object"
+      ? JSON.stringify(r[k])
+      : String(r[k]);
 const trainingSummary = (row: Named) => {
   const options = row.options as Partial<TrainingOptions> | undefined;
   if (!options) return "";
@@ -178,10 +253,11 @@ async function openForm() {
     if (tab.value === "training") {
       products.value = (
         await api<{ items: InspectionPlan[] }>("/plans?pageSize=100")
-      ).items;
+      ).items.filter((plan) => Array.isArray(plan.rules?.classes));
       productId.value = String(
         route.query.planId ??
-          (products.value.length === 1 ? products.value[0]!.id : ""),
+          (workflow.id ||
+            (products.value.length === 1 ? products.value[0]!.id : "")),
       );
     }
     if (tab.value !== "deployments" && tab.value !== "training")
@@ -321,7 +397,8 @@ watch(
     form.value = false;
     detail.value = null;
     try {
-      if (route.query.create === "1") await openForm();
+      if (route.query.create === "1" && tab.value !== "deployments")
+        await openForm();
       if (tab.value === "registry" && typeof route.query.modelId === "string")
         detail.value = await api<Named>(`/models/${route.query.modelId}`);
     } catch (error) {
@@ -346,7 +423,7 @@ watch(
             : tab === "registry"
               ? "查看模型效果、下载模型包，并由管理员批准发布。"
               : tab === "deployments"
-                ? "选择模型和设备后下发，设备确认生效后即可回到现场工作台检测。"
+                ? "选择要检测的产品和设备。开始后，实时画面与计件结果会显示在现场工作台。"
                 : "评估候选模型，确认效果后再发布到设备。"
         }}
       </p>
@@ -354,7 +431,12 @@ watch(
     <div class="heading-actions">
       <button v-if="tab === 'registry'" @click="importing = true">
         导入模型制品</button
-      ><button v-else class="primary" @click="openForm">
+      ><button
+        v-else-if="tab !== 'deployments'"
+        class="primary"
+        :disabled="tab === 'training' && !!trainingBlocker"
+        @click="openForm"
+      >
         {{
           tab === "training"
             ? "创建训练"
@@ -365,14 +447,33 @@ watch(
       </button>
     </div>
   </div>
+  <ProductApplication v-if="tab === 'deployments'" />
   <section v-if="tab === 'training'" class="lab-banner experiment-banner">
     <div>
-      <span class="workspace-index">06 / 实验工作区</span>
-      <h2>训练实验</h2>
+      <span class="workspace-index"
+        >当前产品 · {{ workflow.current?.rules.product || "尚未选择" }}</span
+      >
+      <h2>
+        {{ readiness?.ready ? "图片已就绪，可以创建训练" : "先准备训练图片" }}
+      </h2>
       <p class="banner-note">
-        完成图片标注后选择产品训练；系统自动固定图片与标注版本，完成后生成模型包。
-        <RouterLink to="/data/annotation">去标注</RouterLink> ·
-        <RouterLink to="/data/datasets">查看训练快照</RouterLink>
+        {{ trainingBlocker || readiness?.message }}
+        <RouterLink
+          :to="{
+            name: 'data',
+            params: { tab: 'annotation' },
+            query: { planId: productId || undefined },
+          }"
+          >为此产品补充标注</RouterLink
+        >
+        <span
+          >训练使用已完成标注、未弃用的真实图片；提交时自动固定本次图片版本。</span
+        >
+      </p>
+      <p v-if="readiness">
+        真实图片 {{ readiness.total }} 张 · 可训练 {{ readiness.annotated }} 张
+        · 待标注 {{ readiness.pending }} 张 · 已弃用/待补充
+        {{ readiness.excluded }} 张
       </p>
     </div>
     <div class="experiment-register">
@@ -389,39 +490,8 @@ watch(
       ><small>本页任务</small>
     </div>
   </section>
-  <section v-else-if="tab === 'deployments'" class="deployment-flow">
-    <div
-      v-for="(step, index) in [
-        { label: '待执行', states: ['APPROVED'] },
-        {
-          label: '正在部署',
-          states: [
-            'DOWNLOADING',
-            'VERIFYING',
-            'VERIFIED',
-            'ACTIVATING',
-            'SELF_TEST',
-            'ROLLBACK',
-          ],
-        },
-        { label: '已生效', states: ['ACTIVE', 'SUPERSEDED'] },
-        { label: '需处理', states: ['FAILED', 'ROLLED_BACK'] },
-      ]"
-      :key="step.label"
-    >
-      <small class="mono">0{{ index + 1 }}</small
-      ><span>{{ step.label }}</span
-      ><b class="mono">{{
-        list.items.value.filter((r) =>
-          step.states.some((state) => state === r.status),
-        ).length
-      }}</b>
-    </div>
-    <small class="flow-caption">本页部署状态</small>
-  </section>
   <section v-else-if="tab === 'benchmarks'" class="benchmark-scope">
     <div>
-      <span class="workspace-index">07 / 性能实验室</span>
       <h2>性能对照</h2>
     </div>
     <div class="benchmark-scale">
@@ -441,361 +511,369 @@ watch(
           :value="metricFps(r) ?? 0"
           :aria-label="`${displayName(r.name)} 帧率`"
         /><span v-else class="muted">未上报</span
-        ><b class="mono">{{ metricFps(r)?.toFixed(2) ?? "—" }}</b>
+        ><b class="mono">{{ metricFps(r)?.toFixed(2) ?? "未测量" }}</b>
       </div>
       <small v-if="!list.items.value.length" class="muted"
         >评估完成后显示实际指标</small
       >
     </div>
   </section>
-  <form class="toolbar" @submit.prevent="list.filter">
-    <input v-model="list.search.value" placeholder="搜索模型或任务…" /><select
-      v-model="list.status.value"
-    >
-      <option value="">全部状态</option>
-      <option
-        v-for="s in [
-          'CANDIDATE',
-          'APPROVED',
-          'QUEUED',
-          'RUNNING',
-          'COMPLETED',
-          'FAILED',
-          'ACTIVE',
-          'ROLLED_BACK',
-        ]"
-        :key="s"
-        :value="s"
+  <component
+    :is="tab === 'deployments' ? 'details' : 'div'"
+    :class="{ 'model-history': tab === 'deployments' }"
+  >
+    <summary v-if="tab === 'deployments'">
+      模型更新记录 · {{ list.total.value }} 条
+    </summary>
+    <p v-if="tab === 'deployments'" class="note">
+      这里只记录模型更新。生产批次和检测结果请在侧栏对应页面查看。
+    </p>
+    <form class="toolbar" @submit.prevent="list.filter">
+      <input
+        v-model="list.search.value"
+        placeholder="搜索模型或任务…"
+      /><UiSelect v-model="list.status.value">
+        <option value="">全部状态</option>
+        <option v-for="s in filterStatuses" :key="s" :value="s">
+          {{ chinese(s) }}
+        </option></UiSelect
+      ><button
+        :class="{ busy: list.loading.value }"
+        :disabled="list.loading.value"
       >
-        {{ chinese(s) }}
-      </option></select
-    ><button
-      :class="{ busy: list.loading.value }"
-      :disabled="list.loading.value"
-    >
-      筛选</button
-    ><button
-      type="button"
-      :class="{ busy: list.loading.value }"
-      :disabled="list.loading.value"
-      @click="list.load"
-    >
-      刷新</button
-    ><template v-if="['training', 'deployments'].includes(tab)"
-      ><select
-        v-model="list.sort.value"
-        aria-label="排序字段"
-        @change="list.filter"
+        筛选</button
+      ><button
+        type="button"
+        :class="{ busy: list.loading.value }"
+        :disabled="list.loading.value"
+        @click="list.load"
       >
-        <option value="createdAt">创建时间</option>
-        <option value="name">名称</option></select
-      ><select
-        v-model="list.order.value"
-        aria-label="排序方向"
-        @change="list.filter"
+        刷新</button
+      ><template v-if="['training', 'deployments'].includes(tab)"
+        ><UiSelect
+          v-model="list.sort.value"
+          aria-label="排序字段"
+          @change="list.filter"
+        >
+          <option value="createdAt">创建时间</option>
+          <option value="name">名称</option></UiSelect
+        ><UiSelect
+          v-model="list.order.value"
+          aria-label="排序方向"
+          @change="list.filter"
+        >
+          <option value="desc">降序</option>
+          <option value="asc">升序</option>
+        </UiSelect></template
+      ><span class="right inline-count">{{ list.total.value }} 条记录</span>
+    </form>
+    <AsyncState
+      :loading="list.loading.value"
+      :error="list.error.value"
+      :empty="!list.items.value.length"
+      :hint="
+        tab === 'training'
+          ? '还没有训练任务。为产品准备至少两张完成标注的图片，即可创建训练。'
+          : tab === 'deployments'
+            ? '还没有应用记录。在上方选择产品、兼容模型与设备后应用。'
+            : '这里还是空的。训练完成后可在模型仓库查看并下载模型。'
+      "
+      @retry="list.load"
+      ><details
+        v-if="tab === 'training'"
+        class="experiment-log"
+        aria-label="训练实验记录"
+        :open="
+          list.items.value.some((row) =>
+            ['QUEUED', 'RUNNING'].includes(row.status ?? ''),
+          )
+        "
       >
-        <option value="desc">降序</option>
-        <option value="asc">升序</option>
-      </select></template
-    ><span class="right inline-count">{{ list.total.value }} 条记录</span>
-  </form>
-  <AsyncState
-    :loading="list.loading.value"
-    :error="list.error.value"
-    :empty="!list.items.value.length"
-    :hint="
-      tab === 'training'
-        ? '还没有训练任务。先在数据管理里冻结一个数据集，再回到这里发起训练。'
-        : tab === 'deployments'
-          ? '还没有部署记录。管理员批准模型后，用「创建部署」下发到设备。'
-          : '这里还是空的。训练完成后可在模型仓库查看并下载模型。'
-    "
-    @retry="list.load"
-    ><section
-      v-if="tab === 'training'"
-      class="experiment-log"
-      aria-label="训练实验记录"
-    >
-      <article
-        v-for="(r, index) in list.items.value"
-        :key="r.id"
-        class="experiment-entry"
-      >
-        <div class="experiment-time">
-          <span class="mono">{{
-            String(
-              (list.page.value - 1) * list.pageSize.value + index + 1,
-            ).padStart(3, "0")
-          }}</span
-          ><time>{{ new Date(r.createdAt).toLocaleDateString() }}</time
-          ><small class="mono">{{
-            new Date(r.createdAt).toLocaleTimeString()
-          }}</small>
-        </div>
-        <div class="experiment-body">
-          <div class="experiment-entry-head">
-            <h3>{{ displayName(r.name) }}</h3>
-            <Status :value="r.status" />
+        <summary>
+          训练任务记录 ·
+          {{ list.total.value }} 条（展开查看历史成功、失败及日志）
+        </summary>
+        <article
+          v-for="r in list.items.value"
+          :key="r.id"
+          class="experiment-entry"
+        >
+          <div class="experiment-time">
+            <time>{{ new Date(r.createdAt).toLocaleDateString() }}</time
+            ><small class="mono">{{
+              new Date(r.createdAt).toLocaleTimeString()
+            }}</small>
           </div>
-          <div class="experiment-source">
-            <span
-              class="tag"
-              :class="{ simulated: r.source === 'SIMULATION' }"
-              >{{ r.options ? "本地训练" : chinese(r.source) }}</span
-            ><span class="mono">{{ r.id.slice(-10) }}</span
-            ><span>{{ stageText(r) }}</span>
-            <span v-if="r.options">{{ trainingSummary(r) }}</span>
-            <span v-if="r.dataset"
-              >数据集：{{ displayName((r.dataset as Dataset).name) }} / V{{
-                (r.dataset as Dataset).version
-              }}</span
-            >
-          </div>
-          <div class="experiment-progress">
-            <div class="bar">
-              <span :style="{ width: `${r.progress ?? 0}%` }" />
+          <div class="experiment-body">
+            <div class="experiment-entry-head">
+              <h3>{{ displayName(r.name) }}</h3>
+              <Status :value="r.status" />
             </div>
-            <span class="mono">{{
-              r.progress === undefined ? "—" : `${r.progress}%`
-            }}</span>
-          </div>
-          <p v-if="r.error" class="tone-crit">{{ trainingError(r.error) }}</p>
-        </div>
-        <div class="experiment-actions">
-          <RouterLink
-            v-if="createdModel(r)"
-            class="button-link"
-            :to="{
-              name: 'models',
-              params: { tab: 'registry' },
-              query: { modelId: createdModel(r)!.id },
-            }"
-            >查看模型 →</RouterLink
-          >
-          <button class="table-action" @click="open(r)">实验详情</button
-          ><button
-            v-if="['QUEUED', 'RUNNING'].includes(r.status ?? '')"
-            @click="action(r.id, 'cancel')"
-            :disabled="busy"
-            class="table-action danger"
-          >
-            取消任务
-          </button>
-        </div>
-      </article>
-    </section>
-    <section
-      v-else-if="tab === 'deployments'"
-      class="deployment-console"
-      aria-label="部署执行记录"
-    >
-      <article
-        v-for="r in list.items.value"
-        :key="r.id"
-        class="deployment-entry"
-      >
-        <header>
-          <div>
-            <span class="mono">{{ r.id.slice(-10) }}</span>
-            <h3>{{ displayName(r.name) }}</h3>
-          </div>
-          <Status chip :value="r.status" />
-        </header>
-        <div class="deployment-route">
-          <div>
-            <small>当前目标</small
-            ><b>{{ displayName(rowModel(r)?.name ?? text(r, "modelId")) }}</b
-            ><span class="mono">{{ rowModel(r)?.version ?? "—" }}</span>
-          </div>
-          <span class="deployment-arrow">→</span>
-          <div>
-            <small>接收设备</small><b>{{ displayName(deviceName(r)) }}</b
-            ><span class="mono">{{
-              r.previousVersion ? `前序版本 ${r.previousVersion}` : "无前序版本"
-            }}</span>
-          </div>
-        </div>
-        <div class="deployment-progress">
-          <Status :value="r.status" /><span>{{ stageText(r) }}</span>
-          <div class="bar">
-            <span :style="{ width: `${r.progress ?? 0}%` }" />
-          </div>
-          <b class="mono">{{
-            r.progress === undefined ? "—" : `${r.progress}%`
-          }}</b>
-        </div>
-        <p v-if="r.error" class="error-box">{{ r.error }}</p>
-        <footer>
-          <span class="tag" :class="{ simulated: r.source === 'SIMULATION' }">{{
-            chinese(r.source)
-          }}</span
-          ><span v-if="switchedLocally(r)" class="tag">本地切换</span
-          ><time class="mono">{{
-            new Date(r.createdAt).toLocaleString()
-          }}</time>
-          <div class="deployment-actions">
-            <button @click="open(r)">执行证据</button
-            ><button
-              v-if="
-                canRollback(r.deviceId) &&
-                r.previousVersion &&
-                ['ACTIVE', 'FAILED'].includes(r.status ?? '')
-              "
-              :disabled="busy"
-              @click="action(r.id, 'rollback')"
-              class="danger"
-            >
-              回滚版本
-            </button>
-          </div>
-        </footer>
-      </article>
-    </section>
-    <div v-else class="panel table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <!-- 四个 tab 的接口白名单都允许 name 与 createdAt，这两列可以安全排序 -->
-            <SortableTh
-              field="name"
-              label="名称 / 版本"
-              :active="list.sort.value"
-              :order="list.order.value"
-              @sort="list.sortBy"
-            />
-            <th>{{ tab === "benchmarks" ? "评估模型" : "生成方式" }}</th>
-            <th>{{ tab === "benchmarks" ? "指标" : "状态" }}</th>
-            <th>{{ tab === "registry" ? "指标" : "进度" }}</th>
-            <SortableTh
-              field="createdAt"
-              label="时间"
-              :active="list.sort.value"
-              :order="list.order.value"
-              @sort="list.sortBy"
-            />
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="r in list.items.value" :key="r.id">
-            <td>
-              <strong>{{ displayName(r.name) }}</strong
-              ><small class="mono">{{ r.version ?? "—" }}</small>
-            </td>
-            <td v-if="tab === 'benchmarks'">
-              <strong>{{ displayName(rowModel(r)?.name ?? "—") }}</strong
-              ><small class="mono">{{ rowModel(r)?.version ?? "—" }}</small>
-            </td>
-            <td v-else>
+            <div class="experiment-source">
               <span
                 class="tag"
                 :class="{ simulated: r.source === 'SIMULATION' }"
-                >{{
-                  r.trainingId
-                    ? "训练生成"
-                    : r.source === "SIMULATION"
-                      ? "模拟"
-                      : "导入"
+                >{{ r.options ? "本地训练" : chinese(r.source) }}</span
+              ><span>{{ stageText(r) }}</span>
+              <span v-if="r.options">{{ trainingSummary(r) }}</span>
+              <span v-if="r.dataset"
+                >数据集：{{ displayName((r.dataset as Dataset).name) }} / V{{
+                  (r.dataset as Dataset).version
                 }}</span
               >
-            </td>
-            <td v-if="tab === 'benchmarks'">
-              <div class="cell-metrics">
-                <InfoFields
-                  :value="r.metrics"
-                  :fields="['fps', 'inferenceUs']"
-                />
+            </div>
+            <div class="experiment-progress">
+              <div class="bar">
+                <span :style="{ width: `${r.progress ?? 0}%` }" />
               </div>
-            </td>
-            <td v-else>
-              <Status :value="r.status" /><small v-if="tab !== 'registry'">{{
-                stageText(r) === "—" ? "" : stageText(r)
-              }}</small
-              ><small style="color: var(--red)">{{
-                text(r, "error") === "—" ? "" : text(r, "error")
-              }}</small>
-            </td>
-            <td v-if="tab === 'registry'">
-              <div v-if="r.trainingId" class="cell-metrics">
-                <InfoFields
-                  :value="r.metrics"
-                  :fields="['mAP50', 'precision', 'recall']"
-                />
-              </div>
-              <span v-else class="muted">—</span>
-            </td>
-            <td v-else>
               <span class="mono">{{
-                r.progress === undefined ? "—" : r.progress + "%"
+                r.progress == null ? "进度未上报" : `${r.progress}%`
               }}</span>
-              <div
-                v-if="r.progress !== undefined"
-                class="bar"
-                style="width: 95px; margin-top: 7px"
+            </div>
+            <p v-if="r.error" class="tone-crit">{{ trainingError(r.error) }}</p>
+          </div>
+          <div class="experiment-actions">
+            <RouterLink
+              v-if="createdModel(r)"
+              class="button-link"
+              :to="{
+                name: 'models',
+                params: { tab: 'registry' },
+                query: { modelId: createdModel(r)!.id },
+              }"
+              >查看模型</RouterLink
+            >
+            <button class="table-action" @click="open(r)">实验详情</button
+            ><button
+              v-if="['QUEUED', 'RUNNING'].includes(r.status ?? '')"
+              @click="action(r.id, 'cancel')"
+              :disabled="busy"
+              class="table-action danger"
+            >
+              取消任务
+            </button>
+          </div>
+        </article>
+      </details>
+      <section
+        v-else-if="tab === 'deployments'"
+        class="deployment-console"
+        aria-label="模型更新记录"
+      >
+        <article
+          v-for="r in list.items.value"
+          :key="r.id"
+          class="deployment-entry"
+        >
+          <header>
+            <div>
+              <h3>{{ displayName(r.name) }}</h3>
+            </div>
+            <Status chip :value="r.status" />
+          </header>
+          <div class="deployment-route">
+            <div>
+              <small>当前目标</small
+              ><b>{{ displayName(rowModel(r)?.name ?? text(r, "modelId")) }}</b
+              ><span class="mono">{{
+                rowModel(r)?.version ?? "版本未提供"
+              }}</span>
+            </div>
+            <span class="deployment-arrow">→</span>
+            <div>
+              <small>接收设备</small><b>{{ displayName(deviceName(r)) }}</b
+              ><span class="mono">{{
+                r.previousVersion
+                  ? `前序版本 ${r.previousVersion}`
+                  : "无前序版本"
+              }}</span>
+            </div>
+          </div>
+          <div class="deployment-progress">
+            <Status :value="r.status" /><span>{{ stageText(r) }}</span>
+            <div class="bar">
+              <span :style="{ width: `${r.progress ?? 0}%` }" />
+            </div>
+            <b class="mono">{{
+              r.progress == null ? "进度未上报" : `${r.progress}%`
+            }}</b>
+          </div>
+          <p v-if="r.error" class="error-box">{{ r.error }}</p>
+          <footer>
+            <span
+              class="tag"
+              :class="{ simulated: r.source === 'SIMULATION' }"
+              >{{ chinese(r.source) }}</span
+            ><span v-if="switchedLocally(r)" class="tag">本地切换</span
+            ><time class="mono">{{
+              new Date(r.createdAt).toLocaleString()
+            }}</time>
+            <div class="deployment-actions">
+              <button @click="open(r)">执行证据</button
+              ><button
+                v-if="
+                  canRollback(r.deviceId) &&
+                  r.previousVersion &&
+                  ['ACTIVE', 'FAILED'].includes(r.status ?? '')
+                "
+                :disabled="busy"
+                @click="action(r.id, 'rollback')"
+                class="danger"
               >
-                <span :style="{ width: `${r.progress}%` }" />
-              </div>
-            </td>
-            <td>{{ new Date(r.createdAt).toLocaleString() }}</td>
-            <td class="action-cell">
-              <div class="row-actions">
-                <button @click="open(r)" class="table-action">详情</button
-                ><button
-                  v-if="
-                    tab === 'training' &&
-                    ['QUEUED', 'RUNNING'].includes(r.status ?? '')
-                  "
-                  @click="action(r.id, 'cancel')"
-                  class="table-action danger"
-                  :disabled="busy"
+                回滚版本
+              </button>
+            </div>
+          </footer>
+        </article>
+      </section>
+      <div v-else class="panel table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <!-- 四个 tab 的接口白名单都允许 name 与 createdAt，这两列可以安全排序 -->
+              <SortableTh
+                field="name"
+                label="名称 / 版本"
+                :active="list.sort.value"
+                :order="list.order.value"
+                @sort="list.sortBy"
+              />
+              <th>{{ tab === "benchmarks" ? "评估模型" : "生成方式" }}</th>
+              <th>{{ tab === "benchmarks" ? "指标" : "状态" }}</th>
+              <th>{{ tab === "registry" ? "指标" : "进度" }}</th>
+              <SortableTh
+                field="createdAt"
+                label="时间"
+                :active="list.sort.value"
+                :order="list.order.value"
+                @sort="list.sortBy"
+              />
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in list.items.value" :key="r.id">
+              <td>
+                <strong>{{ displayName(r.name) }}</strong
+                ><small class="mono">{{ r.version ?? "版本未提供" }}</small>
+              </td>
+              <td v-if="tab === 'benchmarks'">
+                <strong>{{
+                  displayName(rowModel(r)?.name ?? "未关联模型")
+                }}</strong
+                ><small class="mono">{{
+                  rowModel(r)?.version ?? "版本未提供"
+                }}</small>
+              </td>
+              <td v-else>
+                <span
+                  class="tag"
+                  :class="{ simulated: r.source === 'SIMULATION' }"
+                  >{{
+                    r.trainingId
+                      ? "训练生成"
+                      : r.source === "SIMULATION"
+                        ? "模拟"
+                        : "导入"
+                  }}</span
                 >
-                  取消</button
-                ><button
-                  v-if="
-                    tab === 'deployments' &&
-                    canRollback(r.deviceId) &&
-                    r.previousVersion &&
-                    ['ACTIVE', 'FAILED'].includes(r.status ?? '')
-                  "
-                  @click="action(r.id, 'rollback')"
-                  class="table-action danger"
-                  :disabled="busy"
+              </td>
+              <td v-if="tab === 'benchmarks'">
+                <div class="cell-metrics">
+                  <InfoFields
+                    :value="r.metrics"
+                    :fields="['fps', 'inferenceUs']"
+                  />
+                </div>
+              </td>
+              <td v-else>
+                <Status :value="r.status" /><small v-if="tab !== 'registry'">{{
+                  stageText(r)
+                }}</small
+                ><small style="color: var(--red)">{{ text(r, "error") }}</small>
+              </td>
+              <td v-if="tab === 'registry'">
+                <div v-if="r.trainingId" class="cell-metrics">
+                  <InfoFields
+                    :value="r.metrics"
+                    :fields="['mAP50', 'precision', 'recall']"
+                  />
+                </div>
+                <span v-else class="muted">未评估</span>
+              </td>
+              <td v-else>
+                <span class="mono">{{
+                  r.progress == null ? "进度未上报" : r.progress + "%"
+                }}</span>
+                <div
+                  v-if="r.progress !== undefined"
+                  class="bar"
+                  style="width: 95px; margin-top: 7px"
                 >
-                  回滚</button
-                ><button
-                  v-if="tab === 'registry'"
-                  @click="
-                    download(
-                      `/models/${r.id}/export`,
-                      `model-${r.id}.zip`,
-                      'POST',
-                    ).catch(notices.error)
-                  "
-                  class="table-action"
-                >
-                  导出
-                </button>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div></AsyncState
-  >
-  <Pager
-    :page="list.page.value"
-    :total="list.total.value"
-    :page-size="list.pageSize.value"
-    @update:page="
-      (p) => {
-        list.page.value = p;
-        list.load();
-      }
-    "
-    @update:page-size="list.setPageSize"
-  />
+                  <span :style="{ width: `${r.progress}%` }" />
+                </div>
+              </td>
+              <td>{{ new Date(r.createdAt).toLocaleString() }}</td>
+              <td class="action-cell">
+                <div class="row-actions">
+                  <button @click="open(r)" class="table-action">详情</button
+                  ><button
+                    v-if="
+                      tab === 'training' &&
+                      ['QUEUED', 'RUNNING'].includes(r.status ?? '')
+                    "
+                    @click="action(r.id, 'cancel')"
+                    class="table-action danger"
+                    :disabled="busy"
+                  >
+                    取消</button
+                  ><button
+                    v-if="
+                      tab === 'deployments' &&
+                      canRollback(r.deviceId) &&
+                      r.previousVersion &&
+                      ['ACTIVE', 'FAILED'].includes(r.status ?? '')
+                    "
+                    @click="action(r.id, 'rollback')"
+                    class="table-action danger"
+                    :disabled="busy"
+                  >
+                    回滚</button
+                  ><button
+                    v-if="tab === 'registry'"
+                    @click="
+                      download(
+                        `/models/${r.id}/export`,
+                        `model-${r.id}.zip`,
+                        'POST',
+                      ).catch(notices.error)
+                    "
+                    class="table-action"
+                  >
+                    导出
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div></AsyncState
+    >
+    <Pager
+      :page="list.page.value"
+      :total="list.total.value"
+      :page-size="list.pageSize.value"
+      @update:page="
+        (p) => {
+          list.page.value = p;
+          list.load();
+        }
+      "
+      @update:page-size="list.setPageSize"
+    />
+  </component>
   <Drawer
-    v-if="form"
+    v-if="form && tab !== 'deployments'"
     :title="
       tab === 'training'
         ? '创建训练'
@@ -808,19 +886,19 @@ watch(
       <label v-if="tab !== 'deployments'"
         >任务名称<input v-model="name" required /></label
       ><label v-if="tab === 'training'"
-        >训练产品<select v-model="productId" required>
+        >训练产品<UiSelect v-model="productId" required>
           <option value="" disabled>选择产品</option>
           <option v-for="p in products" :key="p.id" :value="p.id">
-            {{ p.rules.product }} · {{ p.name }}
+            {{ p.rules.product }} · V{{ p.version }}
           </option>
-        </select></label
+        </UiSelect></label
       >
       <p v-if="tab === 'training'" class="note">
         使用该产品已完成标注、未弃用的真实图片，自动生成本次训练的数据版本。
       </p>
       <label v-if="tab !== 'deployments' && tab !== 'training'"
         >{{ tab === "training" ? "训练数据集" : "评估数据集"
-        }}<select v-model="datasetId" required>
+        }}<UiSelect v-model="datasetId" required>
           <option value="">选择数据集</option>
           <option v-for="d in datasets" :key="d.id" :value="d.id">
             {{ datasetLabel(d)
@@ -834,7 +912,7 @@ watch(
                 : ""
             }}
           </option>
-        </select></label
+        </UiSelect></label
       >
       <p v-if="tab === 'training' && trainingBlocker" class="note">
         {{ trainingBlocker }}
@@ -910,10 +988,10 @@ watch(
               required
           /></label>
           <label
-            >计算设备<select v-model="trainingOptions.device">
+            >计算设备<UiSelect v-model="trainingOptions.device">
               <option value="cuda">CUDA GPU</option>
               <option value="cpu">CPU（调试）</option>
-            </select></label
+            </UiSelect></label
           >
           <label v-if="trainingOptions.device === 'cuda'"
             ><input
@@ -937,19 +1015,19 @@ watch(
         </p>
       </template>
       <label v-if="tab !== 'training'"
-        >模型<select v-model="modelId" required>
+        >模型<UiSelect v-model="modelId" required>
           <option value="">选择模型</option>
           <option v-for="m in models" :key="m.id" :value="m.id">
             {{ displayName(m.name) }} / {{ m.version }} /
             {{ chinese(m.status) }}
           </option>
-        </select></label
+        </UiSelect></label
       >
       <p v-if="tab === 'deployments' && !models.length" class="note">
         还没有已批准的模型。请先由管理员在“模型仓库”批准发布。
       </p>
       <label v-if="tab !== 'training'"
-        >设备<select v-model="deviceId" required>
+        >设备<UiSelect v-model="deviceId" required>
           <option value="">选择设备</option>
           <option
             v-for="d in devices.devices"
@@ -960,7 +1038,7 @@ watch(
             {{ displayName(d.name) }}
             {{ !d.capabilities.modelUpdate ? "· 不支持模型更新" : "" }}
           </option>
-        </select></label
+        </UiSelect></label
       >
       <label v-if="tab === 'deployments'" class="confirm-line">
         <input v-model="confirmDeploy" type="checkbox" />
@@ -1000,7 +1078,9 @@ watch(
   >
     <div class="detail-head">
       <Status chip :value="detail.status" />
-      <span class="mono">{{ detail.id.slice(-10) }}</span>
+      <span class="mono" :title="detail.id"
+        >任务编号：{{ detail.id.slice(-10) }}</span
+      >
       <time class="mono">{{
         new Date(detail.createdAt).toLocaleString()
       }}</time>
@@ -1011,6 +1091,16 @@ watch(
         :fields="['mAP50', 'precision', 'recall', 'fps']"
       />
     </div>
+    <RouterLink
+      v-if="tab === 'registry' && detail.status === 'APPROVED'"
+      class="button-link primary"
+      :to="{
+        name: 'models',
+        params: { tab: 'deployments' },
+        query: { modelId: detail.id, planId: workflow.id || undefined },
+      }"
+      >使用此模型开始检测</RouterLink
+    >
     <section
       v-if="tab === 'registry' && detail.status !== 'APPROVED'"
       class="approval-gate"
@@ -1053,7 +1143,7 @@ watch(
         params: { tab: 'registry' },
         query: { modelId: createdModel(detail)!.id },
       }"
-      >查看生成模型 →</RouterLink
+      >查看生成模型</RouterLink
     >
     <InfoFields :value="detailView" :fields="detailFields" />
     <details>
@@ -1085,6 +1175,18 @@ watch(
   >
 </template>
 <style scoped>
+.model-history {
+  max-width: 1120px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px 20px;
+  background: var(--surface);
+}
+.model-history > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+}
 .terminal-model-guide {
   padding: 1rem;
   margin: 1rem 0;
