@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
 import Icon from "../Icon.vue";
 
 export interface UiTabItem {
@@ -37,9 +37,24 @@ function select(key: string, disabled?: boolean) {
   emit("change", key);
 }
 
+interface SurfaceRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 const root = ref<HTMLDivElement | null>(null),
   buttons = ref<(HTMLButtonElement | null)[]>([]),
-  indicator = ref({ left: 0, width: 0, ready: false });
+  current = ref<SurfaceRect | null>(null),
+  previous = ref<SurfaceRect | null>(null),
+  motion = ref(0),
+  surfaceSize = ref({ width: 0, height: 0 });
+let clearTimer: ReturnType<typeof setTimeout> | undefined;
+
+const uid = useId(),
+  gooId = `ui-tabs-goo-${uid}`,
+  gradientId = `ui-tabs-gradient-${uid}`;
 
 function setButton(el: unknown, index: number) {
   buttons.value[index] = (el as HTMLButtonElement | null) ?? null;
@@ -51,17 +66,39 @@ function measure() {
       (item) => normalize(item).key === props.modelValue,
     ),
     button = buttons.value[index];
-  if (!button) {
-    indicator.value = { ...indicator.value, ready: false };
-    return;
-  }
+  if (!button) return;
   const rootRect = root.value.getBoundingClientRect(),
-    rect = button.getBoundingClientRect();
-  indicator.value = {
-    left: rect.left - rootRect.left - root.value.clientLeft,
-    width: rect.width,
-    ready: true,
+    rect = button.getBoundingClientRect(),
+    next: SurfaceRect = {
+      left: rect.left - rootRect.left - root.value.clientLeft,
+      top: rect.top - rootRect.top - root.value.clientTop,
+      width: rect.width,
+      height: rect.height,
+    };
+  surfaceSize.value = {
+    width: root.value.clientWidth,
+    height: root.value.clientHeight,
   };
+  const changed =
+    current.value !== null &&
+    (Math.abs(current.value.left - next.left) > 0.5 ||
+      Math.abs(current.value.top - next.top) > 0.5 ||
+      Math.abs(current.value.width - next.width) > 0.5 ||
+      Math.abs(current.value.height - next.height) > 0.5);
+  if (current.value === null) {
+    current.value = next;
+    motion.value++;
+  } else if (changed) {
+    previous.value = current.value;
+    current.value = next;
+    motion.value++;
+    if (clearTimer) clearTimeout(clearTimer);
+    clearTimer = setTimeout(() => {
+      previous.value = null;
+    }, 340);
+  } else {
+    current.value = next;
+  }
 }
 
 function scheduleMeasure() {
@@ -75,7 +112,7 @@ function onKeydown(event: KeyboardEvent) {
     .filter(({ item }) => !item.disabled);
   if (!entries.length) return;
   event.preventDefault();
-  const current = entries.findIndex(
+  const currentIndex = entries.findIndex(
       ({ item }) => item.key === props.modelValue,
     ),
     step = event.key === "ArrowRight" ? 1 : -1,
@@ -84,9 +121,9 @@ function onKeydown(event: KeyboardEvent) {
         ? 0
         : event.key === "End"
           ? entries.length - 1
-          : current < 0
+          : currentIndex < 0
             ? 0
-            : (current + step + entries.length) % entries.length,
+            : (currentIndex + step + entries.length) % entries.length,
     target = entries[next]!;
   select(target.item.key);
   void nextTick(() => buttons.value[target.index]?.focus());
@@ -96,7 +133,10 @@ onMounted(() => {
   scheduleMeasure();
   window.addEventListener("resize", measure);
 });
-onBeforeUnmount(() => window.removeEventListener("resize", measure));
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", measure);
+  if (clearTimer) clearTimeout(clearTimer);
+});
 watch([() => props.modelValue, () => props.items], scheduleMeasure, {
   deep: true,
 });
@@ -110,16 +150,77 @@ watch([() => props.modelValue, () => props.items], scheduleMeasure, {
     role="tablist"
     @keydown="onKeydown"
   >
-    <span
-      v-if="variant === 'segment'"
-      class="ui-tab-indicator"
-      :class="{ 'is-ready': indicator.ready }"
-      :style="{
-        width: `${indicator.width}px`,
-        transform: `translateX(${indicator.left}px)`,
-      }"
+    <svg
+      v-if="variant === 'segment' && current && surfaceSize.width"
+      class="ui-tab-surface"
+      :viewBox="`0 0 ${surfaceSize.width} ${surfaceSize.height}`"
       aria-hidden="true"
-    ></span>
+    >
+      <defs>
+        <filter
+          :id="gooId"
+          x="-18%"
+          y="-40%"
+          width="136%"
+          height="180%"
+          color-interpolation-filters="sRGB"
+        >
+          <feGaussianBlur
+            in="SourceGraphic"
+            stdDeviation="5"
+            result="blurred-field"
+          />
+          <feColorMatrix
+            in="blurred-field"
+            type="matrix"
+            values="
+              1 0 0 0 0
+              0 1 0 0 0
+              0 0 1 0 0
+              0 0 0 20 -9"
+          />
+        </filter>
+        <linearGradient :id="gradientId" x1="0" y1="0" x2="0" y2="1">
+          <stop
+            offset="0"
+            style="stop-color: var(--lui-surface-top, var(--surface))"
+          />
+          <stop offset="1" style="stop-color: var(--surface)" />
+        </linearGradient>
+      </defs>
+      <g :filter="`url(#${gooId})`">
+        <rect
+          v-if="previous"
+          :key="`previous-${motion}`"
+          class="goo-shape goo-previous"
+          :x="previous.left"
+          :y="previous.top"
+          :width="previous.width"
+          :height="previous.height"
+          rx="6"
+        />
+        <rect
+          :key="`current-${motion}`"
+          class="goo-shape goo-current"
+          :x="current.left"
+          :y="current.top"
+          :width="current.width"
+          :height="current.height"
+          rx="6"
+        />
+      </g>
+      <rect
+        :key="`crisp-${motion}`"
+        class="goo-crisp"
+        :x="current.left"
+        :y="current.top"
+        :width="current.width"
+        :height="current.height"
+        rx="6"
+        :fill="`url(#${gradientId})`"
+      />
+    </svg>
+
     <button
       v-for="(raw, index) in items"
       :key="normalize(raw).key"
@@ -247,31 +348,69 @@ watch([() => props.modelValue, () => props.items], scheduleMeasure, {
   color: var(--forest);
 }
 
-.ui-tab-indicator {
+/*
+ * L1 表面层：旧选中矩形收缩成芽，新选中矩形从芽展开，
+ * 两者进入同一个 Alpha 场（模糊 + 阈值）形成连接颈部；
+ * 上层清晰矩形保证当前选中面边缘不糊。内容与命中层不受影响。
+ */
+.ui-tab-surface {
   position: absolute;
-  top: 3px;
-  bottom: 3px;
-  left: 0;
+  inset: 0;
   z-index: 0;
-  border-radius: calc(var(--radius, 8px) - 2px);
-  background: var(--surface);
-  background-image: linear-gradient(
-    180deg,
-    var(--lui-surface-top, var(--surface)) 0%,
-    var(--surface) 100%
-  );
-  box-shadow:
-    inset 0 1px 0 var(--lui-rim, transparent),
-    0 1px 3px rgba(0, 0, 0, 0.08);
-  opacity: 0;
-  transition:
-    transform 260ms var(--lui-ease, ease),
-    width 260ms var(--lui-ease, ease),
-    opacity 160ms var(--lui-ease, ease);
+  width: 100%;
+  height: 100%;
+  overflow: visible;
   pointer-events: none;
 }
-.ui-tab-indicator.is-ready {
-  opacity: 1;
+
+.goo-shape {
+  fill: var(--surface);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.goo-previous {
+  animation: goo-split 300ms var(--lui-ease, ease) forwards;
+}
+
+.goo-current {
+  animation: goo-merge 300ms var(--lui-ease, ease) both;
+}
+
+.goo-crisp {
+  stroke: var(--lui-rim, transparent);
+  stroke-width: 1;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: goo-merge 300ms var(--lui-ease, ease) both;
+}
+
+@keyframes goo-split {
+  0% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+  72% {
+    opacity: 1;
+  }
+  100% {
+    transform: scaleX(0.18);
+    opacity: 0;
+  }
+}
+
+@keyframes goo-merge {
+  0% {
+    transform: scaleX(0.18);
+    opacity: 0;
+  }
+  32% {
+    opacity: 1;
+  }
+  100% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
 }
 
 /* 变体：pill */
