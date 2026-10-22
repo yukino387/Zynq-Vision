@@ -72,7 +72,7 @@ const notices = useNotificationStore();
 const stats = ref<Stats | null>(null),
   error = ref(""),
   busy = ref(false),
-  range = ref("24h"),
+  range = ref("7d"),
   deviceId = ref("");
 const ranges = [
   { key: "24h", label: "近 24 小时" },
@@ -221,6 +221,14 @@ const rangeLabel = computed(() =>
     <template v-if="stats">
       <p v-if="stats.totals.total === 0" class="empty-note">
         当前时间范围没有检测记录，统计会随生产自动更新。
+        <button
+          v-if="range === '24h'"
+          type="button"
+          class="text-button"
+          @click="range = '7d'"
+        >
+          查看近 7 天
+        </button>
       </p>
 
       <div class="analytics-kpis">

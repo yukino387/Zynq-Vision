@@ -532,19 +532,17 @@ export class TerminalController {
       out1 = decode(dto.out1, 6468);
     if (createHash("sha256").update(raw).digest("hex") !== dto.rawSha256)
       throw new DomainError("CHECKSUM_ERROR", "终端原图摘要不匹配", 422);
-    const policy = postprocessSchema.parse(snapshot.rules.postprocess ?? {});
     if (snapshot.rules.postprocess && !dto.postprocess)
       throw new DomainError(
         "MODEL_INCOMPATIBLE",
         "此方案要求新版后处理参数，请更新终端程序后重试",
         422,
       );
-    if (dto.postprocess && canonical(dto.postprocess) !== canonical(policy))
-      throw new DomainError(
-        "MODEL_INCOMPATIBLE",
-        "记录的后处理参数与方案快照不一致",
-        422,
-      );
+    // 离线记录用它采集时的后处理参数重算；方案后来调整参数不应让
+    // 已保存的证据永久卡在同步队列里。
+    const policy = postprocessSchema.parse(
+      dto.postprocess ?? snapshot.rules.postprocess ?? {},
+    );
     const filtered = dto.postprocess ? detectObjects(out0, out1, policy) : null;
     const boxes = (filtered?.boxes ?? detect(out0, out1)).map((box) => ({
       ...box,

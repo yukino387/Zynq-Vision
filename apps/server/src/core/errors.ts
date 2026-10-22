@@ -63,6 +63,19 @@ export class Errors implements ExceptionFilter {
       code = error.code === "P2025" ? "NOT_FOUND" : "CONSTRAINT_VIOLATION";
       message = "Database constraint rejected the operation";
     }
+    if (status === 422)
+      console.error(
+        JSON.stringify({
+          timestamp: new Date().toISOString(),
+          level: "warn",
+          module: "http",
+          message,
+          code,
+          details,
+          requestId: req.id,
+          entityId: req.url,
+        }),
+      );
     if (status === 500)
       console.error(
         JSON.stringify({
