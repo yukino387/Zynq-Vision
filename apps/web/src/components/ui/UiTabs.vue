@@ -1,5 +1,12 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
+import {
+  SPRING_STEP,
+  integrateRect,
+  rectSettled,
+  springSubsteps,
+  type SpringRect,
+} from "../../lib/spring";
 import Icon from "../Icon.vue";
 
 export interface UiTabItem {
@@ -37,20 +44,42 @@ function select(key: string, disabled?: boolean) {
   emit("change", key);
 }
 
-interface SurfaceRect {
-  left: number;
-  top: number;
+interface Rect {
+  x: number;
+  y: number;
   width: number;
   height: number;
 }
 
 const root = ref<HTMLDivElement | null>(null),
   buttons = ref<(HTMLButtonElement | null)[]>([]),
-  current = ref<SurfaceRect | null>(null),
-  previous = ref<SurfaceRect | null>(null),
-  motion = ref(0),
+  leadRect = ref<Rect>({ x: 0, y: 0, width: 0, height: 0 }),
+  trailRect = ref<Rect | null>(null),
+  trailOpacity = ref(0),
   surfaceSize = ref({ width: 0, height: 0 });
-let clearTimer: ReturnType<typeof setTimeout> | undefined;
+const lead: SpringRect = {
+  x: 0,
+  y: 0,
+  width: 0,
+  height: 0,
+  vx: 0,
+  vy: 0,
+  vw: 0,
+  vh: 0,
+};
+let leadTarget: Rect = { x: 0, y: 0, width: 0, height: 0 };
+const trail: SpringRect = { ...lead };
+let trailTarget: Rect = { x: 0, y: 0, width: 0, height: 0 };
+let trailStartWidth = 1,
+  trailBudWidth = 1,
+  lastKey = "",
+  initialized = false,
+  frameId: number | null = null,
+  lastFrame = 0,
+  settleFrames = 0;
+const reducedMotion =
+  typeof window !== "undefined" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const uid = useId(),
   gooId = `ui-tabs-goo-${uid}`,
@@ -58,6 +87,74 @@ const uid = useId(),
 
 function setButton(el: unknown, index: number) {
   buttons.value[index] = (el as HTMLButtonElement | null) ?? null;
+}
+
+function budRect(rect: Rect): Rect {
+  const width = Math.max(8, Math.round(rect.width * 0.18)),
+    height = Math.max(6, Math.round(rect.height * 0.4));
+  return {
+    x: rect.x + (rect.width - width) / 2,
+    y: rect.y + (rect.height - height) / 2,
+    width,
+    height,
+  };
+}
+
+function stopLoop() {
+  if (frameId != null) cancelAnimationFrame(frameId);
+  frameId = null;
+}
+
+function tick(now: number) {
+  const previous = lastFrame || now - 16.67;
+  lastFrame = now;
+  const delta = Math.min(48, Math.max(1, now - previous)),
+    steps = springSubsteps(delta);
+  for (let index = 0; index < steps; index++) {
+    integrateRect(lead, leadTarget, SPRING_STEP);
+    if (trailRect.value) integrateRect(trail, trailTarget, SPRING_STEP);
+  }
+  leadRect.value = {
+    x: lead.x,
+    y: lead.y,
+    width: lead.width,
+    height: lead.height,
+  };
+  if (trailRect.value) {
+    trailRect.value = {
+      x: trail.x,
+      y: trail.y,
+      width: trail.width,
+      height: trail.height,
+    };
+    trailOpacity.value = Math.max(
+      0,
+      Math.min(
+        1,
+        (trail.width - trailBudWidth) /
+          Math.max(1, trailStartWidth - trailBudWidth),
+      ),
+    );
+    if (rectSettled(trail, trailTarget) || trailOpacity.value <= 0.01) {
+      trailRect.value = null;
+      trailOpacity.value = 0;
+    }
+  }
+  if (rectSettled(lead, leadTarget) && !trailRect.value) {
+    settleFrames++;
+    if (settleFrames >= 2) {
+      stopLoop();
+      return;
+    }
+  } else settleFrames = 0;
+  frameId = requestAnimationFrame(tick);
+}
+
+function startLoop() {
+  if (frameId != null) return;
+  lastFrame = 0;
+  settleFrames = 0;
+  frameId = requestAnimationFrame(tick);
 }
 
 function measure() {
@@ -69,9 +166,9 @@ function measure() {
   if (!button) return;
   const rootRect = root.value.getBoundingClientRect(),
     rect = button.getBoundingClientRect(),
-    next: SurfaceRect = {
-      left: rect.left - rootRect.left - root.value.clientLeft,
-      top: rect.top - rootRect.top - root.value.clientTop,
+    next: Rect = {
+      x: rect.left - rootRect.left - root.value.clientLeft,
+      y: rect.top - rootRect.top - root.value.clientTop,
       width: rect.width,
       height: rect.height,
     };
@@ -79,26 +176,44 @@ function measure() {
     width: root.value.clientWidth,
     height: root.value.clientHeight,
   };
-  const changed =
-    current.value !== null &&
-    (Math.abs(current.value.left - next.left) > 0.5 ||
-      Math.abs(current.value.top - next.top) > 0.5 ||
-      Math.abs(current.value.width - next.width) > 0.5 ||
-      Math.abs(current.value.height - next.height) > 0.5);
-  if (current.value === null) {
-    current.value = next;
-    motion.value++;
-  } else if (changed) {
-    previous.value = current.value;
-    current.value = next;
-    motion.value++;
-    if (clearTimer) clearTimeout(clearTimer);
-    clearTimer = setTimeout(() => {
-      previous.value = null;
-    }, 340);
-  } else {
-    current.value = next;
+  if (!initialized) {
+    Object.assign(lead, { ...next, vx: 0, vy: 0, vw: 0, vh: 0 });
+    leadRect.value = { ...next };
+    leadTarget = { ...next };
+    initialized = true;
+    lastKey = props.modelValue;
+    return;
   }
+  if (reducedMotion) {
+    Object.assign(lead, { ...next, vx: 0, vy: 0, vw: 0, vh: 0 });
+    leadRect.value = { ...next };
+    leadTarget = { ...next };
+    trailRect.value = null;
+    trailOpacity.value = 0;
+    lastKey = props.modelValue;
+    stopLoop();
+    return;
+  }
+  const sameTarget =
+    Math.abs(leadTarget.x - next.x) <= 0.5 &&
+    Math.abs(leadTarget.y - next.y) <= 0.5 &&
+    Math.abs(leadTarget.width - next.width) <= 0.5 &&
+    Math.abs(leadTarget.height - next.height) <= 0.5;
+  if (sameTarget && props.modelValue === lastKey && !trailRect.value) {
+    lastKey = props.modelValue;
+    return;
+  }
+  if (props.modelValue !== lastKey) {
+    Object.assign(trail, lead);
+    trailStartWidth = Math.max(1, lead.width);
+    trailTarget = budRect(leadRect.value);
+    trailBudWidth = trailTarget.width;
+    trailRect.value = { ...leadRect.value };
+    trailOpacity.value = 1;
+  }
+  leadTarget = { ...next };
+  lastKey = props.modelValue;
+  startLoop();
 }
 
 function scheduleMeasure() {
@@ -135,7 +250,7 @@ onMounted(() => {
 });
 onBeforeUnmount(() => {
   window.removeEventListener("resize", measure);
-  if (clearTimer) clearTimeout(clearTimer);
+  stopLoop();
 });
 watch([() => props.modelValue, () => props.items], scheduleMeasure, {
   deep: true,
@@ -151,7 +266,7 @@ watch([() => props.modelValue, () => props.items], scheduleMeasure, {
     @keydown="onKeydown"
   >
     <svg
-      v-if="variant === 'segment' && current && surfaceSize.width"
+      v-if="variant === 'segment' && leadRect.width && surfaceSize.width"
       class="ui-tab-surface"
       :viewBox="`0 0 ${surfaceSize.width} ${surfaceSize.height}`"
       aria-hidden="true"
@@ -190,32 +305,30 @@ watch([() => props.modelValue, () => props.items], scheduleMeasure, {
       </defs>
       <g :filter="`url(#${gooId})`">
         <rect
-          v-if="previous"
-          :key="`previous-${motion}`"
-          class="goo-shape goo-previous"
-          :x="previous.left"
-          :y="previous.top"
-          :width="previous.width"
-          :height="previous.height"
+          v-if="trailRect"
+          class="goo-shape"
+          :x="trailRect.x"
+          :y="trailRect.y"
+          :width="trailRect.width"
+          :height="trailRect.height"
           rx="6"
+          :opacity="trailOpacity"
         />
         <rect
-          :key="`current-${motion}`"
-          class="goo-shape goo-current"
-          :x="current.left"
-          :y="current.top"
-          :width="current.width"
-          :height="current.height"
+          class="goo-shape"
+          :x="leadRect.x"
+          :y="leadRect.y"
+          :width="leadRect.width"
+          :height="leadRect.height"
           rx="6"
         />
       </g>
       <rect
-        :key="`crisp-${motion}`"
         class="goo-crisp"
-        :x="current.left"
-        :y="current.top"
-        :width="current.width"
-        :height="current.height"
+        :x="leadRect.x"
+        :y="leadRect.y"
+        :width="leadRect.width"
+        :height="leadRect.height"
         rx="6"
         :fill="`url(#${gradientId})`"
       />
@@ -365,52 +478,11 @@ watch([() => props.modelValue, () => props.items], scheduleMeasure, {
 
 .goo-shape {
   fill: var(--surface);
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-.goo-previous {
-  animation: goo-split 300ms var(--lui-ease, ease) forwards;
-}
-
-.goo-current {
-  animation: goo-merge 300ms var(--lui-ease, ease) both;
 }
 
 .goo-crisp {
   stroke: var(--lui-rim, transparent);
   stroke-width: 1;
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: goo-merge 300ms var(--lui-ease, ease) both;
-}
-
-@keyframes goo-split {
-  0% {
-    transform: scaleX(1);
-    opacity: 1;
-  }
-  72% {
-    opacity: 1;
-  }
-  100% {
-    transform: scaleX(0.18);
-    opacity: 0;
-  }
-}
-
-@keyframes goo-merge {
-  0% {
-    transform: scaleX(0.18);
-    opacity: 0;
-  }
-  32% {
-    opacity: 1;
-  }
-  100% {
-    transform: scaleX(1);
-    opacity: 1;
-  }
 }
 
 /* 变体：pill */

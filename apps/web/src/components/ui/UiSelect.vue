@@ -12,6 +12,12 @@ import {
   watch,
 } from "vue";
 import type { VNode } from "vue";
+import {
+  SPRING_STEP,
+  integrateRect,
+  rectSettled,
+  springSubsteps,
+} from "../../lib/spring";
 import Icon from "../Icon.vue";
 
 export type UiSelectValue = string | number | boolean | null | undefined;
@@ -249,57 +255,20 @@ function stopLoop() {
   frameId = null;
 }
 
-function isSettled() {
-  const position = Math.max(
-      Math.abs(spring.x - springTarget.x),
-      Math.abs(spring.y - springTarget.y),
-    ),
-    size = Math.max(
-      Math.abs(spring.width - springTarget.width),
-      Math.abs(spring.height - springTarget.height),
-    ),
-    speed = Math.max(
-      Math.abs(spring.vx),
-      Math.abs(spring.vy),
-      Math.abs(spring.vw),
-      Math.abs(spring.vh),
-    );
-  return position <= 0.5 && size <= 0.5 && speed <= 3;
-}
-
-function integrate(dt: number) {
-  const ax = (210 * (springTarget.x - spring.x) - 26 * spring.vx) / 0.9;
-  spring.vx += ax * dt;
-  spring.x += spring.vx * dt;
-  const ay = (210 * (springTarget.y - spring.y) - 26 * spring.vy) / 0.9;
-  spring.vy += ay * dt;
-  spring.y += spring.vy * dt;
-  const aw =
-    (235 * (springTarget.width - spring.width) - 28 * spring.vw) / 0.84;
-  spring.vw += aw * dt;
-  spring.width += spring.vw * dt;
-  const ah =
-    (205 * (springTarget.height - spring.height) - 27 * spring.vh) / 0.88;
-  spring.vh += ah * dt;
-  spring.height += spring.vh * dt;
-  spring.width = Math.max(8, spring.width);
-  spring.height = Math.max(6, spring.height);
-}
-
 function tick(now: number) {
   const previous = lastFrame || now - 16.67;
   lastFrame = now;
-  const delta = Math.min(48, Math.max(1, now - previous)) / 1000,
-    fixedStep = 1 / 120,
-    steps = Math.max(1, Math.min(12, Math.ceil(delta / fixedStep)));
-  for (let index = 0; index < steps; index++) integrate(fixedStep);
+  const delta = Math.min(48, Math.max(1, now - previous)),
+    steps = springSubsteps(delta);
+  for (let index = 0; index < steps; index++)
+    integrateRect(spring, springTarget, SPRING_STEP);
   motionRect.value = {
     x: spring.x,
     y: spring.y,
     width: spring.width,
     height: spring.height,
   };
-  if (isSettled()) {
+  if (rectSettled(spring, springTarget)) {
     settleFrames++;
     if (settleFrames >= 2) {
       stopLoop();
