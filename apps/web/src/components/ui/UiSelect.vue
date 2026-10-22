@@ -75,7 +75,7 @@ interface SurfaceRect {
 interface SelectSurface {
   width: number;
   height: number;
-  bud: SurfaceRect | null;
+  trigger: SurfaceRect;
 }
 const surface = ref<SelectSurface | null>(null);
 const renderMenu = ref(false);
@@ -114,9 +114,30 @@ const revealProgress = computed(() => {
 const contentOpacity = computed(() =>
   contentLeaving.value
     ? 0
-    : Math.max(0, Math.min(1, (revealProgress.value - 0.35) / 0.55)),
+    : Math.max(0, Math.min(1, (revealProgress.value - 0.22) / 0.4)),
 );
-const contentReady = computed(() => open.value && revealProgress.value > 0.6);
+const contentReady = computed(() => open.value && revealProgress.value > 0.3);
+const menuViewport = ref({ left: 0, top: 0 });
+const anchorStyle = computed(() => {
+  const size = surface.value;
+  if (!size) return {};
+  return {
+    left: `${menuViewport.value.left + size.trigger.x}px`,
+    top: `${menuViewport.value.top + size.trigger.y}px`,
+    width: `${size.trigger.width}px`,
+    height: `${size.trigger.height}px`,
+  };
+});
+const contentClip = computed(() => {
+  const size = surface.value;
+  if (!size) return "inset(100% 0 0 0 round 8px)";
+  const rect = motionRect.value,
+    top = Math.max(0, rect.y),
+    left = Math.max(0, rect.x),
+    right = Math.max(0, size.width - (rect.x + rect.width)),
+    bottom = Math.max(0, size.height - (rect.y + rect.height));
+  return `inset(${top}px ${right}px ${bottom}px ${left}px round 8px)`;
+});
 
 function sameValue(a: unknown, b: unknown) {
   if (Object.is(a, b)) return true;
@@ -302,17 +323,6 @@ function startLoop() {
   frameId = requestAnimationFrame(tick);
 }
 
-function budRect(size: SelectSurface): SurfaceRect {
-  return (
-    size.bud ?? {
-      x: Math.max(0, Math.round(size.width * 0.25)),
-      y: Math.max(0, size.height - 10),
-      width: Math.max(24, Math.round(size.width * 0.5)),
-      height: 10,
-    }
-  );
-}
-
 function startOpen(reset: boolean) {
   const size = surface.value;
   if (!size) return;
@@ -331,16 +341,15 @@ function startOpen(reset: boolean) {
     return;
   }
   if (reset) {
-    const bud = budRect(size);
-    spring.x = bud.x;
-    spring.y = bud.y;
-    spring.width = bud.width;
-    spring.height = bud.height;
+    spring.x = size.trigger.x;
+    spring.y = size.trigger.y;
+    spring.width = size.trigger.width;
+    spring.height = size.trigger.height;
     spring.vx = 0;
     spring.vy = 0;
     spring.vw = 0;
     spring.vh = 0;
-    motionRect.value = { ...bud };
+    motionRect.value = { ...size.trigger };
   }
   springTarget = { x: 0, y: 0, width: size.width, height: size.height };
   closing.value = false;
@@ -366,7 +375,7 @@ function closeMenu() {
   // 内容先退出；表面在 120ms 后才沿锚点回吸。
   closeTimer = setTimeout(() => {
     if (!closing.value || !surface.value) return;
-    springTarget = budRect(surface.value);
+    springTarget = surface.value.trigger;
     startLoop();
   }, 120);
 }
@@ -472,13 +481,11 @@ function positionMenu() {
   menu.style.top = `${rect.bottom + gap}px`;
 
   const measured = menu.getBoundingClientRect();
-  let maxHeight = Math.min(320, viewportHeight - rect.bottom - gap - margin),
-    placeAbove = false;
+  let maxHeight = Math.min(320, viewportHeight - rect.bottom - gap - margin);
   if (
     measured.height > Math.max(160, maxHeight) &&
     rect.top - gap - margin > maxHeight
   ) {
-    placeAbove = true;
     maxHeight = Math.min(320, rect.top - gap - margin);
     menu.style.top = `${Math.max(margin, rect.top - gap - Math.min(measured.height, maxHeight))}px`;
   }
@@ -489,22 +496,20 @@ function positionMenu() {
 
   menu.style.maxHeight = `${Math.max(120, maxHeight)}px`;
 
-  // 菜单主体、连接颈与触发器芽共用同一个 Alpha 场；菜单从触发器下沿
-  // 的芽中长出，关闭时沿同一锚点回吸。
+  // 触发器与菜单是同一个表面实体：从触发器的完整矩形 Morph 到菜单矩形，
+  // 关闭时沿同一锚点收回。没有独立的芽或连接线。
   const wasPositioned = positioned.value,
-    menuRect = menu.getBoundingClientRect(),
-    budHeight = 10;
+    menuRect = menu.getBoundingClientRect();
+  menuViewport.value = { left: menuRect.left, top: menuRect.top };
   surface.value = {
     width: Math.round(menuRect.width),
     height: Math.round(menuRect.height),
-    bud: placeAbove
-      ? null
-      : {
-          x: rect.left - menuRect.left + 5,
-          y: -gap - budHeight,
-          width: Math.max(8, rect.width - 10),
-          height: budHeight,
-        },
+    trigger: {
+      x: rect.left - menuRect.left,
+      y: rect.top - menuRect.top,
+      width: rect.width,
+      height: rect.height,
+    },
   };
   positioned.value = true;
   if (wasPositioned && surface.value) {
@@ -517,7 +522,7 @@ function positionMenu() {
       };
       startLoop();
     } else if (closing.value) {
-      springTarget = budRect(surface.value);
+      springTarget = surface.value.trigger;
     }
   }
 }
@@ -622,6 +627,7 @@ onBeforeUnmount(() => {
         'has-icon': Boolean(icon),
         'is-block': block,
         'is-open': open,
+        'is-surfaced': renderMenu && Boolean(surface),
       },
     ]"
   >
@@ -775,13 +781,12 @@ onBeforeUnmount(() => {
           </defs>
           <g :filter="`url(#${gooId})`">
             <rect
-              v-if="surface.bud"
               class="goo-shape"
-              :x="surface.bud.x"
-              :y="surface.bud.y"
-              :width="surface.bud.width"
-              :height="surface.bud.height"
-              rx="6"
+              :x="surface.trigger.x"
+              :y="surface.trigger.y"
+              :width="surface.trigger.width"
+              :height="surface.trigger.height"
+              rx="8"
             />
             <rect
               class="goo-shape"
@@ -794,6 +799,15 @@ onBeforeUnmount(() => {
           </g>
           <rect
             class="goo-crisp"
+            :x="surface.trigger.x"
+            :y="surface.trigger.y"
+            :width="surface.trigger.width"
+            :height="surface.trigger.height"
+            rx="8"
+            :fill="`url(#${gradientId})`"
+          />
+          <rect
+            class="goo-crisp"
             :filter="`url(#${shadowId})`"
             :x="motionRect.x"
             :y="motionRect.y"
@@ -804,11 +818,45 @@ onBeforeUnmount(() => {
           />
         </svg>
         <div
+          v-if="surface"
+          class="ui-select-anchor"
+          :class="[`size-${size}`, { 'has-icon': Boolean(icon) }]"
+          :style="anchorStyle"
+          aria-hidden="true"
+        >
+          <span v-if="icon" class="ui-select-prefix">
+            <Icon
+              :name="icon"
+              :size="size === 'sm' ? 14 : size === 'lg' ? 18 : 16"
+            />
+          </span>
+          <span
+            class="ui-select-anchor-value"
+            :class="{ 'is-placeholder': !selectedOption }"
+            >{{ displayLabel }}</span
+          >
+          <span class="ui-select-anchor-arrow">
+            <svg
+              viewBox="0 0 10 6"
+              width="10"
+              height="6"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M1 1l4 4 4-4" />
+            </svg>
+          </span>
+        </div>
+        <div
           class="ui-select-list"
           :class="{ 'is-leaving': contentLeaving }"
           :style="{
             opacity: contentOpacity,
             transform: `translateY(${(1 - contentOpacity) * 6}px)`,
+            clipPath: contentClip,
             pointerEvents: contentReady ? 'auto' : 'none',
           }"
         >
@@ -975,6 +1023,70 @@ onBeforeUnmount(() => {
   padding-left: 6px;
 }
 
+/* 打开时触发器内容由覆盖层中的镜像保持清晰；表面本身由 SVG 触发器皮肤承担 */
+.ui-select-anchor {
+  position: fixed;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  border: 1px solid transparent;
+  box-sizing: border-box;
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.ui-select-anchor.size-sm {
+  font-size: 12px;
+  padding: 4px 26px 4px 8px;
+}
+
+.ui-select-anchor.size-sm.has-icon {
+  padding-left: 4px;
+}
+
+.ui-select-anchor.size-md {
+  font-size: 13px;
+  padding: 8px 32px 8px 12px;
+}
+
+.ui-select-anchor.size-md.has-icon {
+  padding-left: 4px;
+}
+
+.ui-select-anchor.size-lg {
+  font-size: 14px;
+  padding: 10px 36px 10px 14px;
+}
+
+.ui-select-anchor.size-lg.has-icon {
+  padding-left: 6px;
+}
+
+.ui-select-anchor-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-select-anchor-value.is-placeholder {
+  color: var(--muted);
+}
+
+.ui-select-anchor-arrow {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  transform: translateY(-50%);
+}
+
 .ui-select-prefix {
   display: inline-flex;
   align-items: center;
@@ -1007,6 +1119,25 @@ onBeforeUnmount(() => {
 
 .ui-select-inner:focus-within .ui-select-arrow {
   color: var(--forest);
+}
+
+/* 打开时触发器表面交给同一 Morph 实体，内容层淡出，避免出现两个表面 */
+.ui-select.is-surfaced .ui-select-inner {
+  background: transparent;
+  background-image: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.ui-select.is-surfaced .ui-select-trigger:focus-visible {
+  outline: none;
+}
+
+.ui-select.is-surfaced .ui-select-value,
+.ui-select.is-surfaced .ui-select-arrow,
+.ui-select.is-surfaced .ui-select-prefix,
+.ui-select.is-surfaced .ui-select-measure {
+  opacity: 0;
 }
 
 /* 禁用与错误 */
@@ -1061,6 +1192,7 @@ onBeforeUnmount(() => {
   max-width: calc(100vw - 16px);
   overflow: visible;
   opacity: 0;
+  pointer-events: none;
 }
 
 /* L1 表面层：菜单主体、连接颈与触发器芽共用同一个 Alpha 场 */
