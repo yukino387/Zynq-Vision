@@ -61,7 +61,7 @@ export class SystemController {
       createdAt: { gte: new Date(start), lte: new Date(end) },
       ...(deviceId ? { deviceId } : {}),
     };
-    const [byResult, samples, snapshots, pendingReview] = await Promise.all([
+    const [byResult, samples, snapshots] = await Promise.all([
       this.db.inspection.groupBy({
         by: ["result"],
         _count: { _all: true },
@@ -73,14 +73,6 @@ export class SystemController {
         where: { deletedAt: null },
       }),
       this.devices.snapshots(),
-      this.db.inspection.count({
-        where: {
-          OR: [
-            { result: { in: ["REVIEW", "ERROR"] }, reviewResult: null },
-            { reviewResult: "REVIEW" },
-          ],
-        },
-      }),
     ]);
     const count = (result: string) =>
       byResult.find((r) => r.result === result)?._count._all ?? 0;
@@ -174,8 +166,8 @@ export class SystemController {
               key: "inspection",
               label: "检测",
               done: byResult.reduce((s, r) => s + r._count._all, 0),
-              waiting: pendingReview,
-              to: "records/queue",
+              waiting: 0,
+              to: "records/all",
             },
           ];
         })()
@@ -245,9 +237,7 @@ export class SystemController {
       },
       /** 设备内存里的最近一帧遥测；没有过遥测时为 null，界面显示未上报。 */
       through: active?.telemetry ?? null,
-      pipeline: engineer
-        ? { pendingReview, reviewSamples, pendingDeployments }
-        : null,
+      pipeline: engineer ? { reviewSamples, pendingDeployments } : null,
       loop,
       trainingReadiness: readiness
         ? {

@@ -7,6 +7,7 @@
 #include "../../hardware/camera/ov5640_registers.h"
 #include "../../hardware/camera/ov5640_mode.h"
 #include <atomic>
+#include <arm_neon.h>
 #include <algorithm>
 #include <chrono>
 #include <cstring>
@@ -52,7 +53,10 @@ Hardware::~Hardware() {
     gpio[0]=control&~16u;dma[0x30/4]=4;
     munmap(buffer,VISION_BUFFER_BYTES);munmap(const_cast<uint32_t*>(gpio),4096);munmap(const_cast<uint32_t*>(dma),4096);munmap(const_cast<uint32_t*>(conv),4096);close(fd);
 }
-void Hardware::pin(unsigned mask,bool high){control=high?control|mask:control&~mask;gpio[0]=control;delay(5);}
+void Hardware::pin(unsigned mask,bool high){control=high?control|mask:control&~mask;gpio[0]=control;
+    if(mask==16){const auto end=clock_ns()+5000;while(clock_ns()<end){}}
+    else delay(5);
+}
 void Hardware::start(){pin(2,true);pin(1,true);pin(2,false);pin(1,false);}
 void Hardware::stop(){pin(2,false);pin(1,true);pin(2,true);}
 bool Hardware::write_byte(uint8_t v){for(unsigned i=0;i<8;++i){pin(2,v&0x80);pin(1,true);pin(1,false);v<<=1;}pin(2,true);pin(1,true);const bool ack=!(gpio[2]&1);pin(1,false);return ack;}
@@ -81,6 +85,8 @@ void Hardware::load_model(const std::vector<uint8_t>& file,const std::string& ve
     if(graph[4]!=1 && graph[4]!=3)throw std::runtime_error("Unsupported input channels");
     for(unsigned i=0;i<33;++i)for(unsigned j=0;j<10;++j)if(!(i==0 && j==4) && graph[i*10+j]!=model_commands[i][j])throw std::runtime_error("Model graph mismatch");
     channels=graph[4];
+    level_enabled=expected_file==level_model_sha256;
+    captured_level=LevelFrame{};
     have_frame=false;current=0;captured_ns=0;
     std::memcpy(commands,graph,sizeof(commands));
     gray.assign(3*224*224,0);
@@ -105,6 +111,7 @@ Frame Hardware::capture() {
     const auto prepare_begin=clock_ns();
     Frame frame;frame.id=++sequence;frame.monotonic_ns=captured_ns;
     frame.pixels.swap(captured_pixels);
+    frame.level=std::move(captured_level);
     auto features=reinterpret_cast<int8_t*>(buffer+feature_offset);
     for(unsigned c=0;c<channels;++c)for(unsigned y=0;y<224;++y)std::memcpy(features+c*224*256+y*256,gray.data()+c*224*224+y*224,224);
     prepare_ns.store(clock_ns()-prepare_begin);
@@ -129,8 +136,7 @@ Frame Hardware::capture() {
         std::atomic_thread_fence(std::memory_order_seq_cst);conv[0]=1;
         while(!(conv[0]&2)){
             if(clock_ns()>inference_deadline)throw std::runtime_error("PL inference timeout");
-            // ap_done remains latched until read; let Linux run while the PL works.
-            delay(50);
+            // Keep layer hand-off immediate; inference has its own CPU.
         }
     }
     conv_ns.store(clock_ns()-conv_begin);
@@ -156,21 +162,29 @@ uint64_t Hardware::prepare_capture(unsigned index) {
     captured_pixels.resize(416*416);
     std::memcpy(captured_pixels.data(),buffer+pixels_offset+index*camera_bytes,camera_bytes);
     if(!shading.empty()){
-        for(unsigned i=0;i<416u*416u;++i){
-            const uint16_t p=captured_pixels[i];
-            unsigned r=(p>>11)&31,g=(p>>5)&63,b=p&31;
-            r=(r<<3)|(r>>2);g=(g<<2)|(g>>4);b=(b<<3)|(b>>2);
-            const uint16_t* gain=&shading[i*3];
-            r=std::min(255u,(r*gain[0]+128)>>8);
-            g=std::min(255u,(g*gain[1]+128)>>8);
-            b=std::min(255u,(b*gain[2]+128)>>8);
-            captured_pixels[i]=uint16_t(((r>>3)<<11)|((g>>2)<<5)|(b>>3));
+        // Gains remain Q8 with the same rounding and saturation as the scalar path.
+        for(unsigned i=0;i<416u*416u;i+=8){
+            const auto p=vld1q_u16(captured_pixels.data()+i);
+            const auto r5=vshrq_n_u16(p,11),g6=vandq_u16(vshrq_n_u16(p,5),vdupq_n_u16(63)),b5=vandq_u16(p,vdupq_n_u16(31));
+            const auto gain=vld3q_u16(shading.data()+i*3);
+            auto corrected=[](uint16x8_t c,uint16x8_t gain){
+                const auto lo=vaddq_u32(vmull_u16(vget_low_u16(c),vget_low_u16(gain)),vdupq_n_u32(128));
+                const auto hi=vaddq_u32(vmull_u16(vget_high_u16(c),vget_high_u16(gain)),vdupq_n_u32(128));
+                return vminq_u16(vcombine_u16(vshrn_n_u32(lo,8),vshrn_n_u32(hi,8)),vdupq_n_u16(255));
+            };
+            const auto r=corrected(vorrq_u16(vshlq_n_u16(r5,3),vshrq_n_u16(r5,2)),gain.val[0]);
+            const auto g=corrected(vorrq_u16(vshlq_n_u16(g6,2),vshrq_n_u16(g6,4)),gain.val[1]);
+            const auto b=corrected(vorrq_u16(vshlq_n_u16(b5,3),vshrq_n_u16(b5,2)),gain.val[2]);
+            vst1q_u16(captured_pixels.data()+i,vorrq_u16(vorrq_u16(vshlq_n_u16(vshrq_n_u16(r,3),11),vshlq_n_u16(vshrq_n_u16(g,2),5)),vshrq_n_u16(b,3)));
         }
     }
     // The previous pixels are cached now; rearm the other DMA buffer immediately,
     // as in the bare-metal pipeline, before preprocessing or the next inference.
     start_capture(index^1);
-    model_input_rows(captured_pixels.data(),gray.data(),0,640,channels);
+    if(level_enabled){
+        captured_level=prepare_level_rgb565(captured_pixels.data());
+        for(unsigned i=0;i<224*224;++i)gray[i]=int8_t((unsigned(captured_level.gray[i])*127+127)/255);
+    }else model_input_rows(captured_pixels.data(),gray.data(),0,640,channels);
     return captured;
 }
 }

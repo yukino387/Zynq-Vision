@@ -1,56 +1,59 @@
 {
-  "name": "视觉采样",
-  "appid": "__UNI__05C60CA",
-  "description": "本地局域网现场视觉采样",
-  "versionName": "0.2.0",
-  "versionCode": "200",
-  "transformPx": false,
-  "vueVersion": "3",
-  "h5": {
-    "router": {
-      "mode": "hash",
-      "base": "/mobile/"
+    "name" : "视觉采样",
+    "appid" : "__UNI__05C60CA",
+    "description" : "本地局域网现场视觉采样",
+    "versionName" : "0.2.0",
+    "versionCode" : "200",
+    "transformPx" : false,
+    "vueVersion" : "3",
+    "h5" : {
+        "router" : {
+            "mode" : "hash",
+            "base" : "/mobile/"
+        },
+        "title" : "视觉采样"
     },
-    "title": "视觉采样"
-  },
-  "app-plus": {
-    "usingComponents": true,
-    "modules": {
-      "Camera": {},
-      "LivePusher": {},
-      "Barcode": {}
-    },
-    "safearea": {
-      "background": "#f3f6f7",
-      "bottom": {
-        "offset": "auto"
-      }
-    },
-    "distribute": {
-      "android": {
-        "minSdkVersion": 23,
-        "targetSdkVersion": 35,
-        "usesCleartextTraffic": true,
-        "abiFilters": ["arm64-v8a", "armeabi-v7a", "x86"],
-        "permissions": [
-          "<uses-permission android:name=\"android.permission.CAMERA\"/>",
-          "<uses-permission android:name=\"android.permission.RECORD_AUDIO\"/>",
-          "<uses-permission android:name=\"android.permission.INTERNET\"/>",
-          "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>"
-        ]
-      },
-      "icons": {
-        "android": {
-          "mdpi": "src/static/icon-48.png",
-          "hdpi": "src/static/icon-72.png",
-          "xhdpi": "src/static/icon-96.png",
-          "xxhdpi": "src/static/icon-144.png",
-          "xxxhdpi": "src/static/icon-192.png"
+    "app-plus" : {
+        "usingComponents" : true,
+        "modules" : {
+            "Camera" : {},
+            "LivePusher" : {},
+            "Barcode" : {}
+        },
+        "safearea" : {
+            "background" : "#f3f6f7",
+            "bottom" : {
+                "offset" : "auto"
+            }
+        },
+        "distribute" : {
+            "android" : {
+                "minSdkVersion" : 23,
+                "targetSdkVersion" : 35,
+                "usesCleartextTraffic" : true,
+                "abiFilters" : [ "arm64-v8a", "armeabi-v7a", "x86" ],
+                "permissions" : [
+                    "<uses-permission android:name=\"android.permission.CAMERA\"/>",
+                    "<uses-permission android:name=\"android.permission.RECORD_AUDIO\"/>",
+                    "<uses-permission android:name=\"android.permission.INTERNET\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>"
+                ]
+            },
+            "icons" : {
+                "android" : {
+                    "mdpi" : "src/static/icon-48.png",
+                    "hdpi" : "src/static/icon-72.png",
+                    "xhdpi" : "src/static/icon-96.png",
+                    "xxhdpi" : "src/static/icon-144.png",
+                    "xxxhdpi" : "src/static/icon-192.png"
+                }
+            },
+            "ios" : {
+                "dSYMs" : false
+            }
         }
-      }
+    },
+    "uniStatistics" : {
+        "enable" : false
     }
-  },
-  "uniStatistics": {
-    "enable": false
-  }
 }

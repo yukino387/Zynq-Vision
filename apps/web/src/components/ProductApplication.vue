@@ -237,9 +237,15 @@ watch(
 watch(
   targets,
   (items) => {
-    if (!deviceId.value)
+    if (
+      !items.some(
+        (item) =>
+          item.id === deviceId.value && item.connectionState === "ONLINE",
+      )
+    )
       deviceId.value =
         items.find((item) => item.connectionState === "ONLINE")?.id ??
+        items.find((item) => item.id === deviceId.value)?.id ??
         items[0]?.id ??
         "";
   },
@@ -366,7 +372,7 @@ async function apply() {
             <label for="inspection-device">{{
               inline ? "当前检测设备" : "在哪台设备上检测？"
             }}</label>
-            <p v-if="inline" class="device-name">
+            <p v-if="inline || targets.length === 1" class="device-name">
               {{ device?.name || "尚未选择" }}
             </p>
             <UiSelect
@@ -406,7 +412,11 @@ async function apply() {
             </div>
           </section>
         </div>
-        <details class="model-options" :open="issue?.kind === 'model'">
+        <details
+          v-if="compatibleModels.length > 1 || issue?.kind === 'model'"
+          class="model-options"
+          :open="issue?.kind === 'model'"
+        >
           <summary>
             识别模型：{{ selectedModel?.version || "尚未匹配"
             }}<span>{{

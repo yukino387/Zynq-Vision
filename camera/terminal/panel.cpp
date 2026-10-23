@@ -335,6 +335,11 @@ void refresh(lv_timer_t*) {
         unsigned confirmed=0;for(const auto& b:frame.at("boxes"))if(b.value("trackConfirmed",false))++confirmed;
         const bool truncated=frame.contains("postprocess") && (frame["postprocess"].value("overflow",false) || frame["postprocess"].value("invalid",0u));
         text(fresh_label,(frame.at("fresh").get<bool>()?"实时画面":"画面已超时")+std::string(" · #")+std::to_string(frame.at("frameId").get<unsigned>())+" · 本帧目标 "+std::to_string(frame.at("boxes").size())+" · 稳定跟踪 "+std::to_string(confirmed)+(truncated?" · 目标异常，请复核":""));
+        if(frame.contains("level")){
+            const auto& level=frame.at("level");std::string value=level.at("status");
+            if(!level.at("row").is_null()){const auto row=std::to_string(level.at("row").get<double>());value+=" · "+row.substr(0,row.find('.')+3)+" 行";}
+            text(fresh_label,(frame.at("fresh").get<bool>()?"实时 · ":"超时 · ")+value+" · 合格带 85.00–102.90");
+        }
         for(auto object:rectangles)lv_obj_delete(object);rectangles.clear();
         if(has_product && frame.at("planId")==state["product"].at("id") && frame.at("planVersion")==state["product"].at("version") && state["product"].contains("checks"))for(const auto& check:state["product"]["checks"])if(check.contains("region")) {
             const auto& r=check["region"];auto rectangle=lv_obj_create(picture);lv_obj_remove_style_all(rectangle);

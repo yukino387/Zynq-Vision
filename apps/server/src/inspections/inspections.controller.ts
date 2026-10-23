@@ -38,17 +38,6 @@ export class InspectionsController {
           },
         ];
     }
-    if (q.result === "REVIEW" && q.reviewed === "false") {
-      delete args.where.result;
-      args.where.AND = [
-        {
-          OR: [
-            { result: { in: ["REVIEW", "ERROR"] }, reviewResult: null },
-            { reviewResult: "REVIEW" },
-          ],
-        },
-      ];
-    }
     if (q.realOnly === "true") args.where.NOT = { source: "SIMULATION" };
     return page(
       await this.db.inspection.findMany({
@@ -350,10 +339,16 @@ export class ReviewsController {
       const inspection = await tx.inspection.findUniqueOrThrow({
         where: { id: dto.inspectionId },
       });
+      if (inspection.result === "ERROR" && dto.finalResult)
+        throw new DomainError(
+          "VALIDATION_ERROR",
+          "检测执行失败，请排除故障后重新检测，不能补判产品质量",
+          400,
+        );
       if (dto.finalResult === "REVIEW" && !dto.note.trim())
         throw new DomainError(
           "VALIDATION_ERROR",
-          "保持待复核时请填写原因",
+          "保持不确定时请填写原因",
           400,
         );
       const review = await tx.review.create({

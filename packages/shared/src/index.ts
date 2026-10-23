@@ -15,6 +15,12 @@ export {
 } from "./display.js";
 export { statusTone, type Tone } from "./status.js";
 export { evaluateInspection, assessInspectionImage } from "./acceptance.js";
+export {
+  measureLevelGray,
+  mapLevelBoxes,
+  recomputeLevelReport,
+  applyLevelDecision,
+} from "./level-compat.js";
 /** Business classes occupy the first slots; the fixed hardware head has six slots. */
 export function productClassesMatch(
   product: string[],

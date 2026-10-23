@@ -7,6 +7,7 @@ import { terminalRequest } from "./terminal-client.js";
 
 export interface TerminalPreview {
   frameId: number;
+  level?: import("@vision/contracts").LevelReport;
   postprocess?: import("@vision/contracts").PostprocessReport;
   planId?: string | null;
   planVersion?: number | null;
@@ -19,6 +20,7 @@ export interface TerminalPreview {
 
 interface TerminalFrameMetadata {
   frameId: number;
+  level?: import("@vision/contracts").LevelReport;
   postprocess?: import("@vision/contracts").PostprocessReport;
   planId?: string | null;
   planVersion?: number | null;
@@ -62,6 +64,7 @@ export async function readTerminalPreview(
     .toBuffer();
   return {
     frameId: metadata.frameId,
+    level: metadata.level,
     postprocess: metadata.postprocess,
     planId: metadata.planId,
     planVersion: metadata.planVersion,

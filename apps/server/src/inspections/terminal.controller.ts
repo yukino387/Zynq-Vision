@@ -16,6 +16,8 @@ import { z } from "zod";
 import {
   acceptanceSchema,
   postprocessSchema,
+  levelEvidenceSchema,
+  LEVEL_V3_PAYLOAD_SHA256,
   inspectionRegionSchema,
   planPurposeSchema,
   type BatchSnapshot,
@@ -24,6 +26,8 @@ import {
   canonical,
   assessInspectionImage,
   evaluateInspection,
+  recomputeLevelReport,
+  applyLevelDecision,
 } from "@vision/shared";
 import { detect, detectObjects, decodeRgb565 } from "@vision/device-protocol";
 import { Public, Roles, type Request } from "../core/auth.js";
@@ -54,6 +58,7 @@ const recordSchema = z
   .object({
     formatVersion: z.literal(1),
     postprocess: postprocessSchema.optional(),
+    level: levelEvidenceSchema.optional(),
     planId: z.string().min(1),
     planVersion: z.number().int().min(1),
     planName: z.string().min(1).max(120),
@@ -132,6 +137,7 @@ const heartbeatSchema = z
         payloadSha256: z.string().regex(/^[a-f0-9]{64}$/),
         weightsSha256: z.string().regex(/^[a-f0-9]{64}$/),
         classes: z.array(z.string().min(1)).min(1),
+        compatibilityProfile: z.literal("LEVEL_V3_20261022").optional(),
       })
       .strict()
       .nullable(),
@@ -544,10 +550,40 @@ export class TerminalController {
       dto.postprocess ?? snapshot.rules.postprocess ?? {},
     );
     const filtered = dto.postprocess ? detectObjects(out0, out1, policy) : null;
-    const boxes = (filtered?.boxes ?? detect(out0, out1)).map((box) => ({
+    let boxes = (filtered?.boxes ?? detect(out0, out1)).map((box) => ({
       ...box,
       label: snapshot.modelClasses[box.classId]!,
     }));
+    const liquidModel = snapshot.modelPayloadSha256 === LEVEL_V3_PAYLOAD_SHA256;
+    if (liquidModel !== !!dto.level)
+      throw new DomainError(
+        "MODEL_INCOMPATIBLE",
+        "液位模型与兼容处理证据不匹配，请检查板端版本",
+        422,
+      );
+    const levelGray = dto.level ? decode(dto.level.gray224, 224 * 224) : null;
+    let level: import("@vision/contracts").LevelReport | null = null;
+    if (dto.level && levelGray) {
+      try {
+        level = recomputeLevelReport(dto.level, levelGray);
+      } catch (error) {
+        throw new DomainError("VALIDATION_ERROR", String(error), 422);
+      }
+      // The red label is the product marker for LEVEL-v3; the network box is
+      // not used. Replace detections with the label's own box.
+      const [bx, by, bw, bh] = level.bbox;
+      boxes = [
+        {
+          classId: 0,
+          label: snapshot.modelClasses[0]!,
+          confidence: 1,
+          x1: bx,
+          y1: by,
+          x2: bx + bw,
+          y2: by + bh,
+        },
+      ];
+    }
     const quality = assessInspectionImage(raw),
       decision = evaluateInspection({
         rules: snapshot.rules,
@@ -557,6 +593,12 @@ export class TerminalController {
         height: 416,
         quality: quality.status,
       });
+    if (level)
+      applyLevelDecision(
+        decision,
+        level,
+        boxes.some((box) => box.confidence >= snapshot.acceptance.confidence),
+      );
     if (filtered?.report.overflow || filtered?.report.invalid) {
       decision.result = "REVIEW";
       decision.reason = "目标过多或候选数据异常，请人工复核";
@@ -655,6 +697,18 @@ export class TerminalController {
       ),
     ]);
     stored[0]!.format = "RGB565_LE";
+    if (levelGray)
+      stored.push(
+        await this.assets.store(
+          levelGray,
+          "MODEL_INPUT",
+          "BOARD",
+          "level-gray224.bin",
+          "application/octet-stream",
+          224,
+          224,
+        ),
+      );
     try {
       const sample = await this.db.$transaction(async (tx) => {
         const created = await tx.sample.create({
@@ -702,6 +756,9 @@ export class TerminalController {
               bootId: dto.bootId,
               monotonicNs: dto.monotonicNs,
               localResult: dto.localResult,
+              ...(level
+                ? { level: level as unknown as Prisma.InputJsonValue }
+                : {}),
               ...(filtered
                 ? {
                     postprocess:

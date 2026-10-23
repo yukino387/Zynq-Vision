@@ -22,6 +22,7 @@ import ProductWorkflow from "./components/ProductWorkflow.vue";
 import Icon from "./components/Icon.vue";
 import { UiSelect, UiBadge, UiButton, UiThemeToggle } from "./components/ui";
 const navIcons: Record<string, string> = {
+  showcase: "scan",
   overview: "dashboard",
   plans: "clipboard",
   production: "scan",
@@ -193,6 +194,7 @@ watch(
 <template>
   <div v-if="!auth.ready" class="empty">正在连接平台…</div>
   <AuthPanel v-else-if="!auth.user" />
+  <RouterView v-else-if="route.name === 'showcase'" />
   <div
     v-else
     class="shell"

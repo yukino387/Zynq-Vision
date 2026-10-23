@@ -1,557 +1,264 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { displayName } from "@vision/shared";
-import type { InspectionPlan } from "@vision/contracts";
-import { api } from "../api";
-import { useAuthStore } from "../stores/auth";
+import { computed, ref, watch } from "vue";
+import { terminalActivity } from "@vision/shared";
+import type { InspectionBatch, Page } from "@vision/contracts";
+import { api, errorText } from "../api";
 import { useDeviceStore } from "../stores/devices";
 import AsyncState from "../components/AsyncState.vue";
-import Icon from "../components/Icon.vue";
-import { UiButton, UiCard, UiBadge, UiStat } from "../components/ui";
+import { UiButton, UiCard, UiBadge, UiStat, UiSelect } from "../components/ui";
 
-const auth = useAuthStore(),
-  devices = useDeviceStore();
-interface Overview {
-  samples: { pending: number };
-  pipeline: { pendingReview: number } | null;
-  trainingReadiness: {
-    realSamples: number;
-    annotatedReal: number;
-    simulatedSamples: number;
-    readyDatasets: { id: string }[];
-    candidateModels: number;
-    activeDeployments: number;
-  } | null;
-}
-const data = ref<Overview | null>(null),
-  plans = ref<InspectionPlan[]>([]),
-  pendingReal = ref(0),
-  loading = ref(false),
+const devices = useDeviceStore();
+const device = computed(() => devices.current);
+const state = computed(() => device.value?.terminal?.state);
+const online = computed(() => device.value?.connectionState === "ONLINE");
+const activity = computed(() =>
+  terminalActivity(state.value ?? null, online.value),
+);
+const counts = computed(() =>
+  state.value?.productionRunId ? state.value.runCounts : state.value?.counts,
+);
+const total = computed(() =>
+  counts.value
+    ? Object.values(counts.value).reduce((sum, count) => sum + count, 0)
+    : null,
+);
+const batches = ref<InspectionBatch[]>([]);
+const loading = ref(false),
   error = ref("");
-const ready = computed(() => data.value?.trainingReadiness);
+const batchLink = computed(() => ({
+  name: "production",
+  query: { run: state.value?.productionRunId || undefined },
+}));
 async function load() {
+  const id = device.value?.id;
+  batches.value = [];
+  if (!id) return;
   loading.value = true;
   error.value = "";
   try {
-    const [overview, result, pending] = await Promise.all([
-      api<Overview>("/overview"),
-      api<{ items: InspectionPlan[] }>("/plans?pageSize=100"),
-      api<{ total: number }>(
-        "/samples?realOnly=true&reviewed=false&pageSize=1",
-      ),
-    ]);
-    data.value = overview;
-    pendingReal.value = pending.total;
-    plans.value = result.items.filter((p) => Array.isArray(p.rules.classes));
+    const result = await api<Page<InspectionBatch>>(
+      `/batches?deviceId=${encodeURIComponent(id)}&pageSize=5&sort=createdAt&order=desc`,
+    );
+    if (device.value?.id === id) batches.value = result.items;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    error.value = errorText(e);
   } finally {
     loading.value = false;
   }
 }
-onMounted(load);
-const next = computed(() => {
-  if (!plans.value.length)
-    return {
-      title: "先配置要检测的产品",
-      body: "设置识别对象和合格数量，保存后即可准备检测。",
-      label: auth.admin ? "新建产品" : "查看产品配置",
-      to: auth.admin ? "/plans?create=1" : "/plans",
-    };
-  if (data.value?.pipeline?.pendingReview)
-    return {
-      title: `${data.value.pipeline.pendingReview} 件检测结果需要复核`,
-      body: "查看单件图像与机器判定，再给出人工处理结论。",
-      label: "处理待复核记录",
-      to: "/records/queue",
-    };
-  const device = devices.current,
-    state = device?.terminal?.state;
-  if (device?.connectionState !== "ONLINE")
-    return {
-      title: "检测设备尚未连接",
-      body: "检查供电和网线，在设备诊断中确认连接状态。",
-      label: "查看设备连接",
-      to: "/diagnostics/registry",
-    };
-  if (state?.production)
-    return {
-      title: `正在检测：${state.product?.product || state.product?.name || device.name}`,
-      body: "在现场工作台查看实时画面、单件结果和当前批次计数，也可以停止检测或更换产品。",
-      label: "查看现场检测",
-      to: "/workbench",
-    };
-  return {
-    title: "准备开始检测",
-    body: "进入现场工作台，沿用现有配置开检，或直接选择其他产品。批次会随检测自动创建。",
-    label: "进入现场工作台",
-    to: "/workbench",
-  };
-});
-const actions = [
-  {
-    title: "现场检测",
-    body: "开始、停止、换型和查看实时画面",
-    to: "/workbench",
-  },
-  { title: "产品配置", body: "设置识别对象、合格数量和位置范围", to: "/plans" },
-  {
-    title: "样本与标注",
-    body: "补充训练图片，标注目标并整理样本",
-    to: "/data/annotation",
-  },
-  {
-    title: "模型管理",
-    body: "导入或查看模型，核对效果并批准使用",
-    to: "/models/registry",
-  },
-];
+async function refresh() {
+  try {
+    await devices.snapshot();
+    await load();
+  } catch (e) {
+    error.value = errorText(e);
+  }
+}
+watch(() => device.value?.id, load, { immediate: true });
+watch(() => state.value?.productionRunId, load);
 </script>
 
 <template>
   <div class="page-heading">
     <div>
-      <h1>{{ auth.admin ? "管理首页" : "技术维护" }}</h1>
-      <p>围绕产品与检查方案，把现场采样、模型准备和正式发布连接起来。</p>
+      <h1>运行概览</h1>
+      <p>当前设备、自动检测状态与批次结果。</p>
     </div>
     <div class="heading-actions">
-      <UiButton variant="secondary" icon="chart" to="/production?tab=stats">
-        统计分析
-      </UiButton>
+      <UiSelect
+        v-if="devices.devices.length > 1"
+        v-model="devices.selected"
+        aria-label="检测设备"
+      >
+        <option v-for="item in devices.devices" :key="item.id" :value="item.id">
+          {{ item.name }}
+        </option>
+      </UiSelect>
       <UiButton
         variant="secondary"
         icon="refresh"
         :loading="loading"
-        @click="load"
+        @click="refresh"
+        >刷新</UiButton
       >
-        {{ loading ? "刷新中…" : "刷新概览" }}
-      </UiButton>
     </div>
   </div>
+  <UiCard padding="lg" class="current-device">
+    <div>
+      <UiBadge :tone="online ? 'forest' : 'warn'" chip dot>{{
+        online ? "设备在线" : "设备未连接"
+      }}</UiBadge>
+      <h2>{{ activity.label }}</h2>
+      <p>
+        {{ device?.name || "尚未选择设备" }} ·
+        {{ state?.product?.product || state?.product?.name || "尚未配置产品" }}
+      </p>
+      <p class="muted">{{ activity.hint }}</p>
+    </div>
+    <UiButton variant="primary" to="/workbench">进入现场检测</UiButton>
+  </UiCard>
 
-  <AsyncState :loading="loading" :error="error" @retry="load">
-    <!-- 下一步推进任务卡片 -->
-    <UiCard variant="accent" padding="lg" class="management-next-card">
-      <div class="management-next-grid">
-        <div class="management-next-main">
-          <UiBadge tone="forest" chip dot :pulse="true" class="mb-3">
-            {{ auth.admin ? "当前需要你处理" : "维护职责" }}
-          </UiBadge>
-          <h2>{{ next.title }}</h2>
-          <p>{{ next.body }}</p>
-          <UiButton variant="primary" size="md" :to="next.to">
-            {{ next.label }}
-          </UiButton>
-        </div>
-        <aside class="management-next-aside">
-          <b>可配置，不限定一种产品</b>
-          <p>
-            方案决定检查什么；兼容模型负责识别；业务规则用于判定。网络模板和量化参数由开发者维护。
-          </p>
-          <RouterLink to="/plans" class="text-link"
-            >查看方案能力与边界</RouterLink
-          >
-        </aside>
+  <section class="section-space">
+    <div class="section-heading">
+      <div>
+        <h2>{{ state?.productionRunId ? "本批自动检测" : "设备累计检测" }}</h2>
+        <p class="muted">
+          {{
+            online ? "设备原始判定，包含待上传记录。" : "上次上报的设备数据。"
+          }}
+          批次页查看已上传记录及更正结果。
+        </p>
       </div>
-    </UiCard>
-
-    <!-- 核心统计指标 -->
-    <div v-if="ready" class="management-counts">
+      <UiButton variant="ghost" :to="batchLink">查看批次</UiButton>
+    </div>
+    <div class="counts">
+      <UiStat label="检测总件数" :value="total" unit="件" :to="batchLink" />
       <UiStat
-        label="已配置方案版本"
-        :value="plans.length"
-        icon="clipboard"
-        to="/plans"
-        hint="点击进入方案配置"
+        label="合格"
+        :value="counts?.PASS ?? null"
+        unit="件"
+        tone="success"
+        :to="batchLink"
       />
       <UiStat
-        label="真实现场样本"
-        :value="ready.realSamples"
-        icon="database"
-        to="/data/samples"
-        hint="工位实采原始画面"
+        label="不合格"
+        :value="counts?.FAIL ?? null"
+        unit="件"
+        tone="crit"
+        :to="batchLink"
       />
       <UiStat
-        :label="auth.admin ? '真实样本待审核与标注' : '已完成标注样本'"
-        :value="auth.admin ? pendingReal : ready.annotatedReal"
-        icon="audit"
-        to="/data/annotation"
-        :tone="auth.admin && pendingReal > 0 ? 'warn' : 'default'"
-        :hint="auth.admin ? '建议及时审核以供训练' : '已标注可冻结'"
+        label="判定不确定"
+        :value="counts?.REVIEW ?? null"
+        unit="件"
+        hint="证据不足，未计入合格或不合格"
+        :to="batchLink"
       />
       <UiStat
-        label="候选模型（待验证）"
-        :value="ready.candidateModels"
-        icon="layers"
-        to="/models/registry"
-        hint="核对效果后由管理员批准使用"
+        label="检测错误"
+        :value="counts?.ERROR ?? null"
+        unit="件"
+        hint="检测执行失败，查看错误原因"
+        :to="batchLink"
       />
     </div>
+    <p v-if="state?.pendingSync" class="muted">
+      {{ state.pendingSync }} 条设备记录待上传。
+    </p>
+  </section>
 
-    <!-- 常用操作流程卡片 -->
-    <section class="management-section">
-      <div class="section-heading">
-        <div>
-          <h2>常用操作</h2>
-          <span class="subtext">按当前需要选择，不必逐项完成</span>
-        </div>
-      </div>
-      <div class="management-actions">
-        <UiCard
-          v-for="action in actions"
-          :key="action.to"
-          hover
-          padding="md"
-          class="action-card"
+  <section class="section-space">
+    <div class="section-heading">
+      <h2>最近批次</h2>
+      <UiButton variant="ghost" to="/production">全部批次</UiButton>
+    </div>
+    <AsyncState :loading="loading" :error="error" @retry="load">
+      <div v-if="batches.length" class="batch-list">
+        <RouterLink
+          v-for="batch in batches"
+          :key="batch.id"
+          class="batch-row"
+          :to="{
+            name: 'production',
+            query: { run: batch.productionRunId || undefined },
+          }"
         >
-          <RouterLink :to="action.to" class="action-card-link">
-            <h3 class="action-title">
-              {{ action.title }}
-            </h3>
-            <p class="action-body">{{ action.body }}</p>
-          </RouterLink>
-        </UiCard>
-      </div>
-    </section>
-
-    <!-- 产品与检查方案展示 -->
-    <section v-if="plans.length" class="management-section">
-      <div class="section-heading">
-        <div>
-          <h2>产品与检查方案</h2>
-          <span class="subtext">当前可用的现场检验规格</span>
-        </div>
-        <UiButton variant="ghost" size="sm" to="/plans">全部方案</UiButton>
-      </div>
-      <div class="management-plans">
-        <UiCard
-          v-for="plan in plans.slice(0, 3)"
-          :key="plan.id"
-          hover
-          padding="md"
-          class="plan-card-item"
-        >
-          <RouterLink
-            :to="{
-              name: 'models',
-              params: { tab: 'deployments' },
-              query: { planId: plan.id },
-            }"
-            class="plan-card-link"
-          >
-            <div class="plan-card-head">
-              <b>{{ plan.rules.product }}</b>
-              <UiBadge tone="info" chip size="sm">V{{ plan.version }}</UiBadge>
-            </div>
-
-            <small class="plan-status-text">{{
-              plan.rules.checks.some((check) => check.min > 0)
-                ? "规则已保存，开检时核对设备与模型"
-                : "需补充计件主体"
+          <div>
+            <b>{{ batch.name }}</b
+            ><small>{{
+              new Date(batch.createdAt).toLocaleString("zh-CN")
             }}</small>
-          </RouterLink>
-        </UiCard>
+          </div>
+          <span>{{ batch.status === "OPEN" ? "进行中" : "已结束" }}</span>
+          <span>查看结果 →</span>
+        </RouterLink>
       </div>
-    </section>
-
-    <!-- 职责分工提示卡片 -->
-    <UiCard variant="flat" padding="md" class="responsibility-card">
-      <div class="responsibility-inner">
-        <div class="resp-icon">
-          <Icon name="users" :size="20" />
-        </div>
-        <div class="resp-content">
-          <b>职责分工说明</b>
-          <p>
-            <strong>现场工人</strong>：按任务留样、监控画面与复核；
-            <strong>管理员</strong>：制定产品方案、审核样本并批准模型上线；
-            <strong>技术维护人员</strong>：维护设备通信与部署、协助模型验证。
-          </p>
-        </div>
-        <div v-if="auth.admin" class="resp-action">
-          <UiButton variant="outline" size="sm" to="/access/users">
-            管理人员与权限
-          </UiButton>
-        </div>
-      </div>
-    </UiCard>
-  </AsyncState>
+      <p v-else class="muted">
+        {{
+          device
+            ? "此设备暂无已上传批次。开始自动检测后会自动创建批次。"
+            : "选择设备后查看生产批次。"
+        }}
+      </p>
+    </AsyncState>
+  </section>
 </template>
 
 <style scoped>
-.mb-3 {
-  margin-bottom: 12px;
-}
-
-.management-next-card {
-  margin-top: 4px;
-}
-
-.management-next-grid {
-  display: grid;
-  grid-template-columns: 1.6fr 1fr;
-  gap: 40px;
-  align-items: center;
-}
-
-.management-next-main h2 {
-  font-size: clamp(22px, 2.2vw, 30px);
-  margin: 10px 0 14px;
-  color: var(--ink);
-  line-height: 1.35;
-}
-
-.management-next-main p {
-  font-size: 14px;
-  line-height: 1.8;
-  color: var(--muted);
-  max-width: 600px;
-  margin-bottom: 22px;
-}
-
-.management-next-aside {
-  border-left: 1px solid var(--line);
-  padding-left: 28px;
-  color: var(--ink-2);
-}
-
-.management-next-aside b {
-  display: block;
-  font-size: 14px;
-  color: var(--ink);
-  margin-bottom: 8px;
-}
-
-.management-next-aside p {
-  font-size: 13px;
-  line-height: 1.7;
-  color: var(--muted);
-  margin-bottom: 14px;
-}
-
-.text-link {
-  font-size: 13px;
-  color: var(--forest);
-  text-decoration: none;
-  font-weight: 550;
-}
-.text-link:hover {
-  text-decoration: underline;
-}
-
-/* 统计卡片栅格 */
-.management-counts {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  margin-top: 24px;
-}
-
-.management-section {
-  margin-top: 32px;
-}
-
-.section-heading {
+.current-device,
+.section-heading,
+.batch-row {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: flex-end;
-  gap: 12px;
+  gap: 24px;
+}
+.current-device h2 {
+  margin: 16px 0 8px;
+  font-size: 26px;
+}
+.current-device p {
+  margin: 8px 0;
+}
+.section-space {
+  margin-top: 28px;
+}
+.section-heading {
   margin-bottom: 16px;
 }
-
 .section-heading h2 {
-  font-size: 18px;
-  font-weight: 650;
   margin: 0;
-  color: var(--ink);
+  font-size: 18px;
 }
-
-.section-heading .subtext {
-  font-size: 12px;
-  color: var(--muted);
-  margin-left: 8px;
+.section-heading p {
+  margin: 8px 0 0;
+  font-size: 13px;
 }
-
-/* 工作流动作卡片 */
-.management-actions {
+.counts {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 14px;
 }
-
-.action-card {
-  height: 100%;
-}
-
-.action-card-link {
-  text-decoration: none;
-  color: inherit;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.action-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.action-owner {
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.action-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--ink);
-  margin: 0 0 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.action-arrow {
-  color: var(--forest);
-  transition: transform 0.18s ease;
-}
-
-.action-card:hover .action-arrow {
-  transform: translateX(4px);
-}
-
-.action-body {
-  font-size: 13px;
-  color: var(--muted);
-  margin: 0;
-  line-height: 1.6;
-}
-
-/* 方案卡片 */
-.management-plans {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.plan-card-item {
-  height: 100%;
-}
-
-.plan-card-link {
-  text-decoration: none;
-  color: inherit;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  height: 100%;
-}
-
-.plan-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.plan-card-head b {
-  font-size: 15px;
-  color: var(--ink);
-}
-
-.plan-spec {
-  font-size: 13px;
-  color: var(--muted);
-}
-
-.plan-status-text {
-  font-size: 12px;
-  color: var(--muted);
-  margin-top: 4px;
-}
-
-/* 职责卡片 */
-.responsibility-card {
-  margin-top: 32px;
-}
-
-.responsibility-inner {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.resp-icon {
-  color: var(--forest);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
-  background: var(--surface);
-  flex-shrink: 0;
+.batch-list {
   border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
 }
-
-.resp-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.resp-content b {
-  display: block;
-  font-size: 14px;
+.batch-row {
+  padding: 18px 20px;
+  text-decoration: none;
   color: var(--ink);
-  margin-bottom: 4px;
 }
-
-.resp-content p {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.6;
+.batch-row + .batch-row {
+  border-top: 1px solid var(--line);
+}
+.batch-row:hover {
+  background: var(--surface-2);
+}
+.batch-row div {
+  flex: 1;
+}
+.batch-row small {
+  display: block;
+  margin-top: 6px;
   color: var(--muted);
 }
-
-.resp-content strong {
-  color: var(--ink);
-}
-
-.resp-action {
-  flex-shrink: 0;
-}
-
-@media (max-width: 1000px) {
-  .management-next-grid {
-    grid-template-columns: 1fr;
-    gap: 24px;
-  }
-  .management-next-aside {
-    border-left: 0;
-    border-top: 1px solid var(--line);
-    padding: 20px 0 0;
-  }
-  .management-counts {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .management-actions,
-  .management-plans {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .responsibility-inner {
-    flex-direction: column;
-    align-items: flex-start;
+@media (max-width: 1100px) {
+  .counts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
-
 @media (max-width: 600px) {
-  .management-counts,
-  .management-actions,
-  .management-plans {
-    grid-template-columns: 1fr;
+  .counts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .current-device {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .batch-row {
+    flex-wrap: wrap;
   }
 }
 </style>

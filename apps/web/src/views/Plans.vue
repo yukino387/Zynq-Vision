@@ -188,16 +188,14 @@ async function save() {
     detail.value = null;
     await workflow.load();
     workflow.select(saved.id);
-    notices.add("产品规则已保存，请确认后应用并开始检测");
+    notices.add("产品规则已保存，选择后即可开始检测");
     await router.push({
-      name: route.query.returnTo === "workbench" ? "workbench" : "models",
-      params:
-        route.query.returnTo === "workbench" ? {} : { tab: "deployments" },
+      name: "workbench",
       query: {
         planId: saved.id,
         deviceId: route.query.deviceId,
         modelId: route.query.modelId,
-        ...(route.query.returnTo === "workbench" ? { setup: "1" } : {}),
+        setup: "1",
       },
     });
   } catch (e) {
@@ -665,9 +663,8 @@ async function remove() {
       <UiButton
         variant="primary"
         :to="{
-          name: 'models',
-          params: { tab: 'deployments' },
-          query: { planId: detail.id },
+          name: 'workbench',
+          query: { planId: detail.id, setup: '1' },
         }"
         @click="detail = null"
         >使用此产品</UiButton

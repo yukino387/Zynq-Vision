@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { watch, ref } from "vue";
-import { useRoute, useRouter } from "vue-router";
-import { useNotificationStore } from "../stores/notifications";
+import { useRoute } from "vue-router";
 import { useAuthStore } from "../stores/auth";
 import { api } from "../api";
 import type { Inspection } from "../types";
@@ -16,9 +15,7 @@ type InspectionRecord = Inspection & {
 };
 
 const route = useRoute(),
-  router = useRouter(),
   auth = useAuthStore(),
-  notices = useNotificationStore(),
   inspection = ref<InspectionRecord | null>(null),
   loading = ref(false),
   error = ref("");
@@ -39,27 +36,8 @@ async function load() {
   }
 }
 watch(() => route.params.id, load, { immediate: true });
-async function saved(next: boolean) {
-  if (!next) return load();
-  try {
-    const pending = await api<{ items: Inspection[] }>(
-      "/inspections?result=REVIEW&reviewed=false&pageSize=1&sort=createdAt&order=desc",
-    );
-    const item = pending.items[0];
-    if (item)
-      await router.replace({
-        name: "inspection",
-        params: { id: item.id },
-        query: { queue: "1" },
-      });
-    else {
-      notices.add("待复核记录已全部处理");
-      await router.push({ name: "records", params: { tab: "queue" } });
-    }
-  } catch (e) {
-    notices.error(e);
-    await load();
-  }
+async function saved() {
+  await load();
 }
 </script>
 
@@ -75,7 +53,7 @@ async function saved(next: boolean) {
       <RouterLink
         :to="{
           name: 'records',
-          params: { tab: route.query.queue ? 'queue' : 'all' },
+          params: { tab: 'all' },
         }"
         >返回记录列表</RouterLink
       >
@@ -87,7 +65,6 @@ async function saved(next: boolean) {
       <InspectionDetail
         :key="inspection.id"
         :inspection="inspection"
-        :queue="route.query.queue === '1'"
         @saved="saved"
       />
     </div>

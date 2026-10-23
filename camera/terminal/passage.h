@@ -1,7 +1,6 @@
 #pragma once
 #include "core.h"
 #include "hardware.h"
-#include "presence.h"
 #include <array>
 #include <algorithm>
 
@@ -22,7 +21,6 @@ class Passage {
     std::vector<Pattern> patterns_;
     std::array<Frame,2> entering_frames_;
     std::array<Decision,2> entering_decisions_;
-    ScenePresence scene_;
     static bool same(const Decision& a,const Decision& b) {
         if(a.result!=b.result || a.findings.size()!=b.findings.size())return false;
         for(size_t i=0;i<a.findings.size();++i) {
@@ -104,12 +102,11 @@ public:
                 if(box.x1>=rules.region[0]*416+2 && box.y1>=rules.region[1]*416+2 && box.x2<=(rules.region[0]+rules.region[2])*416-2 && box.y2<=(rules.region[1]+rules.region[3])*416-2)complete=true;
             }
         }
-        const auto scene=scene_.observe(frame.pixels,rules.region,!detected && !active_);
-        if(active_ && !strong && scene!=ScenePresence::State::Empty) {
+        if(active_ && !strong && detected) {
             if(!lost_since_)lost_since_=frame.monotonic_ns;
             if(frame.monotonic_ns-lost_since_>uint64_t(rules.postprocess.track_max_gap_ms)*1000000ULL)interrupted_=true;
         }else lost_since_=0;
-        if(!detected && scene==ScenePresence::State::Empty) {
+        if(!detected) {
             entering_=0;if(!empty_++)empty_since_=frame.monotonic_ns;
             if(empty_>=3 && frame.monotonic_ns-empty_since_>=200000000ULL){if(active_)finish();else armed_=true;}
             previous_=8;
@@ -128,7 +125,7 @@ public:
         return ready_;
     }
     void committed() {
-        auto scene=std::move(scene_);reset();scene_=std::move(scene);armed_=true;
+        reset();armed_=true;
     }
 };
 }

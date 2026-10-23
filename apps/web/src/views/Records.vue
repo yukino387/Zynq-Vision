@@ -14,15 +14,18 @@ const route = useRoute(),
   endpoint = ref("/inspections"),
   list = useList<Inspection>(endpoint),
   tab = computed(() =>
-    String(route.params.tab || route.meta.defaultTab || "queue"),
+    String(route.params.tab || route.meta.defaultTab || "all"),
   );
 
-/** 待办 tab 只要待复核的；「全部」不加结果筛选。
- *  useList 创建时已按空筛选取过一次，这里按 tab 纠正并重载。 */
 function applyTab() {
   list.realOnly.value = "true";
-  list.result.value = tab.value === "queue" ? "REVIEW" : "";
-  list.reviewed.value = tab.value === "queue" ? "false" : "";
+  list.result.value =
+    tab.value === "uncertain"
+      ? "REVIEW"
+      : tab.value === "errors"
+        ? "ERROR"
+        : "";
+  list.reviewed.value = "";
   list.filter();
 }
 watch(tab, applyTab);
@@ -31,7 +34,15 @@ applyTab();
 <template>
   <div class="page-heading">
     <div>
-      <h1>{{ tab === "queue" ? "待复核记录" : "全部检测记录" }}</h1>
+      <h1>
+        {{
+          tab === "uncertain"
+            ? "判定不确定"
+            : tab === "errors"
+              ? "检测错误"
+              : "全部检测记录"
+        }}
+      </h1>
     </div>
     <RouterLink :to="{ name: 'workbench' }">返回工作台</RouterLink>
   </div>
@@ -63,11 +74,7 @@ applyTab();
     :loading="list.loading.value"
     :error="list.error.value"
     :empty="!list.items.value.length"
-    :hint="
-      tab === 'queue'
-        ? '当前筛选下没有待复核记录，可返回工作台继续检测。'
-        : '当前筛选下没有检测记录。开始检测并完成一件产品后，可在这里查看结果。'
-    "
+    hint="当前筛选下没有检测记录。"
     @retry="list.load"
     ><div class="panel table-wrap">
       <table>
@@ -81,8 +88,8 @@ applyTab();
               :order="list.order.value"
               @sort="list.sortBy"
             />
-            <th>机器原判 / 平台核验</th>
-            <th>人工复核</th>
+            <th>检测结果</th>
+            <th>运行状态</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -93,21 +100,16 @@ applyTab();
             </td>
             <td>{{ new Date(i.createdAt).toLocaleString() }}</td>
             <td>
-              <Status chip :value="i.metadata?.localResult || i.result" /> /
-              <Status :value="i.result" />
-              <span v-if="i.source === 'SIMULATION'" class="tag simulated"
-                >模拟</span
-              >
+              <Status chip :value="i.reviewResult ?? i.result" />
+              <small v-if="i.reviewResult">已更正</small>
             </td>
             <td>
               {{
-                i.reviewResult === "PASS" || i.reviewResult === "FAIL"
-                  ? "已复核"
-                  : i.result === "REVIEW" ||
-                      i.result === "ERROR" ||
-                      i.reviewResult === "REVIEW"
-                    ? "待复核"
-                    : "无需复核"
+                i.result === "ERROR"
+                  ? "检测执行失败"
+                  : i.result === "REVIEW"
+                    ? "证据不足，未能明确判定"
+                    : "检测完成"
               }}
             </td>
             <td class="action-cell">
@@ -117,9 +119,8 @@ applyTab();
                   :to="{
                     name: 'inspection',
                     params: { id: i.id },
-                    query: tab === 'queue' ? { queue: '1' } : {},
                   }"
-                  >{{ tab === "queue" ? "立即复核" : "查看详情" }}</RouterLink
+                  >查看详情</RouterLink
                 >
               </div>
             </td>

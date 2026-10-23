@@ -1,6 +1,7 @@
 import type { RouteRecordRaw } from "vue-router";
 import type { Role } from "@vision/contracts";
 import Overview from "./views/Overview.vue";
+import Showcase from "./views/Showcase.vue";
 import Operations from "./views/Operations.vue";
 import Records from "./views/Records.vue";
 import InspectionDetail from "./views/InspectionDetail.vue";
@@ -74,11 +75,17 @@ export const routes: RouteRecordRaw[] = [
     meta: { title: "账号设置", nav: false, discipline: "business" },
   },
   {
+    path: "/showcase",
+    name: "showcase",
+    component: Showcase,
+    meta: { title: "演示大屏", nav: true, order: 0, discipline: "business" },
+  },
+  {
     path: "/overview",
     name: "overview",
     component: Overview,
     meta: {
-      title: "管理首页",
+      title: "运行概览",
       nav: true,
       order: 1,
       roles: ENGINEER,
@@ -118,10 +125,11 @@ export const routes: RouteRecordRaw[] = [
       nav: true,
       order: 4,
       discipline: "business",
-      defaultTab: "queue",
+      defaultTab: "all",
       tabs: [
-        { tab: "queue", label: "待复核记录" },
         { tab: "all", label: "全部记录" },
+        { tab: "uncertain", label: "判定不确定" },
+        { tab: "errors", label: "检测错误" },
       ],
     },
   },

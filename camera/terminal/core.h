@@ -10,12 +10,16 @@ const char* name(Result result);
 bool product_classes_match(const std::vector<std::string>& product, const std::vector<std::string>& model);
 struct Box { unsigned class_id; double confidence, x1, y1, x2, y2; unsigned track_id=0; bool track_confirmed=false; };
 struct Postprocess {
-    double nms_iou=.45,containment=.9,min_area=.00002,track_iou=.3;
+    double nms_iou=.45,containment=.9,min_area=.00002,track_iou=.3,min_score=.35;
     unsigned max_detections=100,track_min_hits=2,track_max_misses=3,track_max_gap_ms=1000;
+    double merge_distance=0;
     unsigned algorithm_version=3;
 };
 struct FilterResult {
     std::vector<Box> boxes;
+    // Display-only boxes (LEVEL-v3: the network's liquid-line box). The level
+    // product uses `boxes` as label presence and must not show it as a target.
+    std::vector<Box> display;
     unsigned candidates=0,invalid=0,tiny=0,nested=0,suppressed=0;
     bool overflow=false;
 };

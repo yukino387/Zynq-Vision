@@ -319,7 +319,7 @@ watch(
                   }}</span>
                 </div>
                 <div class="compare-row">
-                  <span class="verdict-tag review">待复核</span>
+                  <span class="verdict-tag review">判定不确定</span>
                   <span class="mono">{{ summary.machine.REVIEW }}</span>
                   <span class="mono font-semibold">{{ summary.pending }}</span>
                 </div>
@@ -341,7 +341,7 @@ watch(
       <div class="batch-records-col">
         <UiCard
           title="最近过件明细"
-          subtitle="点击行打开单件检测详情与复核"
+          subtitle="点击记录查看检测依据；异常记录可单独处理"
           padding="md"
         >
           <template #actions>
@@ -368,16 +368,11 @@ watch(
               </div>
               <div class="record-middle">
                 <span class="record-verdict">
-                  原判 <Status :value="record.result" />
+                  <Status :value="record.reviewResult ?? record.result" />
                 </span>
-                <span class="record-sep">/</span>
-                <span class="record-verdict">
-                  人工
-                  <Status
-                    v-if="record.reviewResult"
-                    :value="record.reviewResult"
-                  /><span v-else class="text-muted">未复核</span>
-                </span>
+                <span v-if="record.reviewResult" class="text-muted"
+                  >已人工处理</span
+                >
               </div>
               <div class="record-right">
                 <span class="record-arrow">查看</span>

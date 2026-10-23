@@ -108,11 +108,16 @@ std::vector<Box> detect(const int8_t* out0,const int8_t* out1) {
     return kept;
 }
 static double box_area(const Box& b){return (b.x2-b.x1)*(b.y2-b.y1);}
+// Two anchors of the same object can have a low IoU but nearly the same center.
+static bool same_center(const Box& a,const Box& b,double distance) {
+    const double dx=(a.x1+a.x2)/2-(b.x1+b.x2)/2,dy=(a.y1+a.y2)/2-(b.y1+b.y2)/2;
+    return dx*dx+dy*dy<distance*distance;
+}
 FilterResult filter_boxes(const std::vector<Box>& candidates,const Postprocess& policy) {
     FilterResult result;result.candidates=candidates.size();std::vector<Box> clean,leaves,kept;
     for(auto b:candidates) {
         if(b.class_id>5 || !std::isfinite(b.confidence) || !std::isfinite(b.x1) || !std::isfinite(b.y1) || !std::isfinite(b.x2) || !std::isfinite(b.y2) || b.confidence<0 || b.confidence>1 || b.x2<=b.x1 || b.y2<=b.y1){++result.invalid;continue;}
-        if(b.confidence<.35)continue;
+        if(b.confidence<policy.min_score)continue;
         b.x1=std::clamp(b.x1,0.0,416.0);b.y1=std::clamp(b.y1,0.0,416.0);b.x2=std::clamp(b.x2,0.0,416.0);b.y2=std::clamp(b.y2,0.0,416.0);
         if(b.x2-b.x1<1 || b.y2-b.y1<1 || box_area(b)<policy.min_area*416*416){++result.tiny;continue;}
         clean.push_back(b);
@@ -128,7 +133,7 @@ FilterResult filter_boxes(const std::vector<Box>& candidates,const Postprocess& 
                 const double small=std::min(box_area(k),box_area(b)),large=std::max(box_area(k),box_area(b));
                 const double intersection=std::max(0.0,std::min(k.x2,b.x2)-std::max(k.x1,b.x1))*std::max(0.0,std::min(k.y2,b.y2)-std::max(k.y1,b.y1));
                 if(large>=1.5*small && intersection/small>=policy.containment){++result.nested;removed=true;break;}
-                if(overlap(k,b)>policy.nms_iou){++result.suppressed;removed=true;break;}
+                if(overlap(k,b)>policy.nms_iou || (policy.merge_distance>0 && same_center(k,b,2*policy.merge_distance))){++result.suppressed;removed=true;break;}
             }
             if(!removed)kept.push_back(b);
         }
@@ -147,7 +152,7 @@ FilterResult filter_boxes(const std::vector<Box>& candidates,const Postprocess& 
     }
     std::stable_sort(leaves.begin(),leaves.end(),[](const Box& a,const Box& b){return a.confidence==b.confidence?box_area(a)<box_area(b):a.confidence>b.confidence;});
     for(const auto& b:leaves){
-        const bool suppressed=std::any_of(kept.begin(),kept.end(),[&](const Box& k){return k.class_id==b.class_id && overlap(k,b)>policy.nms_iou;});
+        const bool suppressed=std::any_of(kept.begin(),kept.end(),[&](const Box& k){return k.class_id==b.class_id && (overlap(k,b)>policy.nms_iou || (policy.merge_distance>0 && same_center(k,b,2*policy.merge_distance)));});
         if(suppressed)++result.suppressed;else kept.push_back(b);
     }
     result.overflow=kept.size()>policy.max_detections;
@@ -268,9 +273,16 @@ void Tracker::update(std::vector<Box>& boxes,uint64_t now,const Postprocess& pol
 // Conservative on-device quality gate. Server recalculates quality from stored evidence.
 bool quality(const uint16_t* pixels) {
     unsigned mean=0,n=0;int lap=0;uint64_t squares=0;
-    auto luma=[&](unsigned x,unsigned y){const unsigned p=pixels[y*416+x],r=p>>11,g=(p>>5)&63,b=p&31;return int((19595*((r<<3)|(r>>2))+38470*((g<<2)|(g>>4))+7471*((b<<3)|(b>>2))+32768)>>16);};
-    for(unsigned y=4;y<412;y+=4)for(unsigned x=4;x<412;x+=4) {
-        const int v=luma(x,y),d=4*v-luma(x-4,y)-luma(x+4,y)-luma(x,y-4)-luma(x,y+4);
+    // Neighbouring Laplacians reuse the same 4-pixel grid. Convert each
+    // RGB565 sample once instead of converting five pixels per output point.
+    std::array<uint8_t,104*104> luminance;
+    for(unsigned y=0;y<104;++y)for(unsigned x=0;x<104;++x) {
+        const unsigned p=pixels[y*4*416+x*4],r=p>>11,g=(p>>5)&63,b=p&31;
+        luminance[y*104+x]=uint8_t((19595*((r<<3)|(r>>2))+38470*((g<<2)|(g>>4))+7471*((b<<3)|(b>>2))+32768)>>16);
+    }
+    for(unsigned y=1;y<103;++y)for(unsigned x=1;x<103;++x) {
+        const unsigned i=y*104+x;
+        const int v=luminance[i],d=4*v-luminance[i-1]-luminance[i+1]-luminance[i-104]-luminance[i+104];
         mean+=v;lap+=d;squares+=unsigned(d*d);++n;
     }
     // Integer sums are exact here: |d| <= 1020, n = 10404; only squares needs 64 bits.

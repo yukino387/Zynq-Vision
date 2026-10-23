@@ -35,6 +35,7 @@ export interface Inspection {
   batchId?: string | null;
   metadata?: {
     localResult?: import("./index.js").InspectionResult;
+    level?: import("./level-compat.js").LevelReport;
     manual?: boolean;
     productionRunId?: string;
     decision?: import("./inspection.js").InspectionDecision;

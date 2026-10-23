@@ -7,8 +7,8 @@ import { useNotificationStore } from "../stores/notifications";
 import { useAuthStore } from "../stores/auth";
 import Status from "./Status.vue";
 import ImageViewer from "./ImageViewer.vue";
-const props = defineProps<{ inspection: Inspection; queue?: boolean }>();
-const emit = defineEmits<{ saved: [next: boolean] }>();
+const props = defineProps<{ inspection: Inspection }>();
+const emit = defineEmits<{ saved: [] }>();
 const auth = useAuthStore(),
   notices = useNotificationStore();
 const verdict = ref(""),
@@ -49,7 +49,7 @@ const verdicts = computed<[string, string][]>(() =>
         ["OTHER", "其他"],
       ],
 );
-async function save(next = false) {
+async function save() {
   if (!verdict.value || busy.value) return;
   busy.value = true;
   try {
@@ -60,18 +60,12 @@ async function save(next = false) {
       hard: hard.value,
       ...(finalResult.value ? { finalResult: finalResult.value } : {}),
     });
-    notices.add(
-      reviewed.value
-        ? "追加意见已提交"
-        : "复核意见已提交；样本取舍与标注在样本库处理",
-    );
-    const advance =
-      next && !!finalResult.value && finalResult.value !== "REVIEW";
+    notices.add(reviewed.value ? "追加意见已提交" : "结果更正已保存");
     appending.value = false;
     verdict.value = "";
     note.value = "";
     finalResult.value = "";
-    emit("saved", advance);
+    emit("saved");
   } catch (e) {
     notices.error(e);
   } finally {
@@ -96,7 +90,7 @@ async function raw() {
     ><Status :value="inspection.result" /><span
       v-if="inspection.reviews.length"
       class="tag ok"
-      >已提交复核意见</span
+      >已保存更正说明</span
     ><span v-if="inspection.source === 'SIMULATION'" class="tag simulated"
       >模拟数据</span
     ><template v-if="auth.engineer"
@@ -120,6 +114,13 @@ async function raw() {
         :postprocess="inspection.metadata?.postprocess"
       />
       <p class="note">{{ reasonLabel(inspection.reason) }}</p>
+      <p v-if="inspection.metadata?.level" class="note">
+        液面位置：{{
+          inspection.metadata.level.row === null
+            ? "未测出"
+            : `${inspection.metadata.level.row.toFixed(2)} 行`
+        }}；合格带 85.00–102.90。
+      </p>
       <RouterLink
         v-if="auth.engineer"
         :to="{
@@ -157,8 +158,8 @@ async function raw() {
           </tbody>
         </table>
       </div>
-      <p class="note">
-        机器原判保留。人工最终结论：<Status
+      <p v-if="resolved?.finalResult" class="note">
+        原始记录保留。更正结论：<Status
           v-if="resolved?.finalResult"
           :value="resolved.finalResult"
         /><span v-else>尚未给出</span>
@@ -194,11 +195,17 @@ async function raw() {
         记录时间：{{ new Date(inspection.createdAt).toLocaleString() }}
       </p>
     </div>
-    <section class="review-panel">
-      <h3>人工复核</h3>
+    <p v-if="inspection.result === 'ERROR'" class="note">
+      此次检测执行失败。请查看错误原因，排除故障后重新检测。
+    </p>
+    <details v-else class="review-panel">
+      <summary>纠正误判 / 补充说明</summary>
+      <p class="note">
+        开发时发现误判可在此更正结果。原始判定保留，正常检测无需逐件确认。
+      </p>
       <template v-if="reviewed && !showForm">
         <p class="note">
-          此记录已提交复核意见。如需补充说明，请点击“追加意见”。
+          此记录已保存更正说明。如需补充说明，请点击“追加意见”。
         </p>
         <div v-for="(r, i) in inspection.reviews" :key="i" class="list-line">
           <span>{{ chinese(r.verdict) }}</span
@@ -210,19 +217,16 @@ async function raw() {
       </template>
       <template v-else>
         <label
-          >最终处理结论<UiSelect
-            v-model="finalResult"
-            aria-label="最终处理结论"
-          >
+          >更正结论<UiSelect v-model="finalResult" aria-label="更正结论">
             <option value="">仅追加意见，保持原处理状态</option>
             <option value="PASS">符合要求</option>
             <option value="FAIL">不符合要求</option>
-            <option value="REVIEW">仍待复核</option>
+            <option value="REVIEW">保持不确定</option>
           </UiSelect></label
         >
         <div class="form-grid">
           <label
-            >审核结论<UiSelect v-model="verdict">
+            >更正原因<UiSelect v-model="verdict">
               <option value="" disabled>请选择</option>
               <option
                 v-for="[value, label] in verdicts"
@@ -238,21 +242,11 @@ async function raw() {
         </div>
         <label>备注<textarea v-model="note" rows="2" maxlength="2000" /></label>
         <div class="form-actions">
-          <button
-            class="primary"
-            @click="save(queue)"
-            :disabled="busy || !verdict"
-          >
-            {{
-              queue
-                ? "提交并查看下一件"
-                : reviewed
-                  ? "提交追加意见"
-                  : "提交复核意见"
-            }}
+          <button class="primary" @click="save()" :disabled="busy || !verdict">
+            {{ reviewed ? "保存追加说明" : "保存更正" }}
           </button>
         </div>
       </template>
-    </section>
+    </details>
   </div>
 </template>

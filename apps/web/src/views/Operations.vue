@@ -15,6 +15,7 @@ import { useDeviceStore } from "../stores/devices";
 import { useInspectionStore } from "../stores/inspections";
 import { useNotificationStore } from "../stores/notifications";
 import type { Preview } from "../stores/devices";
+import { LEVEL_V3_PAYLOAD_SHA256 } from "@vision/contracts";
 import Sparkline from "../components/Sparkline.vue";
 import ImageViewer from "../components/ImageViewer.vue";
 import Status from "../components/Status.vue";
@@ -122,6 +123,9 @@ watch(
   },
 );
 const shown = computed(() => held.value ?? preview.value);
+const levelMode = computed(
+  () => terminalState.value?.model?.payloadSha256 === LEVEL_V3_PAYLOAD_SHA256,
+);
 const previewProduct = computed(() => {
   const product = terminalState.value?.product;
   return product &&
@@ -635,6 +639,34 @@ async function checkOne() {
     </div>
 
     <aside class="result-inspector workbench-side">
+      <section
+        v-if="levelMode"
+        class="side-card level-reading"
+        :class="{
+          'is-pass': shown?.level?.status === '液位合格',
+          'is-fail': ['液位过高', '液位过低'].includes(
+            shown?.level?.status ?? '',
+          ),
+        }"
+        aria-label="液面高低实时读数"
+      >
+        <div class="side-card-title">
+          <span>液面高低 · {{ held ? "帧回看" : "实时读数" }}</span>
+          <span v-if="shown">图像帧 {{ shown.frameId }}</span>
+        </div>
+        <strong class="level-status">{{
+          shown?.level?.status ?? "等待液位数据"
+        }}</strong>
+        <p class="level-value">
+          <b>{{
+            shown?.level?.row == null ? "—" : shown.level.row.toFixed(2)
+          }}</b>
+          <span>行</span>
+        </p>
+        <p>合格带：85.00～102.90 行</p>
+        <p class="level-guide">小于 85：过高 · 大于 102.90：过低</p>
+        <small>实时读数不计件；保存单件后查看下方机器原判。</small>
+      </section>
       <div class="live-verdict">
         <span class="verdict-caption"
           >{{
@@ -694,25 +726,30 @@ async function checkOne() {
       <section v-if="terminalState" class="side-card">
         <div class="side-card-title">
           {{
-            terminalState.productionRunId
-              ? "本批次机器原判"
-              : "本机累计机器原判"
+            terminalState.productionRunId ? "本批次自动检测" : "本机累计检测"
           }}
         </div>
         <p>
-          合格 {{ localCounts?.PASS ?? 0 }} · 不合格
-          {{ localCounts?.FAIL ?? 0 }} · 待复核 {{ localCounts?.REVIEW ?? 0 }} ·
-          错误 {{ localCounts?.ERROR ?? 0 }}
+          总计
+          {{
+            Object.values(localCounts ?? {}).reduce(
+              (sum, count) => sum + count,
+              0,
+            )
+          }}
+          件 · 合格 {{ localCounts?.PASS ?? 0 }} · 不合格
+          {{ localCounts?.FAIL ?? 0 }} · 判定不确定
+          {{ localCounts?.REVIEW ?? 0 }} · 错误 {{ localCounts?.ERROR ?? 0 }}
         </p>
         <RouterLink
           :to="{
             name: 'production',
             query: { run: terminalState.productionRunId || undefined },
           }"
-          >查看当前批次汇总与复核</RouterLink
+          >查看批次统计</RouterLink
         >
         <p class="note">
-          本机原判包含待同步记录；人工处理结果见 Web 批次汇总。
+          产品离场后自动计件；此处包含待上传记录，批次页统计已上传记录。
         </p>
         <div
           v-if="terminalState.product?.checks?.length"
@@ -778,7 +815,7 @@ async function checkOne() {
 
       <div v-if="auth.engineer" class="inspector-section model-readout">
         <p class="note">
-          单件结论由当前产品方案的数量、区域与图像质量规则判定。人工复核保留机器原判。
+          系统按当前产品规则自动判定并计件；证据不足的记录标为判定不确定。
         </p>
         <h3><Icon name="device" :size="14" /> 运行模型</h3>
         <b class="mono">{{
@@ -824,7 +861,7 @@ async function checkOne() {
           <th>时间</th>
           <th v-if="auth.engineer">来源</th>
           <th v-if="auth.engineer">模型</th>
-          <th>平台核验 / 人工结论</th>
+          <th>检测结果</th>
           <th>操作</th>
         </tr>
       </thead>
@@ -851,12 +888,8 @@ async function checkOne() {
             {{ i.modelVersion ?? "未上报" }}
           </td>
           <td>
-            <Status chip :value="i.result" /> /
-            <Status v-if="i.reviewResult" :value="i.reviewResult" /><span
-              v-else
-              class="text-muted"
-              >未复核</span
-            >
+            <Status chip :value="i.reviewResult ?? i.result" />
+            <span v-if="i.reviewResult" class="text-muted">已人工处理</span>
           </td>
           <td class="action-cell">
             <UiButton
@@ -1077,6 +1110,42 @@ async function checkOne() {
 .side-card {
   padding: 14px 16px;
   border-bottom: 1px solid var(--line);
+}
+.level-reading {
+  border-left: 4px solid var(--muted);
+  background: var(--surface-2);
+}
+.level-status {
+  display: block;
+  font-size: 22px;
+}
+.level-value {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 10px 0;
+}
+.level-value b {
+  font-size: 42px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.level-reading.is-pass {
+  border-left-color: #22712b;
+}
+.level-reading.is-pass .level-status {
+  color: #22712b;
+}
+.level-reading.is-fail {
+  border-left-color: #b3261e;
+}
+.level-reading.is-fail .level-status {
+  color: #b3261e;
+}
+.level-guide,
+.level-reading small {
+  color: var(--muted);
+  font-size: 11px;
 }
 .side-card-title {
   display: flex;

@@ -90,6 +90,12 @@ export function detect(
 }
 
 /** One set of surviving boxes feeds display, counting and tracking. Coordinates are frame pixels. */
+const sameCenter = (a: DetectionBox, b: DetectionBox, distance: number) => {
+  const dx = (a.x1 + a.x2) / 2 - (b.x1 + b.x2) / 2,
+    dy = (a.y1 + a.y2) / 2 - (b.y1 + b.y2) / 2;
+  return dx * dx + dy * dy < distance * distance;
+};
+
 export function postprocessBoxes(
   candidates: DetectionBox[],
   configuration: Partial<PostprocessPolicy> = {},
@@ -104,6 +110,8 @@ export function postprocessBoxes(
   )
     throw new Error("Invalid frame dimensions");
   const policy = postprocessSchema.parse(configuration);
+  // mergeDistance is defined in 224-px network units; boxes are frame pixels.
+  const merge = policy.mergeDistance * (width / 224);
   const report: PostprocessReport = {
     policy,
     candidates: candidates.length,
@@ -131,7 +139,7 @@ export function postprocessBoxes(
       report.invalid++;
       continue;
     }
-    if (box.confidence < 0.35) continue;
+    if (box.confidence < policy.minScore) continue;
     const b = {
       ...box,
       x1: Math.max(0, Math.min(width, box.x1)),
@@ -171,7 +179,10 @@ export function postprocessBoxes(
           removed = true;
           break;
         }
-        if (overlap(k, b) > policy.nmsIou) {
+        if (
+          overlap(k, b) > policy.nmsIou ||
+          (merge > 0 && sameCenter(k, b, merge))
+        ) {
           report.suppressed++;
           removed = true;
           break;
@@ -210,7 +221,12 @@ export function postprocessBoxes(
   const kept: DetectionBox[] = [];
   for (const b of leaves) {
     if (
-      kept.some((k) => k.classId === b.classId && overlap(k, b) > policy.nmsIou)
+      kept.some(
+        (k) =>
+          k.classId === b.classId &&
+          (overlap(k, b) > policy.nmsIou ||
+            (merge > 0 && sameCenter(k, b, merge))),
+      )
     )
       report.suppressed++;
     else kept.push(b);

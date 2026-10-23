@@ -12,7 +12,7 @@ foreach(header json/single_include/nlohmann/json.hpp httplib/httplib.h lvgl/lvgl
   endif()
 endforeach()
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/generate_graph.py" "${CMAKE_CURRENT_BINARY_DIR}/model_graph.h" COMMAND_ERROR_IS_FATAL ANY)
-add_library(vision_core STATIC core.cpp)
+add_library(vision_core STATIC core.cpp level_compat.cpp)
 target_include_directories(vision_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 add_executable(vision-engine engine.cpp hardware.cpp ../int8/gray.cpp)
 target_include_directories(vision-engine PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${VISION_DEPS}/json/single_include" "${VISION_DEPS}/httplib")

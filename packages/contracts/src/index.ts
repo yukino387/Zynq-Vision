@@ -1,5 +1,11 @@
 import { z } from "zod";
 export {
+  LEVEL_V3_PAYLOAD_SHA256,
+  levelReportSchema,
+  levelEvidenceSchema,
+} from "./level-compat.js";
+export type { LevelReport, LevelEvidence } from "./level-compat.js";
+export {
   planRulesSchema,
   createPlanSchema,
   inspectionRegionSchema,
@@ -108,6 +114,7 @@ export interface TerminalModel {
   weightsSha256: string;
   classes: string[];
   installedAt?: string;
+  compatibilityProfile?: "LEVEL_V3_20261022";
 }
 export interface TerminalProduct {
   id: string;

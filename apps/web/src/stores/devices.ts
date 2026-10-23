@@ -13,6 +13,7 @@ import { useNotificationStore } from "./notifications";
 import { useAuthStore } from "./auth";
 export interface Preview {
   frameId: number;
+  level?: import("@vision/contracts").LevelReport;
   postprocess?: import("@vision/contracts").PostprocessReport;
   planId?: string | null;
   planVersion?: number | null;

@@ -3,12 +3,14 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "level_compat.h"
 namespace terminal {
 struct Frame {
     uint32_t id=0;
     uint64_t monotonic_ns=0;
     std::vector<uint16_t> pixels;
     std::vector<int8_t> out0,out1;
+    LevelFrame level;
 };
 class Hardware {
     int fd=-1;
@@ -18,6 +20,8 @@ class Hardware {
     unsigned channels=0;
     unsigned current=0;
     bool have_frame=false;
+    bool level_enabled=false;
+    LevelFrame captured_level;
     uint64_t captured_ns=0;
     int32_t commands[330]{};
     std::vector<uint16_t> captured_pixels;
