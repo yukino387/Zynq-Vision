@@ -173,6 +173,7 @@ const heartbeatSchema = z
     counts: runCountsSchema,
     runTotal: z.number().int().min(0).max(2147483647),
     runCounts: runCountsSchema,
+    beltCaps: z.number().int().min(0).max(2147483647).optional(),
     production: z.boolean(),
     productionRunId: z.string().uuid().nullable(),
     passagePhase: z.enum([

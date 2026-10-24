@@ -16,6 +16,8 @@
 #include <iostream>
 #include <map>
 #include <mutex>
+#include <set>
+#include <sstream>
 #include <thread>
 #include <fcntl.h>
 #include <sched.h>
@@ -145,11 +147,25 @@ class Engine {
     std::array<unsigned,4> total_counts{};
     std::array<unsigned,4> run_counts{};
     unsigned pending_count=0;
-    void count_record(const Record& record) {
+    // Conveyor count: every confirmed track of the primary class is counted once per run.
+    std::set<unsigned> belt_ids;
+    unsigned belt_caps=0;
+    // 清零基线保存清零时已存在的记录文件名；此后新增的记录才计入，不依赖文件时间。
+    std::set<std::string> counts_baseline_ids;
+    bool has_baseline=false;
+    void count_belt() {
+        unsigned primary=6;for(const auto& c:rules.checks)if(c.minimum>0)primary=std::min(primary,c.class_id);
+        for(const auto& box:frame_boxes) {
+            const auto x=(box.x1+box.x2)/832.0,y=(box.y1+box.y2)/832.0;
+            if(box.class_id!=primary || !box.track_confirmed || box.confidence<rules.confidence || x<rules.region[0] || x>rules.region[0]+rules.region[2] || y<rules.region[1] || y>rules.region[1]+rules.region[3])continue;
+            if(belt_ids.insert(box.track_id).second){++belt_caps;if(belt_ids.size()>4096)belt_ids.erase(belt_ids.begin());}
+        }
+    }
+    void count_record(const Record& record,bool include=true) {
         const std::string result=record.payload.at("localResult");
         const unsigned index=result=="PASS"?0:result=="FAIL"?1:result=="REVIEW"?2:3;
-        ++total_counts[index];
-        if(!production_run.empty() && record.payload.value("productionRunId",std::string())==production_run)++run_counts[index];
+        if(include)++total_counts[index];
+        if(include && !production_run.empty() && record.payload.value("productionRunId",std::string())==production_run)++run_counts[index];
         if(!record.acknowledged)++pending_count;
     }
     static json counts_json(const std::array<unsigned,4>& counts) {return {{"PASS",counts[0]},{"FAIL",counts[1]},{"REVIEW",counts[2]},{"ERROR",counts[3]}};}
@@ -177,6 +193,7 @@ public:
         fs::create_directories(this->root/"model");
         fs::create_directories(this->root/"inspection-requests");
         boot_id=read_text("/proc/sys/kernel/random/boot_id",64);while(!boot_id.empty() && std::isspace(boot_id.back()))boot_id.pop_back();
+        if(fs::exists(this->root/"counts-baseline")){try{std::istringstream lines(read_text(this->root/"counts-baseline",1024*1024));std::string line;while(std::getline(lines,line))if(!line.empty())counts_baseline_ids.insert(line);has_baseline=true;}catch(const std::exception&){}}
         for(const auto& entry:fs::directory_iterator(this->root/"records"))if(entry.path().extension()==".json") {
             try {
                 const auto saved=read_record(entry.path());const auto payload=saved.at("payload");
@@ -185,7 +202,7 @@ public:
                 bool acknowledged=false;
                 if(fs::exists(entry.path().string()+".ack")){try{const auto receipt=json::parse(read_text(entry.path().string()+".ack"));acknowledged=receipt.at("rawSha256")==payload.at("rawSha256") && receipt.at("id").get<std::string>().find(":"+payload.at("bootId").get<std::string>()+":"+std::to_string(payload.at("sequence").get<unsigned>()))!=std::string::npos;}catch(const std::exception&){}}
                 const auto inserted=records.emplace(request,Record{entry.path(),compact_payload(payload),request,acknowledged,true,saved.at("decision"),fs::last_write_time(entry.path()).time_since_epoch().count()});
-                if(inserted.second)count_record(inserted.first->second);
+                if(inserted.second)count_record(inserted.first->second,!has_baseline || !counts_baseline_ids.count(entry.path().filename().string()));
                 if(payload.at("bootId")==boot_id)sequence=std::max(sequence,payload.at("sequence").get<uint32_t>());
             }catch(const std::exception&) {}
         }
@@ -228,7 +245,7 @@ public:
             for(const auto& c:r.at("checks")){auto check=c;check["label"]=r.at("classes").at(c.at("classId").get<unsigned>());checks.push_back(check);}
             product_state={{"id",product.at("id")},{"name",product.at("name")},{"version",product.at("version")},{"product",r.at("product")},{"purpose",r.at("purpose")},{"region",r.at("region")},{"instructions",r.at("instructions")},{"checks",checks},{"postprocess",postprocess_json(rules.postprocess)},{"acceptance",product.at("acceptance")}};
         }
-        return {{"model",model_state},{"product",product_state},{"total",total},{"counts",counts},{"pendingSync",pending_count},{"last",last},{"error",error},{"syncError",sync_error},{"paused",paused},{"production",production},{"productionRunId",production_run.empty()?json(nullptr):json(production_run)},{"runCounts",counts_json(run_counts)},{"runTotal",run_counts[0]+run_counts[1]+run_counts[2]+run_counts[3]},{"passagePhase",production?passage.phase():"STOPPED"},{"inspectionRequestId",inspection_request.empty()?json(nullptr):json(inspection_request)},{"passageSamples",passage.samples()},{"pendingRequestId",pending_storage.empty()?json(nullptr):json(pending_storage)},{"frameId",frame.id},{"fresh",frame.monotonic_ns && clock_ns()-frame.monotonic_ns<3000000000ULL},{"diagnostics",{{"capturedFrames",captured_frames},{"lastCaptureMs",captured_frames?json(capture_ms):json(nullptr)},{"hwPrepareMs",prepare_ms},{"hwConvMs",conv_ms},{"hwForwardMs",forward_ms},{"hwPostMs",post_ms},{"hwExtractMs",extract_ms},{"cameraInitialized",true},{"modelVersion",model.is_null()?json(nullptr):model.at("version")}}}};
+        return {{"model",model_state},{"product",product_state},{"total",total},{"counts",counts},{"pendingSync",pending_count},{"last",last},{"error",error},{"syncError",sync_error},{"paused",paused},{"production",production},{"productionRunId",production_run.empty()?json(nullptr):json(production_run)},{"runCounts",counts_json(run_counts)},{"runTotal",run_counts[0]+run_counts[1]+run_counts[2]+run_counts[3]},{"beltCaps",belt_caps},{"passagePhase",production?passage.phase():"STOPPED"},{"inspectionRequestId",inspection_request.empty()?json(nullptr):json(inspection_request)},{"passageSamples",passage.samples()},{"pendingRequestId",pending_storage.empty()?json(nullptr):json(pending_storage)},{"frameId",frame.id},{"fresh",frame.monotonic_ns && clock_ns()-frame.monotonic_ns<3000000000ULL},{"diagnostics",{{"capturedFrames",captured_frames},{"lastCaptureMs",captured_frames?json(capture_ms):json(nullptr)},{"hwPrepareMs",prepare_ms},{"hwConvMs",conv_ms},{"hwForwardMs",forward_ms},{"hwPostMs",post_ms},{"hwExtractMs",extract_ms},{"cameraInitialized",true},{"modelVersion",model.is_null()?json(nullptr):model.at("version")}}}};
     }
     json history(unsigned page,const std::string& filter) {
         std::lock_guard<std::mutex> lock(mutex);std::vector<const Record*> selected;
@@ -307,8 +324,24 @@ public:
             if(paused || !frame.monotonic_ns || clock_ns()-frame.monotonic_ns>=3000000000ULL)throw std::runtime_error("等待有效图像后再开始自动检测");
             if(std::none_of(rules.checks.begin(),rules.checks.end(),[](const Check& check){return check.minimum>0;}))throw std::runtime_error("视觉计件需要至少一个必需目标；请将产品主体加入识别类别");
             production_run=read_text("/proc/sys/kernel/random/uuid",64);while(!production_run.empty() && std::isspace(production_run.back()))production_run.pop_back();
-            passage.reset();run_counts={};paused=false;production=true;
+            passage.reset();run_counts={};belt_ids.clear();belt_caps=0;paused=false;production=true;
         } else stop_production();
+    }
+    void reset_counts() {
+        std::lock_guard<std::mutex> hardware_lock(hardware_mutex);
+        std::lock_guard<std::mutex> lock(mutex);
+        if(!inspection_request.empty())throw std::runtime_error("外部触发检测中");
+        stop_production();
+        total_counts={};run_counts={};belt_ids.clear();belt_caps=0;last=nullptr;
+        counts_baseline_ids.clear();
+        std::string manifest;
+        for(const auto& entry:fs::directory_iterator(root/"records"))if(entry.path().extension()==".json") {
+            const auto name=entry.path().filename().string();
+            counts_baseline_ids.insert(name);
+            manifest+=name+'\n';
+        }
+        durable_write(root/"counts-baseline",manifest);
+        has_baseline=true;
     }
     void pause(bool value) {std::lock_guard<std::mutex> lock(mutex);if(value)stop_production();paused=value;if(value)frame=Frame{};frame_ready.notify_all();}
     bool known_request(const std::string& request) {std::lock_guard<std::mutex> lock(mutex);return records.count(request)!=0;}
@@ -350,6 +383,7 @@ public:
                 }
                 if(production && !product.is_null()) {
                     const auto decision=filtered_decision(rules,frame_filter,frame);
+                    count_belt();
                     if(passage.observe(frame,frame_boxes,rules,decision))save_passage();
                 }
                 frame_ready.notify_all();
@@ -499,6 +533,7 @@ int main(int argc,char** argv) {
             catch(const std::exception& e){r.status=409;r.set_content(json({{"error",e.what()},{"mayHaveSaved",engine.known_request(request)}}).dump(),"application/json");}
         });
         server.Post("/production",[&](const auto& q,auto& r){guard([&]{engine.set_production(json::parse(q.body).at("enabled"));return engine.state();},r);});
+        server.Post("/reset",[&](const auto&,auto& r){guard([&]{engine.reset_counts();return engine.state();},r);});
         server.Post("/pause",[&](const auto& q,auto& r){guard([&]{engine.pause(json::parse(q.body).at("paused"));return engine.state();},r);});
         server.Post("/sync",[&](const auto&,auto& r){sync_requested=true;r.set_content("{\"queued\":true}","application/json");});
         std::signal(SIGTERM,[](int){running=false;});std::signal(SIGINT,[](int){running=false;});

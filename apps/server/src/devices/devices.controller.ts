@@ -311,6 +311,7 @@ export class DevicesController {
         "fresh",
         "runCounts",
         "runTotal",
+        "beltCaps",
         "total",
         "counts",
         "pendingSync",
@@ -390,7 +391,12 @@ export class DevicesController {
     const dto = parse(
       z
         .object({
-          type: z.enum(["GET_STATUS", "START_INSPECTION", "STOP_INSPECTION"]),
+          type: z.enum([
+            "GET_STATUS",
+            "START_INSPECTION",
+            "STOP_INSPECTION",
+            "RESET_COUNTS",
+          ]),
         })
         .strict(),
       body,

@@ -161,6 +161,7 @@ export interface TerminalStatus {
     counts: TerminalRunCounts;
     runTotal: number;
     runCounts: TerminalRunCounts;
+    beltCaps?: number;
     production: boolean;
     productionRunId: string | null;
     passagePhase: PassagePhase;

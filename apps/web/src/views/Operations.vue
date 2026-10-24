@@ -232,6 +232,21 @@ async function control(start: boolean) {
     connecting.value = false;
   }
 }
+async function resetCounts() {
+  if (!device.value) return;
+  connecting.value = true;
+  try {
+    await post(`/devices/${device.value.id}/commands`, {
+      type: "RESET_COUNTS",
+    });
+    await devices.snapshot();
+    notices.add("计数已清零");
+  } catch (e) {
+    notices.error(e);
+  } finally {
+    connecting.value = false;
+  }
+}
 async function checkOne() {
   if (!device.value) return;
   busy.value = true;
@@ -352,6 +367,14 @@ async function checkOne() {
           >
             {{ inspecting ? "停止检测" : "开始检测" }}
           </UiButton>
+          <UiButton
+            v-if="terminalState?.model && terminalState?.product"
+            variant="secondary"
+            icon="refresh"
+            :disabled="connecting || busy"
+            @click="resetCounts"
+            >清零重检</UiButton
+          >
         </template>
       </div>
       <details
@@ -667,7 +690,10 @@ async function checkOne() {
         <p class="level-guide">小于 85：过高 · 大于 102.90：过低</p>
         <small>实时读数不计件；保存单件后查看下方机器原判。</small>
       </section>
-      <div class="live-verdict">
+      <div
+        class="live-verdict"
+        :class="last ? `verdict-${String(last.result).toLowerCase()}` : ''"
+      >
         <span class="verdict-caption"
           >{{
             last?.productionRunId &&

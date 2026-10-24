@@ -1,15 +1,14 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { chinese, displayName, terminalActivity } from "@vision/shared";
 import type { Inspection } from "@vision/contracts";
-import { api, post, errorText } from "../api";
+import { api, errorText, post } from "../api";
 import { useDeviceStore } from "../stores/devices";
 import Icon from "../components/Icon.vue";
 
 const devices = useDeviceStore();
 const root = ref<HTMLElement | null>(null);
 const now = ref(Date.now()),
-  busy = ref(false),
   message = ref("");
 const full = ref(false),
   boxesVisible = ref(true),
@@ -116,7 +115,7 @@ async function loadRecords() {
   }
   try {
     const data = await api<{ items: Inspection[] }>(
-      `/inspections?deviceId=${encodeURIComponent(id)}&realOnly=true&pageSize=5&sort=createdAt&order=desc`,
+      `/inspections?deviceId=${encodeURIComponent(id)}&realOnly=true&pageSize=100&sort=createdAt&order=desc`,
     );
     if (device.value?.id === id) records.value = data.items;
   } catch (e) {
@@ -135,21 +134,6 @@ watch(
   { immediate: true },
 );
 watch(() => state.value?.last?.sequence, loadRecords);
-async function control() {
-  if (!device.value || busy.value) return;
-  busy.value = true;
-  message.value = "";
-  try {
-    await post(`/devices/${device.value.id}/commands`, {
-      type: active.value ? "STOP_INSPECTION" : "START_INSPECTION",
-    });
-    await devices.snapshot();
-  } catch (e) {
-    message.value = errorText(e);
-  } finally {
-    busy.value = false;
-  }
-}
 async function fullscreen() {
   try {
     if (document.fullscreenElement) await document.exitFullscreen();
@@ -162,7 +146,27 @@ function onFull() {
   full.value = !!document.fullscreenElement;
 }
 document.addEventListener("fullscreenchange", onFull);
+const ARM_S = 16.7258,
+  PL_S = 0.06567,
+  SPEEDUP = 254.7;
+const lap = ref(0),
+  cycles = ref(0);
+let raf = 0,
+  t0 = 0;
+function tick(ts: number) {
+  if (!t0) t0 = ts;
+  const e = (ts - t0) / 1000;
+  cycles.value = Math.floor(e / ARM_S);
+  lap.value = e % ARM_S;
+  raf = requestAnimationFrame(tick);
+}
+onMounted(() => {
+  raf = requestAnimationFrame(tick);
+});
+const armPct = computed(() => (lap.value / ARM_S) * 100);
+const plTotal = computed(() => Math.floor(lap.value / PL_S));
 onBeforeUnmount(() => {
+  cancelAnimationFrame(raf);
   clearInterval(clock);
   document.removeEventListener("fullscreenchange", onFull);
   if (device.value) devices.unwatchPreview(device.value.id);
@@ -182,2106 +186,1865 @@ const trend = computed(() => {
     )
     .join(" ");
 });
+function tween(get: () => number | null) {
+  const shown = ref<number | null>(get());
+  let id = 0;
+  watch(get, (to) => {
+    cancelAnimationFrame(id);
+    const from = shown.value;
+    if (
+      to == null ||
+      from == null ||
+      matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      shown.value = to;
+      return;
+    }
+    const t0 = performance.now();
+    const step = (t: number) => {
+      const k = Math.min(1, (t - t0) / 700);
+      shown.value = from + (to - from) * (1 - Math.pow(1 - k, 3));
+      if (k < 1) id = requestAnimationFrame(step);
+    };
+    id = requestAnimationFrame(step);
+  });
+  onBeforeUnmount(() => cancelAnimationFrame(id));
+  return shown;
+}
+const nTotal = tween(() => total.value);
+const nPass = tween(() => counts.value?.PASS ?? null);
+const nFail = tween(() => counts.value?.FAIL ?? null);
+const nRate = tween(() => passRate.value);
+const int = (v: number | null) => (v == null ? "—" : Math.round(v).toLocaleString());
+
+// ── 计件口径：整件进入并离开画面、保存记录后才计一件；批次随开始/停止自动创建/关闭 ──
+const scope = computed(() => (state.value?.productionRunId ? "本批" : "设备累计"));
+const nBelt = tween(() => state.value?.beltCaps ?? null);
+const resetting = ref(false);
+async function resetCounts() {
+  if (!device.value || resetting.value) return;
+  resetting.value = true;
+  try {
+    await post(`/devices/${device.value.id}/commands`, {
+      type: "RESET_COUNTS",
+    });
+    await devices.snapshot();
+    message.value = "计数已清零，已重新开始检测";
+  } catch (e) {
+    message.value = errorText(e);
+  } finally {
+    resetting.value = false;
+  }
+}
+const nCum = tween(() => state.value?.total ?? null);
+const judged = computed(() =>
+  counts.value ? counts.value.PASS + counts.value.FAIL : null,
+);
+const phases = [
+  { key: "CLEARING", label: "清场" },
+  { key: "WAITING", label: "等待产品" },
+  { key: "INSPECTING", label: "多帧检查" },
+  { key: "SAVING", label: "保存计件" },
+];
+const phaseIdx = computed(() =>
+  state.value?.production
+    ? phases.findIndex((p) => p.key === state.value?.passagePhase)
+    : -1,
+);
+
+// ── 画布缩放：按 1920×1080 设计，整体缩放到窗口 ──
+const W = 1920,
+  H = 1080;
+const k = ref(1),
+  ox = ref(0),
+  oy = ref(0);
+let ro: ResizeObserver | null = null;
+function fit() {
+  const el = root.value;
+  if (!el) return;
+  const s = Math.min(el.clientWidth / W, el.clientHeight / H);
+  k.value = s;
+  ox.value = (el.clientWidth - W * s) / 2;
+  oy.value = (el.clientHeight - H * s) / 2;
+}
+onMounted(() => {
+  fit();
+  ro = new ResizeObserver(fit);
+  if (root.value) ro.observe(root.value);
+});
+onBeforeUnmount(() => ro?.disconnect());
+
+// ── 方形视频上的标注 ──
+const feedImg = ref<HTMLImageElement | null>(null);
+const anns = computed(() => {
+  const p = preview.value;
+  if (!p) return [];
+  const u = p.width / 224,
+    fs = 7.5 * u,
+    lh = fs * 2.3,
+    gap = 10 * u;
+  return detections.value.map((b, i) => {
+    const text =
+      `${displayName(b.label)} ${(b.confidence * 100).toFixed(0)}%` +
+      (b.trackId != null ? ` #${b.trackId}` : "");
+    let cw = 0;
+    for (const ch of text) cw += ch.charCodeAt(0) > 255 ? fs : fs * 0.62;
+    const lw = cw + fs * 1.4;
+    const right = b.x2 + gap + lw <= p.width - 2 * u;
+    const lx = right ? b.x2 + gap : Math.max(2 * u, b.x1 - gap - lw);
+    const ly = Math.min(Math.max(b.y1, 2 * u), p.height - lh - 2 * u);
+    const ax = right ? b.x2 : b.x1;
+    return {
+      key: b.trackId ?? i,
+      b,
+      text,
+      u,
+      fs,
+      lx,
+      ly,
+      lw,
+      lh,
+      d: `M${ax},${b.y1}L${right ? lx : lx + lw},${ly + lh / 2}`,
+    };
+  });
+});
+const rowY = (r: number) => (r / 223) * (preview.value?.height ?? 0);
+
+// ── 检测带：每出一个结论，截一张当前画面缩略图 ──
+type Thumb = { seq: number; result: string; src: string | null };
+const thumbs = ref<Thumb[]>([]);
+watch(
+  () => state.value?.last?.sequence,
+  (seq) => {
+    const last = state.value?.last;
+    if (seq == null || !last) return;
+    let src: string | null = null;
+    try {
+      const img = feedImg.value;
+      if (img?.complete && img.naturalWidth) {
+        const c = document.createElement("canvas");
+        c.width = c.height = 120;
+        const side = Math.min(img.naturalWidth, img.naturalHeight);
+        c.getContext("2d")?.drawImage(
+          img,
+          (img.naturalWidth - side) / 2,
+          (img.naturalHeight - side) / 2,
+          side,
+          side,
+          0,
+          0,
+          120,
+          120,
+        );
+        src = c.toDataURL("image/jpeg", 0.7);
+      }
+    } catch {
+      src = null;
+    }
+    thumbs.value = [
+      ...thumbs.value,
+      { seq, result: last.result, src },
+    ].slice(-24);
+  },
+);
+watch(
+  () => device.value?.id,
+  () => {
+    thumbs.value = [];
+    confBins.value = Array(10).fill(0);
+  },
+);
+const recentList = computed<Thumb[]>(() =>
+  thumbs.value.length
+    ? thumbs.value
+    : [...records.value]
+        .slice(0, 24)
+        .reverse()
+        .map((r, i) => ({ seq: i, result: r.result, src: null })),
+);
+const cells = computed(() => {
+  const list = recentList.value;
+  return [...Array(24 - list.length).fill(null), ...list] as (Thumb | null)[];
+});
+const recentStat = computed(() => {
+  const list = [...recentList.value].reverse();
+  let streak = 0;
+  for (const t of list) {
+    if (t.result !== "PASS") break;
+    streak++;
+  }
+  return {
+    pass: list.filter((t) => t.result === "PASS").length,
+    fail: list.filter((t) => t.result === "FAIL").length,
+    other: list.filter((t) => t.result !== "PASS" && t.result !== "FAIL").length,
+    streak,
+  };
+});
+const cls = (r: string) => (r === "PASS" ? "ok" : r === "FAIL" ? "bad" : "mid");
+
+// ── 耗时瀑布 ──
+const wf = computed(() => {
+  const t = timing.value;
+  const rows = [
+    { label: "采集推理", v: t?.captureMs },
+    { label: "输入搬运", v: t?.prepareMs },
+    { label: "PL 卷积", v: t?.convMs, hot: true },
+    { label: "张量提取", v: t?.extractMs },
+    { label: "后处理", v: t?.postMs },
+  ];
+  const peak = Math.max(1, ...rows.map((r) => r.v ?? 0)) * 1.05;
+  const max = [10, 20, 50, 100, 200, 500, 1000].find((s) => s >= peak) ?? peak;
+  const X0 = 66,
+    PW = 236;
+  return {
+    max,
+    ticks: [0, 1, 2, 3, 4].map((i) => ({
+      x: X0 + (i / 4) * PW,
+      label: ((max * i) / 4).toFixed(max < 20 ? 1 : 0),
+    })),
+    rows: rows.map((r, i) => ({
+      ...r,
+      y: 12 + i * 34,
+      x: X0,
+      w: r.v == null ? 0 : Math.max(2, (r.v / max) * PW),
+    })),
+  };
+});
+
+// ── 延迟分布 + P50 / P99 ──
+const hist = computed(() => {
+  const vals = devices.history
+    .map((h) => h.inferenceUs)
+    .filter((v): v is number => v != null && Number.isFinite(v))
+    .map((v) => v / 1000);
+  if (vals.length < 8) return null;
+  const s = [...vals].sort((a, b) => a - b);
+  const q = (p: number) =>
+    s[Math.min(s.length - 1, Math.floor(p * s.length))] ?? 0;
+  const lo = s[0] ?? 0,
+    span = (s[s.length - 1] ?? lo) - lo || 1,
+    N = 12,
+    bw = 26,
+    HX = 14;
+  const bins = Array(N).fill(0);
+  vals.forEach((v) => {
+    const i = Math.min(N - 1, Math.floor(((v - lo) / span) * N));
+    bins[i] = (bins[i] ?? 0) + 1;
+  });
+  const mx = Math.max(...bins);
+  const pos = (v: number) => HX + ((v - lo) / span) * N * bw;
+  return {
+    n: vals.length,
+    bw,
+    bars: bins.map((c, i) => ({ x: HX + i * bw, h: (c / mx) * 150 })),
+    end: HX + N * bw,
+    HX,
+    p50: q(0.5),
+    p99: q(0.99),
+    x50: pos(q(0.5)),
+    x99: pos(q(0.99)),
+    ticks: [0, 0.25, 0.5, 0.75, 1].map((f) => ({
+      x: HX + f * N * bw,
+      label: (lo + f * span).toFixed(1),
+    })),
+  };
+});
+
+// ── 置信度分布（本次会话累计） ──
+const confBins = ref<number[]>(Array(10).fill(0));
+const confN = computed(() => confBins.value.reduce((a, b) => a + b, 0));
+const confBars = computed(() => {
+  const mx = Math.max(1, ...confBins.value);
+  return confBins.value.map((c, i) => ({ x: i * 32, h: (c / mx) * 56 }));
+});
+watch(
+  () => preview.value?.frameId,
+  () => {
+    for (const d of detections.value) {
+      const i = Math.min(9, Math.max(0, Math.floor(d.confidence * 10)));
+      confBins.value[i] = (confBins.value[i] ?? 0) + 1;
+    }
+  },
+);
+const gmacs = computed(() => (fps.value == null ? null : fps.value * 0.9775));
+
+// ── 报告常量（hardware/camera/build/terminal 与 arm_vs_pl_20261022） ──
+const resources = [
+  { name: "DSP", used: 217, total: 220, text: "217/220" },
+  { name: "LUT", used: 45299, total: 53200, text: "45.3k/53.2k" },
+  { name: "BRAM", used: 112.5, total: 140, text: "112.5/140" },
+  { name: "FF", used: 60859, total: 106400, text: "60.9k/106.4k" },
+];
+const armLayers = [
+  [31, 3.163],
+  [23, 2.528],
+  [16, 1.897],
+  [2, 1.634],
+  [9, 1.63],
+  [1, 1.25],
+  [25, 1.144],
+  [6, 0.55],
+].map(([n = 0, s = 0], i) => ({
+  name: `L${String(n).padStart(2, "0")}`,
+  s,
+  y: 6 + i * 24,
+  w: (s / 3.163) * 230,
+  hot: i === 0,
+}));
+// ── 多视图：纯展示，不含任何后台操作 ──
+type View = "live" | "sys" | "stats";
+const views: { key: View; label: string }[] = [
+  { key: "live", label: "实时总览" },
+  { key: "sys", label: "系统状态" },
+  { key: "stats", label: "判定统计" },
+];
+const view = ref<View>("live");
+const auto = ref(false);
+const rotate = setInterval(() => {
+  if (!auto.value) return;
+  const i = views.findIndex((v) => v.key === view.value);
+  view.value = views[(i + 1) % views.length]!.key;
+}, 20000);
+const samples = ref<{ cpu: number | null; mem: number | null }[]>([]);
+const sampler = setInterval(() => {
+  if (!state.value) return;
+  samples.value = [
+    ...samples.value,
+    { cpu: state.value.cpuPercent, mem: memory.value },
+  ].slice(-90);
+}, 2000);
+onBeforeUnmount(() => {
+  clearInterval(rotate);
+  clearInterval(sampler);
+});
+function line(vals: (number | null)[], max?: number, w = 400, h = 90) {
+  const v = vals.filter((x): x is number => x != null && Number.isFinite(x));
+  if (v.length < 2) return "";
+  const top = max ?? (Math.max(...v) * 1.1 || 1);
+  return v
+    .map(
+      (x, i) =>
+        `${((i / (v.length - 1)) * w).toFixed(1)},${(h - 6 - (x / top) * (h - 12)).toFixed(1)}`,
+    )
+    .join(" ");
+}
+const cpuLine = computed(() => line(samples.value.map((s) => s.cpu), 100));
+const memLine = computed(() => line(samples.value.map((s) => s.mem), 100));
+const fpsLine = computed(() => line(devices.history.map((h) => h.fps)));
+const latLine = computed(() =>
+  line(devices.history.map((h) => (h.inferenceUs == null ? null : h.inferenceUs / 1000))),
+);
+const tele = computed(() => {
+  const t = device.value?.telemetry;
+  if (!t) return [];
+  const rows: [string, number][] = [
+    ["采集", t.captureUs],
+    ["转换", t.conversionUs],
+    ["推理", t.inferenceUs],
+    ["传输", t.transferUs],
+    ["周期", t.cycleUs],
+  ];
+  const mx = Math.max(1, ...rows.map((r) => r[1]));
+  return rows.map(([label, us]) => ({ label, ms: us / 1000, pct: (us / mx) * 100 }));
+});
+const stat = computed(() => {
+  const r = records.value;
+  const c = { PASS: 0, FAIL: 0, other: 0 };
+  for (const x of r) c[x.result === "PASS" ? "PASS" : x.result === "FAIL" ? "FAIL" : "other"]++;
+  const conf = r.map((x) => x.confidence).filter((v): v is number => v != null);
+  const bins: number[] = Array(10).fill(0);
+  for (const v of conf) {
+    const k = Math.min(9, Math.floor(v * 10));
+    bins[k] = (bins[k] ?? 0) + 1;
+  }
+  const mx = Math.max(1, ...bins);
+  const reasons = new Map<string, number>();
+  for (const x of r)
+    if (x.result !== "PASS") {
+      const key = x.reason || "未记录";
+      reasons.set(key, (reasons.get(key) ?? 0) + 1);
+    }
+  const top = [...reasons].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  return {
+    n: r.length,
+    c,
+    pct: (v: number) => (r.length ? (v / r.length) * 100 : 0),
+    bins: bins.map((v, i) => ({ x: i * 40, h: (v / mx) * 110 })),
+    avg: conf.length ? conf.reduce((a, b) => a + b, 0) / conf.length : null,
+    reasons: top.map(([text, n]) => ({ text, n, pct: (n / (top[0]?.[1] ?? 1)) * 100 })),
+    latest: r.slice(0, 10),
+  };
+});
 </script>
 
+
 <template>
-  <div ref="root" class="showcase">
-    <header class="show-header">
-      <RouterLink to="/overview" class="identity" aria-label="返回运行概览"
-        ><span class="brand-emblem"><Icon name="scan" :size="27" /></span
-        ><span class="wordmark"
-          >VISION<span>.</span><small>EDGE INTELLIGENCE</small></span
-        ></RouterLink
-      >
-      <nav class="show-tabs" aria-label="演示导航">
-        <span class="selected"><i></i>实时检测</span
-        ><RouterLink to="/production"
-          >生产记录<Icon name="chart" :size="14"
-        /></RouterLink>
-      </nav>
-      <div class="header-end">
-        <span class="show-clock"
-          >{{ time }}<small>{{ date }}</small></span
-        ><button
-          class="round-button"
+  <div ref="root" class="fit">
+    <div
+      class="sc"
+      :class="resultClass"
+      :style="{ transform: `translate(${ox}px, ${oy}px) scale(${k})` }"
+    >
+      <header class="top">
+        <RouterLink to="/overview" class="brand" aria-label="返回运行概览"
+          >视觉检测</RouterLink
+        >
+        <nav class="tabs" aria-label="展示视图">
+          <button
+            v-for="v in views"
+            :key="v.key"
+            :class="{ on: view === v.key }"
+            @click="view = v.key"
+          >
+            {{ v.label }}
+          </button>
+        </nav>
+        <span class="sp"></span>
+        <span class="tag prod"
+          >{{ product }} · {{ state?.model?.version || "尚未加载模型" }}</span
+        >
+        <span class="live" :class="{ up: online }"
+          ><i></i>{{ online ? "终端在线" : "等待终端" }}</span
+        >
+        <select
+          v-if="devices.devices.length > 1"
+          v-model="devices.selected"
+          class="sel"
+          aria-label="选择演示设备"
+        >
+          <option v-for="d in devices.devices" :key="d.id" :value="d.id">
+            {{ d.name }}
+          </option>
+        </select>
+        <button
+          v-if="view === 'live'"
+          class="ico"
+          :aria-pressed="boxesVisible"
+          @click="boxesVisible = !boxesVisible"
+        >
+          标注
+        </button>
+        <button
+          class="ico"
+          :disabled="!online || resetting"
+          @click="resetCounts"
+        >
+          清零重检
+        </button>
+        <button class="ico" :aria-pressed="auto" @click="auto = !auto">
+          轮播
+        </button>
+        <span class="clk">{{ time }}</span>
+        <button
+          class="ico"
           :aria-label="full ? '退出全屏' : '进入全屏'"
           @click="fullscreen"
         >
-          <svg
-            width="19"
-            height="19"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
-          >
-            <path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" />
-          </svg></button
-        ><RouterLink
-          class="round-button"
-          to="/workbench"
-          aria-label="返回现场工作台"
-          ><Icon name="device" :size="19"
-        /></RouterLink>
-      </div>
-    </header>
+          ⛶
+        </button>
+        <RouterLink class="ico" to="/workbench" aria-label="前往现场工作台"
+          >⌂</RouterLink
+        >
+      </header>
 
-    <div class="show-content">
-      <div class="intro">
-        <div>
-          <p class="eyebrow"><i></i>FPGA POWERED VISION SYSTEM</p>
-          <h1>看见细节<span>，</span>判断品质<span>。</span></h1>
-          <p class="intro-copy">感知、计算、判断。在边缘，实时发生。</p>
-        </div>
-        <div class="connection">
-          <Icon name="wifi" :size="21" />
-          <div>
-            <b>{{ online ? "边缘终端已连接" : "等待边缘终端" }}</b
-            ><small>{{ device?.name || "连接设备后显示实时检测" }}</small>
-          </div>
-          <i :class="{ connected: online }"></i>
-        </div>
-      </div>
-      <div class="show-grid">
-        <section class="soft-card vision-card" aria-label="实时检测视频">
-          <div class="card-heading">
-            <div>
-              <span class="section-number">01</span>
-              <h2>实时视野</h2>
-              <span class="english-label">LIVE VISION</span>
-            </div>
-            <button
-              class="text-control"
-              :aria-pressed="boxesVisible"
-              @click="boxesVisible = !boxesVisible"
-            >
-              <Icon name="scan" :size="15" />{{
-                boxesVisible ? "隐藏标记" : "显示标记"
-              }}
-            </button>
-          </div>
-          <div class="video-well">
-            <div class="video-top">
-              <span class="live-tag" :class="{ streaming: !!preview }"
-                ><i></i>{{ preview ? "LIVE" : "STANDBY" }}</span
-              ><span>{{
-                preview ? `${preview.width} × ${preview.height}` : "CAMERA / 01"
-              }}</span>
-            </div>
-            <div
-              v-if="preview"
-              class="feed"
-              :style="{ aspectRatio: `${preview.width}/${preview.height}` }"
-            >
-              <img
-                :src="`data:image/jpeg;base64,${preview.jpeg}`"
-                alt="设备实时检测画面"
-                draggable="false"
-              />
-              <svg
-                v-if="boxesVisible"
-                class="detection-overlay"
-                :viewBox="`0 0 ${preview.width} ${preview.height}`"
-              >
-                <g v-for="(box, i) in preview.detections ?? []" :key="i">
-                  <rect
-                    :x="box.x1"
-                    :y="box.y1"
-                    :width="box.x2 - box.x1"
-                    :height="box.y2 - box.y1"
-                    rx="3"
-                  />
-                  <rect
-                    class="caption-bg"
-                    :x="box.x1"
-                    :y="Math.max(0, box.y1 - 21)"
-                    :width="Math.min(160, preview.width - box.x1)"
-                    height="20"
-                    rx="3"
-                  />
-                  <text :x="box.x1 + 6" :y="Math.max(14, box.y1 - 7)">
-                    {{ displayName(box.label) }} ·
-                    {{ (box.confidence * 100).toFixed(0) }}%
-                  </text>
-                </g>
-              </svg>
-            </div>
-            <div v-else class="video-placeholder">
-              <div class="lens-orbit">
-                <div><Icon name="camera" :size="38" /></div>
-                <i></i>
+      <main v-if="view === 'live'" class="main">
+        <div class="lcol">
+          <div class="vid">
+            <div class="sq">
+              <template v-if="preview">
+                <img
+                  ref="feedImg"
+                  :src="`data:image/jpeg;base64,${preview.jpeg}`"
+                  alt="设备实时检测画面"
+                  draggable="false"
+                />
+                <svg
+                  class="ov"
+                  :viewBox="`0 0 ${preview.width} ${preview.height}`"
+                  preserveAspectRatio="xMidYMid slice"
+                >
+                  <g v-if="level && boxesVisible">
+                    <rect
+                      x="0"
+                      :y="rowY(level.band[0])"
+                      :width="preview.width"
+                      :height="rowY(level.band[1]) - rowY(level.band[0])"
+                      class="bandfill"
+                    />
+                    <line
+                      v-if="level.row != null"
+                      x1="0"
+                      :x2="preview.width"
+                      :y1="rowY(level.row)"
+                      :y2="rowY(level.row)"
+                      class="rowline"
+                    />
+                  </g>
+                  <g v-if="boxesVisible">
+                    <g v-for="a in anns" :key="a.key" class="ann">
+                      <rect
+                        class="bx"
+                        :x="a.b.x1"
+                        :y="a.b.y1"
+                        :width="a.b.x2 - a.b.x1"
+                        :height="a.b.y2 - a.b.y1"
+                        :stroke-width="1.6 * a.u"
+                      />
+                      <path class="ld" :d="a.d" :stroke-width="0.8 * a.u" />
+                      <g :transform="`translate(${a.lx},${a.ly})`">
+                        <rect class="lb" :width="a.lw" :height="a.lh" />
+                        <text
+                          :x="a.fs * 0.7"
+                          :y="a.lh / 2 + a.fs * 0.35"
+                          :font-size="a.fs"
+                        >
+                          {{ a.text }}
+                        </text>
+                      </g>
+                    </g>
+                  </g>
+                </svg>
+              </template>
+              <div v-else class="idle">
+                <b>{{ online ? "正在建立实时视野" : "等待视频信号" }}</b>
+                <p>
+                  {{
+                    online
+                      ? "画面接收后自动显示"
+                      : "连接边缘终端，开启视觉检测"
+                  }}
+                </p>
               </div>
-              <b>{{ online ? "正在建立实时视野" : "等待视频信号" }}</b>
-              <p>
-                {{
-                  online
-                    ? "保持设备在线，画面将在接收后自动显示"
-                    : "连接边缘终端，开启视觉检测"
-                }}
-              </p>
-            </div>
-            <div class="frame-corners"></div>
-            <div class="video-bottom">
-              <span><i :class="{ lit: active }"></i>{{ activity.label }}</span
-              ><span>{{
+              <span class="vtag">{{
                 preview
-                  ? `FRAME ${String(preview.frameId).padStart(6, "0")}`
+                  ? `FRAME ${String(preview.frameId).padStart(6, "0")} · ${preview.width}×${preview.height} · 目标 ${detections.length}（不等于件数）`
                   : "NO SIGNAL"
               }}</span>
-            </div>
-          </div>
-          <div class="camera-footer">
-            <span class="camera-icon"><Icon name="camera" :size="18" /></span>
-            <div>
-              <b>{{ product }}</b
-              ><small>{{ state?.model?.version || "模型信息待上报" }}</small>
-            </div>
-            <div class="camera-source">
-              <small>实时采集</small><b>OV5640 ↗</b>
-            </div>
-          </div>
-        </section>
-        <aside class="insight-column">
-          <section class="soft-card verdict-card" :class="resultClass">
-            <div class="card-heading">
-              <div>
-                <span class="section-number">02</span>
-                <h2>单件结论</h2>
-              </div>
-              <span class="mini-label">最近完成</span>
-            </div>
-            <div class="verdict-main">
-              <div class="verdict-symbol">
-                <Icon
-                  :name="
-                    result?.result === 'PASS'
-                      ? 'check'
-                      : result?.result === 'FAIL'
-                        ? 'close'
-                        : 'scan'
-                  "
-                  :size="43"
-                />
-              </div>
-              <div>
-                <span class="verdict-kicker">{{
-                  result ? "INSPECTION RESULT" : "READY TO INSPECT"
-                }}</span
-                ><Transition name="result" mode="out-in"
-                  ><h3 :key="lastLabel">{{ lastLabel }}</h3></Transition
+              <Transition name="stamp">
+                <div
+                  v-if="result"
+                  :key="result.sequence"
+                  class="stamp"
+                  :class="resultClass"
                 >
-              </div>
+                  {{ lastLabel }}
+                </div>
+              </Transition>
             </div>
-            <p class="verdict-reason">
-              {{ result?.reason || "产品经过视野后，自动完成判定与计件。" }}
-            </p>
-            <div v-if="level" class="level-reading">
-              <span>当前画面 · 液位测量</span
-              ><b
-                >{{ level.row == null ? "未测到液面" : level.row.toFixed(1)
-                }}<small v-if="level.row != null"> row</small></b
-              >
-              <div class="level-track">
-                <span
+            <div class="ruler">
+              <template v-if="level">
+                <template v-for="n in 12" :key="n">
+                  <i class="tk" :style="{ top: `${((n - 1) * 20 / 223) * 100}%` }"></i>
+                  <span class="rl" :style="{ top: `${((n - 1) * 20 / 223) * 100}%` }">{{
+                    (n - 1) * 20
+                  }}</span>
+                </template>
+                <div
+                  class="band"
                   :style="{
-                    left: `${(level.band[0] / 223) * 100}%`,
-                    width: `${((level.band[1] - level.band[0]) / 223) * 100}%`,
+                    top: `${(level.band[0] / 223) * 100}%`,
+                    height: `${((level.band[1] - level.band[0]) / 223) * 100}%`,
                   }"
-                ></span
-                ><i
+                ></div>
+                <div
                   v-if="level.row != null"
-                  :style="{ left: `${(level.row / 223) * 100}%` }"
-                ></i>
-              </div>
-              <small
-                >{{ level.status }} · 合格带 {{ level.band[0] }}–{{
-                  level.band[1]
-                }}</small
-              >
+                  class="ptr"
+                  :style="{ top: `${(level.row / 223) * 100}%` }"
+                >
+                  <b>{{ level.row.toFixed(1) }}</b>
+                </div>
+                <span v-else class="miss">未测到液面</span>
+              </template>
+              <span v-else class="miss">液位尺</span>
             </div>
-            <div v-else class="verdict-foot">
-              <i></i>多帧判定 · 自动留存检测结果
+          </div>
+
+          <div class="p strip-card">
+            <div class="eb">
+              <span>检测带 · 最近 24 件</span>
+              <ol class="phases" aria-label="单件检测流程">
+                <li
+                  v-for="(p, i) in phases"
+                  :key="p.key"
+                  :class="{ on: i === phaseIdx, done: phaseIdx >= 0 && i < phaseIdx }"
+                >
+                  {{ p.label }}
+                </li>
+              </ol>
             </div>
-          </section>
-          <section class="soft-card compute-card">
-            <div class="card-heading">
-              <div>
-                <span class="section-number">03</span>
-                <h2>边缘计算</h2>
-              </div>
-              <span class="chip-label">ZYNQ-7020</span>
+            <p class="hint">{{ activity.hint }}</p>
+            <TransitionGroup name="cell" tag="div" class="strip">
+              <i
+                v-for="(c, n) in cells"
+                :key="c ? `s${c.seq}` : `e${n}`"
+                :class="c ? cls(c.result) : 'e'"
+                :title="c ? chinese(c.result) : ''"
+                :style="c?.src ? { backgroundImage: `url(${c.src})` } : undefined"
+              ></i>
+            </TransitionGroup>
+            <div class="kv">
+              <div class="g"><span>近 24 件合格</span><b>{{ recentStat.pass }}</b></div>
+              <div class="nb"><span>近 24 件不合格</span><b>{{ recentStat.fail }}</b></div>
+              <div><span>连续合格</span><b>{{ recentStat.streak }}</b></div>
+              <div><span>复核 / 错误</span><b>{{ recentStat.other }}</b></div>
             </div>
-            <div class="compute-body">
-              <span class="processor-icon"
-                ><Icon name="device" :size="37"
-              /></span>
-              <div class="fps-value">
-                {{ fps == null ? "—" : fps.toFixed(1) }}<span>FPS</span
-                ><small>实测推理帧率</small>
+          </div>
+        </div>
+
+        <div class="rcol">
+          <div class="p hero">
+            <div>
+              <div class="eb">
+                <span>PL 加速比</span><span class="badge b-meas">实测</span>
               </div>
-              <svg
-                class="spark"
-                viewBox="0 0 240 55"
-                aria-label="近期推理帧率趋势"
-              >
-                <path d="M0 48H240" />
-                <polyline v-if="trend" :points="trend" />
+              <div class="big">{{ SPEEDUP.toFixed(0) }}<small>×</small></div>
+              <p>
+                同一模型 · 同一块板 · 单帧推理<br />978 MMAC · 输出与 Python
+                参考 0 差异
+              </p>
+            </div>
+            <div class="tl">
+              <div class="lane">
+                <div><b>ARM Cortex-A9</b><small>单核 标量 INT8</small></div>
+                <div class="trk">
+                  <div class="fillA" :style="{ width: `${armPct}%` }"></div>
+                </div>
+                <div class="t">16.73<small> s</small></div>
+              </div>
+              <div class="lane">
+                <div><b>PL 加速器</b><small>33 层全部在 PL</small></div>
+                <div class="trk pl"></div>
+                <div class="t pt">65.7<small> ms</small></div>
+              </div>
+              <div class="axis">
+                <span>0</span><span>4 s</span><span>8 s</span><span>12 s</span
+                ><span>16.7 s</span>
+              </div>
+              <div class="cnt">
+                <span>在 ARM 完成 1 帧的时间里，PL 已完成</span
+                ><b>{{ plTotal }} 帧</b>
+              </div>
+            </div>
+          </div>
+
+          <div class="row r2">
+            <div class="p">
+              <div class="eb">
+                <span>计件 · {{ scope }}</span
+                ><span class="badge b-live">实时</span>
+              </div>
+              <div :key="total ?? 'x'" class="tally">
+                {{ int(nTotal) }}<em>件</em>
+              </div>
+              <div class="rate-line">
+                合格率
+                <b>{{ nRate == null ? "—" : nRate.toFixed(1) }}%</b>
+                <small>已判定 {{ judged ?? "—" }} 件</small>
+              </div>
+              <div class="rate-line">
+                传送带瓶盖
+                <b>{{ int(nBelt) }}</b>
+                <small>本次检测累计经过的瓶盖数</small>
+              </div>
+              <div class="bar">
+                <i :style="{ width: `${nRate ?? 0}%` }"></i>
+              </div>
+              <div class="kv">
+                <div class="g"><span>合格</span><b>{{ int(nPass) }}</b></div>
+                <div class="nb"><span>不合格</span><b>{{ int(nFail) }}</b></div>
+                <div><span>待复核</span><b>{{ counts?.REVIEW ?? "—" }}</b></div>
+                <div><span>错误</span><b>{{ counts?.ERROR ?? "—" }}</b></div>
+              </div>
+              <p class="rule">
+                合格率 = 合格 ÷（合格 + 不合格），复核与错误不计入 · 设备累计
+                {{ int(nCum) }} 件 · 待上传 {{ state?.pendingSync ?? "—" }} 条
+              </p>
+            </div>
+            <div class="p">
+              <div class="eb">
+                <span>单帧耗时 (ms)</span><span class="badge b-live">实时</span>
+              </div>
+              <svg class="ch" width="100%" height="235" viewBox="0 0 330 235">
+                <g v-for="t in wf.ticks" :key="t.x">
+                  <path :d="`M${t.x} 8V190`" stroke="#c9c6bf" />
+                  <text :x="t.x" y="208" text-anchor="middle">{{ t.label }}</text>
+                </g>
+                <g v-for="r in wf.rows" :key="r.label">
+                  <text x="0" :y="r.y + 15">{{ r.label }}</text>
+                  <rect
+                    class="wbar"
+                    :class="{ hot: r.hot }"
+                    :x="r.x"
+                    :y="r.y"
+                    :width="r.w"
+                    height="22"
+                  />
+                  <text
+                    v-if="r.v != null"
+                    :x="r.x + r.w + 4"
+                    :y="r.y + 16"
+                    class="val"
+                  >
+                    {{ r.v.toFixed(1) }}
+                  </text>
+                </g>
+                <text x="330" y="226" text-anchor="end">
+                  预处理与卷积并行，阶段不可相加
+                </text>
               </svg>
             </div>
-            <div class="compute-foot">
-              <span>端侧推理延迟</span
-              ><b
-                >{{ latency == null ? "—" : latency.toFixed(1)
-                }}<small> ms</small></b
-              ><span class="accelerated">● PL 加速</span>
-            </div>
-          </section>
-          <div class="control-deck">
-            <select
-              v-if="devices.devices.length > 1"
-              v-model="devices.selected"
-              aria-label="选择演示设备"
-            >
-              <option v-for="d in devices.devices" :key="d.id" :value="d.id">
-                {{ d.name }}
-              </option></select
-            ><button
-              class="start-button"
-              :disabled="
-                busy || !online || (!active && !!activity.startBlocked)
-              "
-              :title="activity.startBlocked"
-              @click="control"
-            >
-              <span><Icon :name="active ? 'pause' : 'play'" :size="17" /></span
-              >{{ busy ? "正在切换…" : active ? "停止检测" : "开始自动检测"
-              }}<span class="button-arrow">{{ active ? "Ⅱ" : "↗" }}</span>
-            </button>
-            <p v-if="message" class="control-message" role="alert">
-              {{ message }}
-            </p>
-            <RouterLink
-              v-else-if="!state?.model || !state?.product"
-              to="/workbench?setup=1"
-              class="setup-link"
-              >前往工作台配置产品与模型 →</RouterLink
-            >
-          </div>
-        </aside>
-      </div>
-      <section class="metrics-row" aria-label="检测统计">
-        <div class="metric">
-          <span class="metric-icon"><Icon name="scan" :size="22" /></span>
-          <div>
-            <small>{{ state?.productionRunId ? "本批检测" : "设备累计" }}</small
-            ><b
-              >{{ total == null ? "—" : total.toLocaleString() }}<em>件</em></b
-            >
-          </div>
-          <span class="metric-index">01</span>
-        </div>
-        <div class="metric">
-          <span class="metric-icon green"
-            ><Icon name="check" :size="22"
-          /></span>
-          <div>
-            <small>合格产品</small
-            ><b>{{ counts?.PASS?.toLocaleString() ?? "—" }}<em>件</em></b>
-          </div>
-          <span class="metric-index">02</span>
-        </div>
-        <div class="metric">
-          <span class="metric-icon coral"
-            ><Icon name="close" :size="22"
-          /></span>
-          <div>
-            <small>不合格产品</small
-            ><b>{{ counts?.FAIL?.toLocaleString() ?? "—" }}<em>件</em></b>
-          </div>
-          <span class="metric-index">03</span>
-        </div>
-        <div class="metric">
-          <div class="rate-ring" :style="{ '--rate': `${passRate ?? 0}%` }">
-            <Icon name="chart" :size="20" />
-          </div>
-          <div>
-            <small>已判定合格率</small
-            ><b>{{ passRate == null ? "—" : passRate.toFixed(1) }}<em>%</em></b>
-          </div>
-          <span class="metric-index">04</span>
-        </div>
-      </section>
-      <div class="statistics-note">
-        <span>{{
-          online ? "设备原判 · 含待上传记录" : "上次上报的设备数据"
-        }}</span
-        ><span
-          >判定不确定 {{ counts?.REVIEW ?? "—" }} · 检测错误
-          {{ counts?.ERROR ?? "—" }} · 合格率仅统计已明确判定件</span
-        >
-      </div>
-      <section class="technical-grid" aria-label="检测链路与技术指标">
-        <article class="soft-card technical-card">
-          <div class="card-heading">
-            <div>
-              <span class="section-number">04</span>
-              <h2>推理流水线</h2>
-            </div>
-            <span class="mini-label">PS + PL 协同</span>
-          </div>
-          <div class="pipeline-nodes">
-            <span><Icon name="camera" :size="16" />图像采集</span><i>→</i
-            ><b><Icon name="device" :size="16" />FPGA 卷积</b><i>→</i
-            ><span><Icon name="check" :size="16" />自动判定</span>
-          </div>
-          <div v-for="stage in stages" :key="stage.label" class="timing-row">
-            <span>{{ stage.label }}</span>
-            <div>
-              <i
-                :style="{
-                  width:
-                    stage.value == null
-                      ? '0%'
-                      : `${(stage.value / timingMax) * 100}%`,
-                }"
-              ></i>
-            </div>
-            <b
-              >{{ stage.value == null ? "—" : stage.value.toFixed(2)
-              }}<small> ms</small></b
-            >
-          </div>
-          <p class="technical-note">
-            采集推理 {{ timing?.captureMs?.toFixed(1) ?? "—" }} ms ·
-            预处理与卷积并行，阶段耗时不可相加
-          </p>
-        </article>
-        <article class="soft-card technical-card">
-          <div class="card-heading">
-            <div>
-              <span class="section-number">05</span>
-              <h2>识别与判定</h2>
-            </div>
-            <span class="mini-label">当前画面</span>
-          </div>
-          <div class="observation-values">
-            <div>
-              <b>{{ preview ? detections.length : "—" }}<em>个</em></b
-              ><small>检测目标 · 不等于件数</small>
-            </div>
-            <div>
-              <b
-                >{{ confidence == null ? "—" : confidence.toFixed(1)
-                }}<em>%</em></b
-              ><small>最高置信度</small>
-            </div>
-            <div>
-              <b
-                >{{
-                  state?.product
-                    ? (state.product.acceptance.confidence * 100).toFixed(0)
-                    : "—"
-                }}<em>%</em></b
-              ><small>判定阈值</small>
+            <div class="p">
+              <div class="eb">
+                <span>推理延迟分布 · n={{ hist?.n ?? 0 }}</span
+                ><span class="badge b-live">实时</span>
+              </div>
+              <svg
+                v-if="hist"
+                class="ch"
+                width="100%"
+                height="235"
+                viewBox="0 0 330 235"
+              >
+                <rect
+                  v-for="(b, i) in hist.bars"
+                  :key="i"
+                  :x="b.x"
+                  :y="190 - b.h"
+                  :width="hist.bw - 3"
+                  :height="b.h"
+                  fill="#151715"
+                />
+                <path :d="`M${hist.HX} 190H${hist.end}`" stroke="#151715" />
+                <path :d="`M${hist.x50} 22V190`" stroke="#1f4d3a" stroke-width="2" />
+                <text :x="hist.x50 + 4" y="16" class="val ok">
+                  P50 {{ hist.p50.toFixed(1) }}
+                </text>
+                <path
+                  :d="`M${hist.x99} 22V190`"
+                  stroke="#b8381c"
+                  stroke-width="2"
+                  stroke-dasharray="4 3"
+                />
+                <text :x="hist.x99 - 4" y="32" text-anchor="end" class="val bad">
+                  P99 {{ hist.p99.toFixed(1) }}
+                </text>
+                <text v-for="t in hist.ticks" :key="t.x" :x="t.x" y="208">
+                  {{ t.label }}
+                </text>
+                <text :x="hist.end" y="226" text-anchor="end">ms</text>
+              </svg>
+              <div v-else class="wait">等待足够的遥测样本（≥ 8 帧）</div>
             </div>
           </div>
-          <div class="rule-chips">
-            <span v-for="rule in rules" :key="rule.classId"
-              ><i :class="{ forbidden: rule.max === 0 }"></i
-              >{{ displayName(rule.label)
-              }}<b>{{
-                rule.max === 0
-                  ? "禁止出现"
-                  : rule.min === rule.max
-                    ? `${rule.min} 个`
-                    : `${rule.min}–${rule.max} 个`
-              }}</b></span
-            ><span v-if="!rules.length">等待产品规则</span>
-          </div>
-          <p class="technical-note">
-            {{
-              level
-                ? `液位合格带 ${level.band[0]}–${level.band[1]} row`
-                : "按数量、区域与多帧证据自动判定"
-            }}
-            ·
-            {{
-              !state?.product
-                ? "等待质量规则"
-                : state.product.acceptance.qualityGate
-                  ? "图像质量门控已开启"
-                  : "图像质量门控未开启"
-            }}
-          </p>
-        </article>
-        <article class="soft-card technical-card">
-          <div class="card-heading">
-            <div>
-              <span class="section-number">06</span>
-              <h2>端侧运行状态</h2>
-            </div>
-            <span class="mini-label">{{ online ? "ONLINE" : "OFFLINE" }}</span>
-          </div>
-          <div class="runtime-values">
-            <div>
-              <span>CPU 使用率</span
-              ><b>{{ state?.cpuPercent?.toFixed(0) ?? "—" }}<small>%</small></b>
-              <div class="resource-track">
-                <i
-                  :style="{
-                    width: `${Math.min(100, state?.cpuPercent ?? 0)}%`,
-                  }"
-                ></i>
+
+          <div class="row r3">
+            <div class="p">
+              <div class="eb">
+                <span>PL 资源 · Zynq-7020</span
+                ><span class="badge b-meas">实测</span>
+              </div>
+              <div class="res">
+                <div v-for="r in resources" :key="r.name">
+                  <span>{{ r.name }}</span>
+                  <div class="bar">
+                    <i :style="{ width: `${(r.used / r.total) * 100}%` }"></i>
+                  </div>
+                  <b>{{ r.text }}</b>
+                </div>
+              </div>
+              <div class="trio">
+                <div>
+                  <div class="eb">WNS</div>
+                  <div class="big2 ok">+0.060<small> ns</small></div>
+                </div>
+                <div>
+                  <div class="eb">WHS</div>
+                  <div class="big2 ok">+0.046<small> ns</small></div>
+                </div>
+                <div>
+                  <div class="eb">失败端点</div>
+                  <div class="big2">0</div>
+                </div>
+                <div>
+                  <div class="eb">PL 时钟</div>
+                  <div class="big2">125<small> MHz</small></div>
+                </div>
               </div>
             </div>
-            <div>
-              <span>内存使用率</span
-              ><b>{{ memory?.toFixed(0) ?? "—" }}<small>%</small></b>
-              <div class="resource-track">
-                <i :style="{ width: `${memory ?? 0}%` }"></i>
+            <div class="p">
+              <div class="eb">
+                <span>ARM 逐层耗时 · 最重 8 层 (s)</span
+                ><span class="badge b-meas">实测</span>
               </div>
+              <svg class="ch" width="100%" height="215" viewBox="0 0 330 215">
+                <g v-for="l in armLayers" :key="l.name">
+                  <text x="0" :y="l.y + 13">{{ l.name }}</text>
+                  <rect
+                    class="wbar"
+                    :class="{ hot: l.hot }"
+                    x="34"
+                    :y="l.y"
+                    :width="l.w"
+                    height="17"
+                  />
+                  <text :x="40 + l.w" :y="l.y + 13" class="val">
+                    {{ l.s.toFixed(2) }}
+                  </text>
+                </g>
+                <text x="0" y="212">其余 25 层合计 3.0 s · PL 全部 65.7 ms</text>
+              </svg>
+            </div>
+            <div class="p">
+              <div class="eb">
+                <span>算力对比 (GMAC/s)</span
+                ><span class="badge b-est">推算</span>
+              </div>
+              <div class="cmp">
+                <div class="eb"><span>PL 实时（fps × 0.9775）</span></div>
+                <div class="big3 ok">{{ gmacs == null ? "—" : gmacs.toFixed(1) }}</div>
+                <div class="eb"><span>ARM 单核</span></div>
+                <div class="big3 mut">0.058</div>
+              </div>
+              <div class="eb conf-t">
+                <span>置信度分布 · 本次会话 n={{ confN }}</span>
+              </div>
+              <svg class="ch" width="100%" height="70" viewBox="0 0 320 70">
+                <rect
+                  v-for="(b, i) in confBars"
+                  :key="i"
+                  :x="b.x"
+                  :y="62 - b.h"
+                  width="29"
+                  :height="b.h"
+                  fill="#151715"
+                />
+                <path d="M0 62H320" stroke="#151715" />
+              </svg>
             </div>
           </div>
-          <div class="runtime-details">
-            <span
-              >当前模型<b :title="state?.model?.version">{{
-                state?.model?.version || "未上报"
-              }}</b></span
-            ><span
-              >运行时长<b>{{ uptime }}</b></span
-            ><span
-              >记录上传<b>{{
-                state
-                  ? state.pendingSync
-                    ? `${state.pendingSync} 条待上传`
-                    : "已同步"
-                  : "—"
-              }}</b></span
-            >
+        </div>
+      </main>
+      <main v-else-if="view === 'sys'" class="alt alt4">
+        <div class="p">
+          <div class="eb"><span>CPU</span><span class="badge b-live">实时</span></div>
+          <div class="bigs">{{ state?.cpuPercent?.toFixed(0) ?? "—" }}<small>%</small></div>
+          <svg class="ch" width="100%" height="90" viewBox="0 0 400 90"><polyline v-if="cpuLine" :points="cpuLine" class="trace" /></svg>
+        </div>
+        <div class="p">
+          <div class="eb"><span>内存</span><span class="badge b-live">实时</span></div>
+          <div class="bigs">{{ memory?.toFixed(0) ?? "—" }}<small>%</small></div>
+          <svg class="ch" width="100%" height="90" viewBox="0 0 400 90"><polyline v-if="memLine" :points="memLine" class="trace" /></svg>
+        </div>
+        <div class="p">
+          <div class="eb"><span>运行与连接</span><span class="badge b-live">实时</span></div>
+          <div class="bigs">{{ uptime }}</div>
+          <dl class="dl">
+            <dt>连接</dt><dd>{{ online ? "在线" : "离线" }}</dd>
+            <dt>最近心跳</dt><dd>{{ device?.lastSeenAt ? new Date(device.lastSeenAt).toLocaleTimeString("zh-CN", { hour12: false }) : "—" }}</dd>
+            <dt>固件</dt><dd>{{ device?.firmwareVersion || "—" }}</dd>
+            <dt>协议</dt><dd>{{ device?.protocolVersion || "—" }}</dd>
+          </dl>
+        </div>
+        <div class="p">
+          <div class="eb"><span>遥测分段 (ms)</span><span class="badge b-live">实时</span></div>
+          <div v-for="t in tele" :key="t.label" class="hb">
+            <span>{{ t.label }}</span><div class="bar"><i :style="{ width: `${t.pct}%` }"></i></div><b>{{ t.ms.toFixed(1) }}</b>
           </div>
-        </article>
-      </section>
-      <section class="bottom-row">
-        <div class="recent-results">
-          <span class="recent-title"
-            >最近检测<small>RECENT RESULTS</small></span
+        </div>
+        <div class="p">
+          <div class="eb"><span>模型</span><span class="badge b-live">实时</span></div>
+          <div class="bigs sm">{{ state?.model?.version || "未部署" }}</div>
+          <dl class="dl">
+            <dt>载荷 sha</dt><dd>{{ state?.model?.payloadSha256?.slice(0, 8) || "—" }}</dd>
+            <dt>权重 sha</dt><dd>{{ state?.model?.weightsSha256?.slice(0, 8) || "—" }}</dd>
+            <dt>类别</dt><dd>{{ state?.model?.classes?.map((c) => displayName(c)).join(" / ") || "—" }}</dd>
+          </dl>
+        </div>
+        <div class="p">
+          <div class="eb"><span>产品方案</span><span class="badge b-live">实时</span></div>
+          <div class="bigs sm">{{ product }}</div>
+          <dl class="dl">
+            <dt>置信度阈值</dt><dd>{{ state?.product ? (state.product.acceptance.confidence * 100).toFixed(0) + "%" : "—" }}</dd>
+            <dt>质量门控</dt><dd>{{ state?.product ? (state.product.acceptance.qualityGate ? "开启" : "关闭") : "—" }}</dd>
+            <template v-for="r in rules" :key="r.classId">
+              <dt>{{ displayName(r.label) }}</dt>
+              <dd>{{ r.max === 0 ? "禁止出现" : r.min === r.max ? `${r.min} 个` : `${r.min}–${r.max} 个` }}</dd>
+            </template>
+          </dl>
+        </div>
+        <div class="p">
+          <div class="eb"><span>批次与同步</span><span class="badge b-live">实时</span></div>
+          <div class="bigs sm">{{ state?.productionRunId ? "批次进行中" : "无进行中批次" }}</div>
+          <dl class="dl">
+            <dt>本批件数</dt><dd>{{ state?.runTotal ?? "—" }}</dd>
+            <dt>设备累计</dt><dd>{{ state?.total ?? "—" }}</dd>
+            <dt>待上传</dt><dd>{{ state?.pendingSync ?? "—" }} 条</dd>
+            <dt>同步异常</dt><dd>{{ state?.syncError || "无" }}</dd>
+          </dl>
+        </div>
+        <div class="p">
+          <div class="eb"><span>帧率 / 推理延迟趋势</span><span class="badge b-live">实时</span></div>
+          <div class="bigs sm">{{ fps == null ? "—" : fps.toFixed(1) }}<small> FPS</small> · {{ latency == null ? "—" : latency.toFixed(1) }}<small> ms</small></div>
+          <svg class="ch" width="100%" height="90" viewBox="0 0 400 90"><polyline v-if="fpsLine" :points="fpsLine" class="trace" /><polyline v-if="latLine" :points="latLine" class="trace ok" /></svg>
+        </div>
+      </main>
+
+      <main v-else class="alt alt3">
+        <div class="p">
+          <div class="eb"><span>判定构成 · 最近 {{ stat.n }} 条</span><span class="badge b-live">实时</span></div>
+          <div class="stack">
+            <i class="ok" :style="{ width: `${stat.pct(stat.c.PASS)}%` }"></i>
+            <i class="bad" :style="{ width: `${stat.pct(stat.c.FAIL)}%` }"></i>
+            <i class="mid" :style="{ width: `${stat.pct(stat.c.other)}%` }"></i>
+          </div>
+          <div class="kv">
+            <div class="g"><span>合格</span><b>{{ stat.c.PASS }}</b></div>
+            <div class="nb"><span>不合格</span><b>{{ stat.c.FAIL }}</b></div>
+            <div><span>复核 / 其他</span><b>{{ stat.c.other }}</b></div>
+          </div>
+        </div>
+        <div class="p">
+          <div class="eb"><span>置信度分布 · 均值 {{ stat.avg == null ? "—" : (stat.avg * 100).toFixed(1) + "%" }}</span><span class="badge b-live">实时</span></div>
+          <svg class="ch" width="100%" height="150" viewBox="0 0 400 150">
+            <rect v-for="(b, i) in stat.bins" :key="i" :x="b.x + 2" :y="124 - b.h" width="36" :height="b.h" fill="#151715" />
+            <path d="M0 124H400" stroke="#151715" />
+            <text v-for="i in 5" :key="i" :x="(i - 1) * 80" y="142">{{ (i - 1) * 20 }}%</text>
+          </svg>
+        </div>
+        <div class="p">
+          <div class="eb"><span>不合格原因 TOP 5</span><span class="badge b-live">实时</span></div>
+          <div v-for="r in stat.reasons" :key="r.text" class="hb wide">
+            <span :title="r.text">{{ r.text }}</span><div class="bar"><i class="badfill" :style="{ width: `${r.pct}%` }"></i></div><b>{{ r.n }}</b>
+          </div>
+          <div v-if="!stat.reasons.length" class="wait">暂无不合格记录</div>
+        </div>
+        <div class="p span2">
+          <div class="eb"><span>最近 10 条记录</span><span class="badge b-live">实时</span></div>
+          <RouterLink
+            v-for="item in stat.latest"
+            :key="item.id"
+            class="rec"
+            :class="cls(item.result)"
+            :to="{ name: 'inspection', params: { id: item.id } }"
           >
-          <div class="result-pills">
-            <RouterLink
-              v-for="item in records"
-              :key="item.id"
-              class="result-pill"
-              :class="item.result.toLowerCase()"
-              :to="{ name: 'inspection', params: { id: item.id } }"
-              ><Icon
-                :name="
-                  item.result === 'PASS'
-                    ? 'check'
-                    : item.result === 'FAIL'
-                      ? 'close'
-                      : 'scan'
-                "
-                :size="13"
-              /><span>{{ chinese(item.result) }}</span
-              ><small>{{
-                new Date(item.createdAt).toLocaleTimeString("zh-CN", {
-                  hour12: false,
-                })
-              }}</small></RouterLink
-            ><span v-if="!records.length" class="empty-records"
-              >检测记录将在完成后呈现</span
-            >
-          </div>
+            <b>{{ chinese(item.result) }}</b>
+            <span>{{ new Date(item.createdAt).toLocaleTimeString("zh-CN", { hour12: false }) }}</span>
+            <span class="rs">{{ item.reason || "—" }}</span>
+            <span>{{ item.confidence == null ? "—" : (item.confidence * 100).toFixed(0) + "%" }}</span>
+          </RouterLink>
+          <div v-if="!stat.latest.length" class="wait">检测记录将在完成后呈现</div>
         </div>
-        <div class="flow-signature">
-          <span>感知</span><i></i><b>FPGA</b><i></i><span>判定</span><i></i
-          ><span>记录</span>
+        <div class="p">
+          <div class="eb"><span>说明</span></div>
+          <p class="rule">本页统计取自平台已上传的最近 100 条真实检测记录；合格率只统计已明确判定的件，复核与错误不计入。演示页只读，启停与配置请回工作台。</p>
         </div>
-      </section>
-      <footer class="show-footer">
-        <span>VISION AT THE EDGE. <b>QUALITY IN EVERY DETAIL.</b></span
-        ><span>嵌入式视觉检测系统 · LIVE DEMONSTRATION</span>
+      </main>
+
+      <footer class="foot">
+        <span class="badge b-meas">实测</span
+        ><span>Zynq-7020 · Cortex-A9 @ 666.7 MHz · Linux 6.6.159</span>
+        <i class="s"></i>
+        <span>模型 LEVEL-v3-20261022 · sha256 d64e7b51</span>
+        <i class="s"></i>
+        <span>资源与时序 build/terminal/*.rpt</span>
+        <i class="s"></i>
+        <span>对比数据 2026-10-22</span>
+        <i class="s"></i>
+        <span>内存 {{ memory?.toFixed(0) ?? "—" }}% · 运行 {{ uptime }}</span>
+        <span v-if="message" class="msg" role="alert">{{ message }}</span>
       </footer>
     </div>
   </div>
 </template>
 
 <style scoped>
-@media (min-width: 1101px) and (min-height: 980px) {
-  .showcase {
-    height: 100dvh;
-    display: flex;
-    flex-direction: column;
-  }
-  .showcase .show-header {
-    height: 85px;
-    flex-shrink: 0;
-    width: 100%;
-  }
-  .showcase .show-content {
-    display: grid;
-    grid-template-rows: auto minmax(min-content, 1fr) auto auto auto auto auto;
-    flex: 1;
-    min-height: 0;
-    width: 100%;
-  }
-  .showcase .intro {
-    padding: 24px 0;
-  }
-  .showcase .intro h1 {
-    font-size: 36px;
-  }
-  .showcase .show-grid {
-    min-height: 0;
-  }
-  .showcase .vision-card {
-    display: flex;
-    flex-direction: column;
-  }
-  .showcase .video-well {
-    flex: 1;
-    height: 0;
-    min-height: 200px;
-  }
-  .showcase .camera-footer {
-    flex-shrink: 0;
-    padding-top: 16px;
-    padding-bottom: 16px;
-  }
-  .showcase .verdict-card,
-  .showcase .compute-card {
-    padding: 20px 24px;
-  }
-  .showcase .verdict-main {
-    margin: 20px 0 16px;
-  }
-  .showcase .verdict-symbol {
-    width: 70px;
-    height: 70px;
-  }
-  .showcase .verdict-reason {
-    min-height: 0;
-  }
-  .showcase .verdict-foot {
-    margin-top: 14px;
-    padding-top: 12px;
-  }
-  .showcase .compute-body {
-    margin: 20px 0;
-  }
-  .showcase .metrics-row {
-    margin-top: 24px;
-  }
-  .showcase .metric {
-    padding: 20px 24px;
-  }
-  .showcase .bottom-row {
-    padding: 18px 0;
-  }
-}
-.showcase {
-  --paper: #e9eeed;
-  --text: #293d3a;
-  --sub: #7f918c;
-  --mint: #3d927f;
-  min-height: 100dvh;
-  background:
-    radial-gradient(ellipse at 90% 0, #f3f7ed70, transparent 45%), var(--paper);
-  color: var(--text);
-  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
-  padding: 0 4.2vw 20px;
+.fit {
+  --paper: #f1f0ed;
+  --card: #fbfaf8;
+  --ink: #151715;
+  --ink2: #484c49;
+  --mut: #7c807c;
+  --line: #c9c6bf;
+  --acc: #1f4d3a;
+  --ok: #2f7a4b;
+  --bad: #b8381c;
+  --amb: #a06a00;
+  --mono: "IBM Plex Mono", "Cascadia Code", Consolas, monospace;
+  --sans: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  position: relative;
+  width: 100%;
+  height: 100dvh;
   overflow: hidden;
-  font-size: 14px;
-  letter-spacing: 0.01em;
-  color-scheme: light;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
 }
-.showcase * {
+.fit * {
   box-sizing: border-box;
 }
-.showcase h1,
-.showcase h2,
-.showcase h3,
-.showcase p {
+.sc {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1920px;
+  height: 1080px;
+  transform-origin: 0 0;
+  display: grid;
+  grid-template-rows: 64px 1fr 36px;
+  padding: 0 32px;
+}
+.sc h1,
+.sc p {
   margin: 0;
 }
-.showcase button,
-.showcase select {
-  font: inherit;
-  cursor: pointer;
+.sc b,
+.sc em {
+  font-style: normal;
 }
-.showcase button {
-  border: 0;
+.top {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  border-bottom: 2px solid var(--ink);
 }
-.showcase a {
-  color: inherit;
+.brand {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink);
   text-decoration: none;
 }
-.showcase button:focus-visible,
-.showcase a:focus-visible,
-.showcase select:focus-visible {
-  outline: 2px solid var(--mint);
-  outline-offset: 5px;
+.tag {
+  font: 500 12px var(--mono);
+  color: var(--mut);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
-.show-header {
-  height: 106px;
+.tag.prod {
+  letter-spacing: 0.04em;
+}
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+}
+.tabs > * {
+  padding: 5px 14px;
+  font-size: 13px;
+  color: var(--mut);
+  text-decoration: none;
+  border: 1px solid transparent;
+}
+.tabs .on {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+.sp {
+  flex: 1;
+}
+.live {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid #d7dfdc;
-  box-shadow: 0 1px 0 #ffffffa0;
-  gap: 20px;
+  gap: 8px;
+  font: 600 13px var(--mono);
+  color: var(--mut);
 }
-.identity {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-}
-.brand-emblem,
-.round-button {
-  display: grid;
-  place-items: center;
-  background: var(--paper);
-  box-shadow:
-    5px 5px 12px #cbd5d2,
-    -5px -5px 12px #fff;
-  border: 1px solid #f8fffc90;
-}
-.brand-emblem {
-  width: 56px;
-  height: 56px;
-  border-radius: 19px;
-  color: var(--mint);
-}
-.wordmark {
-  font-size: 26px;
-  line-height: 1;
-  font-weight: 750;
-  letter-spacing: 0.12em;
-}
-.wordmark > span {
-  color: var(--mint);
-}
-.wordmark small {
-  display: block;
-  font-size: 8px;
-  letter-spacing: 0.3em;
-  margin-top: 9px;
-  font-weight: 500;
-  color: var(--sub);
-}
-.show-tabs {
-  display: flex;
-  gap: 6px;
-  padding: 7px;
-  border-radius: 100px;
-  box-shadow:
-    inset 4px 4px 9px #cdd7d3,
-    inset -4px -4px 9px #fbffff;
-}
-.show-tabs > span,
-.show-tabs > a {
-  padding: 11px 24px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--sub);
-  font-size: 12px;
-}
-.show-tabs .selected {
-  border-radius: 99px;
-  background: var(--paper);
-  box-shadow:
-    3px 3px 8px #cad4d0,
-    -3px -3px 8px #fff;
-  color: var(--text);
-  font-weight: 600;
-}
-.selected i,
-.eyebrow i {
-  width: 6px;
-  height: 6px;
-  background: var(--mint);
+.live i {
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
+  background: var(--mut);
 }
-.header-end {
-  display: flex;
+.live.up {
+  color: var(--ink);
+}
+.live.up i {
+  background: var(--ok);
+  animation: blink 1.6s infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+.clk {
+  font: 600 22px var(--mono);
+}
+.sel,
+.ico,
+.go {
+  font: 600 13px var(--sans);
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--ink);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+.ico[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+}
+.go {
+  background: var(--acc);
+  border-color: var(--acc);
+  color: #fff;
+}
+.go.stop {
+  background: var(--bad);
+  border-color: var(--bad);
+}
+.go:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.main {
+  display: grid;
+  grid-template-columns: 720px 1fr;
+  gap: 0 28px;
+  padding: 16px 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.lcol {
+  display: grid;
+  grid-template-rows: 656px 1fr;
   gap: 16px;
-  align-items: center;
+  min-height: 0;
 }
-.show-clock {
-  font-size: 18px;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.06em;
-  text-align: right;
-  margin-right: 6px;
-}
-.show-clock small {
-  display: block;
-  font-size: 10px;
-  color: var(--sub);
-  margin-top: 5px;
-  letter-spacing: 0.12em;
-}
-.round-button {
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  color: #72867e;
-  transition:
-    transform 0.2s,
-    box-shadow 0.2s;
-}
-.round-button:hover {
-  transform: translateY(-2px);
-}
-.round-button:active {
-  box-shadow:
-    inset 3px 3px 7px #cbd5d2,
-    inset -3px -3px 7px #fff;
-}
-.show-content,
-.show-header {
-  max-width: 1760px;
-  margin: auto;
-}
-.intro {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 35px 0 29px;
-  gap: 24px;
-}
-.eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  font-size: 9px;
-  letter-spacing: 0.24em;
-  color: var(--mint);
-  font-weight: 600;
-}
-.intro h1 {
-  font-size: clamp(27px, 2.4vw, 43px);
-  font-weight: 600;
-  letter-spacing: 0.035em;
-  margin: 12px 0 11px;
-  line-height: 1.3;
-}
-.intro h1 > span {
-  font-weight: 400;
-  color: #839c91;
-}
-.intro-copy {
-  font-size: 12px;
-  color: var(--sub);
-  letter-spacing: 0.08em;
-}
-.connection {
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  padding: 14px 18px;
-  border: 1px solid #f8fffc7a;
-  border-radius: 18px;
-  box-shadow:
-    inset 3px 3px 8px #d6dfdc,
-    inset -3px -3px 8px #f8fffc;
-  color: #78978a;
-}
-.connection b {
-  font-size: 12px;
-  font-weight: 500;
-}
-.connection small {
-  font-size: 10px;
-  display: block;
-  color: var(--sub);
-  margin-top: 5px;
-}
-.connection > i {
-  width: 7px;
-  height: 7px;
-  background: #aeb9b4;
-  border-radius: 50%;
-  margin-left: 12px;
-}
-.connection > i.connected {
-  background: #65aa8d;
-  box-shadow: 0 0 0 4px #75ad8d14;
-}
-.show-grid {
+.rcol {
   display: grid;
-  grid-template-columns: minmax(0, 1.95fr) minmax(310px, 1fr);
-  gap: 28px;
+  grid-template-rows: 296px 1fr 1fr;
+  gap: 16px;
+  min-height: 0;
 }
-.soft-card {
-  background: var(--paper);
-  border: 1px solid #f5fffc99;
-  border-radius: 27px;
-  box-shadow:
-    12px 12px 27px #cad4d0,
-    -12px -12px 27px #fafffd;
-}
-.vision-card {
-  padding: 21px 22px 0;
+.p {
+  overflow: hidden;
+  background: var(--card);
+  border: 1px solid var(--line);
+  padding: 16px 20px;
+  position: relative;
   min-width: 0;
 }
-.card-heading {
+.eb {
+  font: 500 11px var(--mono);
+  letter-spacing: 0.16em;
+  color: var(--mut);
+  text-transform: uppercase;
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 12px;
 }
-.card-heading > div {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.section-number {
-  font-size: 10px;
-  color: #9aada4;
+.badge {
+  font: 600 10px var(--mono);
   letter-spacing: 0.1em;
+  padding: 2px 6px;
+  border: 1px solid currentColor;
 }
-.card-heading h2 {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
+.b-meas {
+  color: var(--acc);
 }
-.english-label {
-  font-size: 8px;
-  letter-spacing: 0.17em;
-  color: #9aa9a2;
+.b-est {
+  color: var(--amb);
 }
-.text-control {
-  background: transparent;
-  color: #7f968b;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10px !important;
-  padding: 5px !important;
+.b-live {
+  color: var(--ink);
 }
-.video-well {
-  height: clamp(310px, 31vw, 490px);
-  margin-top: 18px;
+
+/* 视频 */
+.vid {
+  border: 2px solid var(--ink);
+  display: grid;
+  grid-template-columns: 652px 64px;
+  background: var(--card);
+}
+.sq {
   position: relative;
-  background:
-    radial-gradient(ellipse at center, #30493d55, transparent 75%),
-    linear-gradient(#ffffff03 1px, transparent 1px),
-    linear-gradient(90deg, #ffffff03 1px, transparent 1px), #172b29;
-  background-size:
-    auto,
-    38px 38px,
-    38px 38px,
-    auto;
-  border-radius: 17px;
+  aspect-ratio: 1;
+  background: #d9d6cd;
   overflow: hidden;
-  box-shadow:
-    inset 5px 5px 15px #0b1b1b,
-    inset -2px -2px 8px #455d55,
-    0 1px 0 #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #d7e8df;
 }
-.feed {
-  height: 100%;
-  max-width: 100%;
-  position: relative;
-}
-.feed img {
-  height: 100%;
-  width: 100%;
-  object-fit: contain;
-  display: block;
-}
-.detection-overlay {
+.sq img,
+.ov {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  overflow: hidden;
 }
-.detection-overlay rect {
-  fill: #72e1bd0a;
-  stroke: #8ee8c6;
-  stroke-width: 1.3;
+.sq img {
+  object-fit: cover;
+  user-select: none;
 }
-.detection-overlay .caption-bg {
-  fill: #6acbaa;
-  stroke: none;
+.bandfill {
+  fill: color-mix(in srgb, var(--ok) 16%, transparent);
 }
-.detection-overlay text {
-  font:
-    9px "Microsoft YaHei",
-    sans-serif;
-  fill: #163b30;
-  stroke: none;
+.rowline {
+  stroke: var(--ink);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
 }
-.video-top,
-.video-bottom {
+.ann .bx {
+  fill: none;
+  stroke: var(--ink);
+}
+.ann .ld {
+  fill: none;
+  stroke: var(--ink);
+}
+.ann .lb {
+  fill: var(--ink);
+}
+.ann text {
+  fill: #fff;
+  font-family: var(--mono);
+  font-weight: 700;
+}
+.pass .ann .bx,
+.pass .ann .ld {
+  stroke: var(--ok);
+}
+.pass .ann .lb {
+  fill: var(--ok);
+}
+.fail .ann .bx,
+.fail .ann .ld {
+  stroke: var(--bad);
+}
+.fail .ann .lb {
+  fill: var(--bad);
+}
+.idle {
   position: absolute;
-  left: 22px;
-  right: 22px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  z-index: 2;
-  pointer-events: none;
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  color: #a3b9ac;
-}
-.video-top {
-  top: 19px;
-}
-.video-bottom {
-  bottom: 18px;
-}
-.video-bottom > span:first-child {
-  max-width: 75%;
-  display: flex;
-  gap: 7px;
-  align-items: center;
-  line-height: 1.5;
-  letter-spacing: 0;
-}
-.video-bottom i {
-  width: 5px;
-  height: 5px;
-  flex-shrink: 0;
-  background: #7e8f86;
-  border-radius: 50%;
-}
-.video-bottom i.lit {
-  background: #99d9b5;
-}
-.live-tag {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: #243b35dd;
-  border: 1px solid #b1d5c025;
-  border-radius: 6px;
-  padding: 6px 9px;
-  font-size: 8px;
-  letter-spacing: 0.14em;
-}
-.live-tag i {
-  width: 4px;
-  height: 4px;
-  background: #8b9e92;
-  border-radius: 50%;
-}
-.live-tag.streaming i {
-  background: #92dcad;
-  box-shadow: 0 0 8px #a8ffc977;
-}
-.frame-corners {
-  position: absolute;
-  inset: 59px 20px 49px;
-  border: 1px solid #a6c1af1c;
-  border-radius: 4px;
-  pointer-events: none;
-}
-.video-placeholder {
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 8px;
   text-align: center;
-  color: #b5c7bd;
 }
-.video-placeholder b {
-  display: block;
-  margin-top: 23px;
-  font-size: 15px;
+.idle b {
+  font-size: 22px;
+}
+.idle p {
+  font-size: 13px;
+  color: var(--mut);
+}
+.vtag {
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  font: 600 12px var(--mono);
+  background: var(--card);
+  border: 1px solid var(--ink);
+  padding: 3px 8px;
+}
+.stamp {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  padding: 8px 22px;
+  font: 800 30px var(--mono);
   letter-spacing: 0.12em;
-  font-weight: 400;
+  color: #fff;
+  background: var(--ink);
 }
-.video-placeholder p {
-  font-size: 10px;
-  color: #7f9b8e;
-  margin-top: 10px;
+.stamp.pass {
+  background: var(--ok);
 }
-.lens-orbit {
-  width: 126px;
-  height: 126px;
-  border: 1px solid #93b4a11b;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  margin: auto;
+.stamp.fail {
+  background: var(--bad);
+}
+.stamp-enter-active {
+  animation: stamp 0.42s cubic-bezier(0.2, 1.3, 0.4, 1);
+}
+.stamp-leave-active {
+  transition: opacity 0.2s;
+  position: absolute;
+}
+.stamp-leave-to {
+  opacity: 0;
+}
+@keyframes stamp {
+  from {
+    transform: scale(1.5) rotate(-4deg);
+    opacity: 0;
+  }
+}
+.ruler {
+  border-left: 1px solid var(--ink);
   position: relative;
+  font: 500 10px var(--mono);
 }
-.lens-orbit:after {
-  content: "";
+.ruler .band {
   position: absolute;
-  inset: -17px;
-  border: 1px dashed #93b4a111;
-  border-radius: 50%;
+  left: 0;
+  right: 0;
+  background: color-mix(in srgb, var(--ok) 22%, transparent);
+  border-top: 2px solid var(--ok);
+  border-bottom: 2px solid var(--ok);
 }
-.lens-orbit > div {
-  width: 90px;
-  height: 90px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  color: #8eb9a2;
-  background: linear-gradient(145deg, #2d473e, #1a302b);
-  box-shadow:
-    8px 8px 20px #0e2424,
-    -8px -8px 20px #2f4840,
-    inset 1px 1px 1px #6e9b7b30;
-}
-.lens-orbit > i {
+.ruler .ptr {
   position: absolute;
-  top: 1px;
-  left: 50%;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #8bb69c;
-  box-shadow: 0 0 14px #9de2ad;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 3px solid var(--ink);
+  transition: top 0.35s cubic-bezier(0.2, 0.9, 0.3, 1);
 }
-.camera-footer {
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  padding: 20px 1px 22px;
-}
-.camera-icon {
-  width: 38px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  box-shadow:
-    inset 3px 3px 7px #d0d9d4,
-    inset -3px -3px 7px #fafffc;
-  color: #6c8d7c;
-}
-.camera-footer b {
-  font-size: 12px;
-  font-weight: 600;
-}
-.camera-footer small {
-  font-size: 9px;
-  display: block;
-  color: var(--sub);
-  margin-top: 6px;
-}
-.camera-source {
-  margin-left: auto;
-  text-align: right;
-}
-.camera-source small {
-  margin: 0 0 6px;
-}
-.camera-source b {
-  font-size: 10px;
-  letter-spacing: 0.07em;
-}
-.insight-column {
-  display: flex;
-  flex-direction: column;
-  gap: 23px;
-  min-width: 0;
-}
-.verdict-card {
-  padding: 23px 25px;
-  flex: 1;
-}
-.mini-label {
-  font-size: 9px;
-  color: #94a69c;
-}
-.verdict-main {
-  display: flex;
-  align-items: center;
-  gap: 23px;
-  margin: 30px 0 22px;
-}
-.verdict-symbol {
-  width: 87px;
-  height: 87px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: linear-gradient(145deg, #e5eeeb, #edf3ef);
-  box-shadow:
-    7px 7px 18px #c8d4cc,
-    -7px -7px 18px #fcfffb,
-    inset 0 0 0 6px #e9eeed;
-  flex-shrink: 0;
-  color: #80998c;
-}
-.pass .verdict-symbol {
-  color: #5e9d78;
-}
-.fail .verdict-symbol {
-  color: #bf806d;
-}
-.verdict-kicker {
-  font-size: 8px;
-  color: #95a79b;
-  letter-spacing: 0.14em;
-}
-.verdict-main h3 {
-  font-size: clamp(27px, 2.6vw, 40px);
-  font-weight: 550;
-  letter-spacing: 0.05em;
-  margin-top: 10px;
-  line-height: 1.2;
-}
-.pass h3 {
-  color: #568e6f;
-}
-.fail h3 {
-  color: #b97662;
-}
-.verdict-reason {
+.ruler .ptr b {
+  position: absolute;
+  right: 4px;
+  top: -22px;
+  background: var(--ink);
+  color: #fff;
+  padding: 1px 5px;
   font-size: 11px;
-  line-height: 1.8;
-  color: #81938a;
-  min-height: 36px;
 }
-.verdict-foot {
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid #d4ded8;
-  font-size: 10px;
-  color: #92a398;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-.verdict-foot i {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: #8ca496;
-}
-.level-reading {
-  margin-top: 15px;
-  padding-top: 14px;
-  border-top: 1px solid #d4ded8;
-  font-size: 10px;
-  color: var(--sub);
-}
-.level-reading > b {
-  float: right;
-  font-size: 18px;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-.level-reading small {
-  font-size: 9px;
-}
-.level-track {
-  height: 7px;
-  position: relative;
-  border-radius: 10px;
-  box-shadow:
-    inset 2px 2px 4px #c3cec8,
-    inset -2px -2px 4px #fafffc;
-  margin: 15px 0 10px;
-}
-.level-track span {
-  position: absolute;
-  top: 0;
-  height: 100%;
-  background: #8fbaa2;
-  border-radius: 8px;
-}
-.level-track i {
-  position: absolute;
-  height: 13px;
-  width: 3px;
-  border-radius: 4px;
-  top: -3px;
-  background: #4d6d5a;
-  box-shadow: 0 0 0 2px #e9eeed;
-}
-.compute-card {
-  padding: 21px 25px;
-}
-.chip-label {
-  font-size: 8px;
-  letter-spacing: 0.09em;
-  color: #8c9b93;
-  border: 1px solid #d5dfd8;
-  padding: 5px 7px;
-  border-radius: 5px;
-}
-.compute-body {
-  display: flex;
-  gap: 21px;
-  align-items: center;
-  margin: 25px 0 21px;
-  position: relative;
-}
-.processor-icon {
-  width: 68px;
-  height: 68px;
-  border-radius: 18px;
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  color: #7b9586;
-  background: linear-gradient(145deg, #e1e9e4, #f2f6f0);
-  box-shadow:
-    5px 5px 12px #cbd5ce,
-    -5px -5px 12px #fcfff9;
-}
-.fps-value {
-  font-size: 39px;
-  font-weight: 500;
-  letter-spacing: -0.06em;
-  font-variant-numeric: tabular-nums;
-  position: relative;
-  z-index: 1;
-}
-.fps-value > span {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  color: #879b8e;
-  margin-left: 8px;
-}
-.fps-value small {
-  font-size: 9px;
-  letter-spacing: 0.06em;
-  font-weight: 400;
-  display: block;
-  color: var(--sub);
-  margin-top: 5px;
-}
-.spark {
+.ruler .tk {
   position: absolute;
   right: 0;
-  width: 35%;
-  height: 49px;
-  opacity: 0.65;
-  bottom: 4px;
+  width: 10px;
+  border-top: 1px solid var(--ink2);
 }
-.spark path {
-  stroke: #d0ddd3;
-  fill: none;
-}
-.spark polyline {
-  stroke: #88ac95;
-  stroke-width: 2;
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.compute-foot {
-  border-top: 1px solid #d4ded8;
-  padding-top: 15px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 10px;
-  color: #8a9b90;
-}
-.compute-foot > b {
-  font-size: 14px;
-  font-weight: 500;
-  color: #546e5d;
-  font-variant-numeric: tabular-nums;
-}
-.compute-foot small {
-  font-size: 9px;
-  color: #97a69d;
-}
-.accelerated {
-  margin-left: auto;
-  font-size: 9px;
-}
-.control-deck select {
-  width: 100%;
-  border: 1px solid #fafffca0;
-  border-radius: 10px;
-  background: var(--paper);
-  color: var(--text);
-  padding: 8px 12px;
-  margin-bottom: 12px;
-  font-size: 11px;
-}
-.start-button {
-  width: 100%;
-  height: 56px;
-  border-radius: 17px;
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  padding: 0 19px;
-  background: linear-gradient(130deg, #62947e, #487760);
-  color: #f1fbef;
-  font-size: 13px !important;
-  letter-spacing: 0.06em;
-  box-shadow:
-    6px 6px 15px #b7c7ba,
-    -6px -6px 15px #fafff7,
-    inset 1px 1px 0 #ffffff30;
-  transition:
-    transform 0.2s,
-    box-shadow 0.2s;
-}
-.start-button > span:first-child {
-  display: grid;
-  place-items: center;
-  width: 27px;
-  height: 27px;
-  border-radius: 50%;
-  background: #ffffff15;
-}
-.start-button:hover:not(:disabled) {
-  transform: translateY(-2px);
-}
-.start-button:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-.button-arrow {
-  margin-left: auto;
-  font-size: 20px;
-  font-weight: 300;
-}
-.control-message {
-  color: #ad6f5c;
-  font-size: 11px;
-  margin-top: 10px !important;
-  line-height: 1.7;
-}
-.setup-link {
-  display: block;
-  text-align: center;
-  font-size: 10px;
-  color: #7b9586 !important;
-  margin-top: 12px;
-}
-.metrics-row {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 25px;
-  margin-top: 28px;
-}
-.metric {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  border-radius: 20px;
-  padding: 24px;
-  background: var(--paper);
-  box-shadow:
-    7px 7px 18px #cdd7d1,
-    -7px -7px 18px #fafffc;
-  border: 1px solid #f7fffa80;
-}
-.metric-icon {
-  width: 49px;
-  height: 49px;
-  display: grid;
-  place-items: center;
-  border-radius: 16px;
-  box-shadow:
-    inset 4px 4px 8px #cdd7d0,
-    inset -4px -4px 8px #fafffc;
-  color: #82978b;
-  flex-shrink: 0;
-}
-.metric-icon.green {
-  color: #6f9c7f;
-}
-.metric-icon.coral {
-  color: #b08f80;
-}
-.metric small {
-  display: block;
-  font-size: 10px;
-  color: #899b90;
-  margin-bottom: 8px;
-}
-.metric b {
-  font-size: 30px;
-  font-weight: 550;
-  letter-spacing: -0.04em;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-.metric em {
-  font-style: normal;
-  font-size: 10px;
-  letter-spacing: 0;
-  color: #a0ada4;
-  margin-left: 9px;
-  font-weight: 400;
-}
-.metric-index {
+.ruler .rl {
   position: absolute;
-  right: 17px;
-  top: 15px;
-  font-size: 8px;
-  color: #a5b4a9;
+  left: 5px;
+  color: var(--mut);
 }
-.rate-ring {
-  width: 49px;
-  height: 49px;
-  display: grid;
-  place-items: center;
-  background: conic-gradient(#85a98f var(--rate), #d7e1d8 0);
-  border-radius: 50%;
-  position: relative;
-  flex-shrink: 0;
-  box-shadow:
-    3px 3px 8px #cbd6ce,
-    -3px -3px 8px #fafff7;
-  color: #7b9a83;
-}
-.rate-ring:before {
-  content: "";
+.ruler .miss {
   position: absolute;
-  inset: 4px;
-  border-radius: 50%;
-  background: var(--paper);
-}
-.rate-ring :deep(svg) {
-  z-index: 1;
-}
-.statistics-note {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 13px 3px 0;
-  color: #8b9c91;
-  font-size: 9px;
-}
-.bottom-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 28px;
-  padding: 23px 0 20px;
-  border-bottom: 1px solid #d5dfd8;
-  margin-top: 8px;
-}
-.recent-results {
-  display: flex;
-  align-items: center;
-  gap: 25px;
-  min-width: 0;
-}
-.recent-title {
-  font-size: 11px;
-  font-weight: 500;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) rotate(90deg);
   white-space: nowrap;
-}
-.recent-title small {
-  display: block;
-  font-size: 7px;
-  letter-spacing: 0.12em;
-  color: #9aa99f;
-  margin-top: 7px;
-  font-weight: 400;
-}
-.result-pills {
-  display: flex;
-  gap: 9px;
-  flex-wrap: wrap;
-}
-.result-pill {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 8px 10px;
-  border-radius: 9px;
-  box-shadow:
-    inset 2px 2px 5px #d0dbd2,
-    inset -2px -2px 5px #fafff9;
-  font-size: 10px;
-  color: #849b8a !important;
-}
-.result-pill.pass {
-  color: #5f8e70 !important;
-}
-.result-pill.fail {
-  color: #b27c66 !important;
-}
-.result-pill small {
-  font-size: 8px;
-  color: #97a99c;
-  margin-left: 5px;
-  font-variant-numeric: tabular-nums;
-}
-.empty-records {
-  font-size: 10px;
-  color: #94a69a;
-}
-.flow-signature {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  white-space: nowrap;
-  font-size: 9px;
-  color: #8d9f91;
-}
-.flow-signature b {
-  font-size: 8px;
-  padding: 7px 9px;
-  border-radius: 7px;
-  box-shadow:
-    3px 3px 7px #cdd8cf,
-    -3px -3px 7px #fafff6;
-  letter-spacing: 0.08em;
-  color: #6d8a73;
-}
-.flow-signature i {
-  width: 18px;
-  height: 1px;
-  background: #bdcfc0;
-}
-.show-footer {
-  display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  padding-top: 17px;
-  color: #a3b0a5;
-  font-size: 8px;
-  letter-spacing: 0.1em;
-}
-.show-footer b {
-  font-weight: 400;
-  color: #819785;
-  margin-left: 5px;
-}
-.result-enter-active,
-.result-leave-active {
-  transition:
-    opacity 0.2s,
-    transform 0.2s;
-}
-.result-enter-from {
-  opacity: 0;
-  transform: translateY(7px);
-}
-.result-leave-to {
-  opacity: 0;
-  transform: translateY(-7px);
-}
-@media (max-width: 1100px) {
-  .showcase {
-    padding: 0 25px 20px;
-  }
-  .show-grid {
-    gap: 20px;
-    grid-template-columns: minmax(0, 1.5fr) minmax(290px, 1fr);
-  }
-  .english-label {
-    display: none;
-  }
-  .verdict-card,
-  .compute-card {
-    padding: 20px;
-  }
-  .verdict-main {
-    gap: 15px;
-    margin: 24px 0 16px;
-  }
-  .verdict-symbol {
-    width: 65px;
-    height: 65px;
-  }
-  .verdict-main h3 {
-    font-size: 28px;
-  }
-  .metrics-row {
-    gap: 17px;
-  }
-  .metric {
-    gap: 12px;
-    padding: 20px 16px;
-  }
-  .metric b {
-    font-size: 26px;
-  }
-  .metric-icon,
-  .rate-ring {
-    width: 40px;
-    height: 40px;
-  }
-  .flow-signature {
-    display: none;
-  }
-  .show-tabs > span,
-  .show-tabs > a {
-    padding: 10px 16px;
-  }
-  .show-header {
-    height: 92px;
-  }
-}
-@media (max-width: 800px) {
-  .show-grid {
-    grid-template-columns: 1fr;
-  }
-  .insight-column {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 18px;
-  }
-  .control-deck {
-    grid-column: 1/-1;
-  }
-  .video-well {
-    height: 420px;
-  }
-  .metrics-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .show-tabs,
-  .connection {
-    display: none;
-  }
-  .intro {
-    padding: 26px 0;
-  }
-  .statistics-note {
-    flex-direction: column;
-    gap: 6px;
-  }
-  .show-footer {
-    font-size: 7px;
-    flex-wrap: wrap;
-  }
-  .verdict-main h3 {
-    font-size: 26px;
-  }
-  .verdict-symbol {
-    width: 60px;
-    height: 60px;
-  }
-  .show-clock {
-    font-size: 14px;
-  }
-  .round-button {
-    height: 35px;
-    width: 35px;
-  }
-  .header-end {
-    gap: 11px;
-  }
-}
-@media (max-width: 500px) {
-  .showcase {
-    padding: 0 18px 18px;
-  }
-  .show-header {
-    height: 83px;
-  }
-  .brand-emblem {
-    height: 43px;
-    width: 43px;
-    border-radius: 14px;
-  }
-  .wordmark {
-    font-size: 20px;
-  }
-  .wordmark small {
-    font-size: 6px;
-  }
-  .header-end > a {
-    display: none;
-  }
-  .identity {
-    gap: 10px;
-  }
-  .show-clock {
-    font-size: 12px;
-  }
-  .show-clock small {
-    font-size: 8px;
-  }
-  .intro h1 {
-    font-size: 27px;
-  }
-  .intro-copy {
-    font-size: 10px;
-  }
-  .vision-card {
-    padding: 16px 14px 0;
-  }
-  .video-well {
-    height: 340px;
-  }
-  .insight-column {
-    grid-template-columns: 1fr;
-  }
-  .control-deck {
-    grid-column: auto;
-  }
-  .metric {
-    padding: 18px 14px;
-  }
-  .metric b {
-    font-size: 25px;
-  }
-  .metric-icon,
-  .rate-ring {
-    width: 35px;
-    height: 35px;
-  }
-  .metric small {
-    font-size: 9px;
-  }
-  .recent-results {
-    gap: 15px;
-    align-items: flex-start;
-  }
-  .result-pill small {
-    display: none;
-  }
-  .show-footer {
-    line-height: 1.8;
-  }
-  .show-footer > span:last-child {
-    display: none;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .showcase * {
-    transition: none !important;
-    animation: none !important;
-  }
+  color: var(--mut);
+  font-size: 12px;
 }
 
-.technical-grid {
+/* 检测带 */
+.strip {
   display: grid;
-  grid-template-columns: 1.05fr 1.15fr 1fr;
-  gap: 23px;
-  margin-top: 23px;
-}
-.technical-card {
-  padding: 19px 22px;
-  border-radius: 21px;
-  min-width: 0;
-}
-.pipeline-nodes {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin: 18px 0;
-  color: #81958b;
-  font-size: 10px;
-}
-.pipeline-nodes > span,
-.pipeline-nodes > b {
-  display: flex;
-  align-items: center;
+  grid-template-columns: repeat(12, 1fr);
   gap: 6px;
-  white-space: nowrap;
-}
-.pipeline-nodes > b {
-  font-weight: 500;
-  color: #5d8a73;
-  padding: 8px 10px;
-  border-radius: 10px;
-  box-shadow:
-    inset 3px 3px 7px #cbd6ce,
-    inset -3px -3px 7px #fafff9;
-}
-.pipeline-nodes > i {
-  font-style: normal;
-  color: #a4b5a8;
-}
-.timing-row {
-  display: grid;
-  grid-template-columns: 64px 1fr 72px;
-  gap: 12px;
-  align-items: center;
-  font-size: 10px;
   margin-top: 10px;
-  color: #81968a;
 }
-.timing-row > div,
-.resource-track {
-  height: 5px;
-  border-radius: 8px;
-  box-shadow:
-    inset 2px 2px 4px #c5d2c9,
-    inset -2px -2px 4px #fafffa;
+.strip i {
+  aspect-ratio: 1;
+  display: block;
+  background: #d9d6cd center / cover;
+  border: 2px solid var(--ok);
+}
+.strip i.bad {
+  border-color: var(--bad);
+}
+.strip i.mid {
+  border-color: var(--amb);
+}
+.strip i.e {
+  border: 1px dashed var(--line);
+  background: transparent;
+}
+.cell-enter-active {
+  animation: cell 0.45s cubic-bezier(0.2, 1.2, 0.4, 1);
+}
+@keyframes cell {
+  from {
+    transform: translateX(14px) scale(0.6);
+    opacity: 0;
+  }
+}
+.kv {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+.kv div {
+  border-top: 2px solid var(--ink);
+  padding-top: 4px;
+}
+.kv span {
+  font-size: 11px;
+  color: var(--mut);
+  display: block;
+}
+.kv b {
+  font: 700 24px var(--mono);
+}
+.kv .g b {
+  color: var(--ok);
+}
+.kv .nb b {
+  color: var(--bad);
+}
+
+/* 英雄区 */
+.hero {
+  display: grid;
+  grid-template-columns: 420px 1fr;
+  gap: 28px;
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+.hero .eb {
+  color: #a3a8a3;
+}
+.big {
+  font: 800 190px/0.9 var(--mono);
+  letter-spacing: -0.07em;
+  margin-top: 14px;
+}
+.big small {
+  font-size: 90px;
+  letter-spacing: 0;
+  margin-left: 4px;
+  color: #7fc79a;
+}
+.hero p {
+  font-size: 13px;
+  color: #a3a8a3;
+  margin-top: 10px;
+  line-height: 1.6;
+}
+.tl {
+  display: grid;
+  align-content: center;
+  gap: 14px;
+}
+.lane {
+  display: grid;
+  grid-template-columns: 150px 1fr 120px;
+  gap: 14px;
+  align-items: center;
+}
+.lane b {
+  font-size: 14px;
+}
+.lane small {
+  display: block;
+  font: 11px var(--mono);
+  color: #a3a8a3;
+}
+.trk {
+  height: 44px;
+  background: #2a2d2a;
+  position: relative;
   overflow: hidden;
 }
-.timing-row i,
-.resource-track i {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, #a2bfa9, #749b80);
-  border-radius: 8px;
-  transition: width 0.5s;
+.trk.pl {
+  background: repeating-linear-gradient(90deg, #7fc79a 0 2px, transparent 2px 6px);
+  animation: pl 0.5s linear infinite;
 }
-.timing-row b {
+@keyframes pl {
+  to {
+    background-position: 6px 0;
+  }
+}
+.fillA {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: #8a8f8a;
+}
+.lane .t {
+  font: 700 26px var(--mono);
   text-align: right;
-  font-size: 11px;
-  font-weight: 500;
-  color: #5f7868;
-  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
-.timing-row small {
-  font-size: 8px;
-  font-weight: 400;
-  color: #96a59b;
+.lane .t small {
+  display: inline;
+  font-size: 12px;
 }
-.technical-note {
-  font-size: 9px;
-  color: #8a9f91;
-  line-height: 1.6;
-  margin-top: 14px !important;
+.lane .t.pt {
+  color: #7fc79a;
 }
-.observation-values {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 14px;
-  padding: 21px 0 16px;
-}
-.observation-values > div + div {
-  border-left: 1px solid #d1ddd4;
-  padding-left: 15px;
-}
-.observation-values b {
-  font-size: 24px;
-  letter-spacing: -0.04em;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-.observation-values em {
-  font-style: normal;
-  font-size: 9px;
-  color: #94a99a;
-  margin-left: 5px;
-}
-.observation-values small {
-  display: block;
-  color: #8b9f90;
-  font-size: 9px;
-  margin-top: 7px;
-}
-.rule-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-}
-.rule-chips > span {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 9px;
-  color: #809688;
-  border: 1px solid #d3dfd6;
-  border-radius: 6px;
-  padding: 5px 7px;
-}
-.rule-chips i {
-  height: 4px;
-  width: 4px;
-  flex-shrink: 0;
-  background: #7ea68b;
-  border-radius: 50%;
-}
-.rule-chips i.forbidden {
-  background: #bc9a89;
-}
-.rule-chips b {
-  font-weight: 400;
-  color: #5e7a66;
-}
-.runtime-values {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 25px;
-  margin: 21px 0 17px;
-}
-.runtime-values > div > span {
-  font-size: 9px;
-  color: #8c9e90;
-  display: block;
-  margin-bottom: 9px;
-}
-.runtime-values b {
-  font-weight: 500;
-  font-size: 26px;
-  font-variant-numeric: tabular-nums;
-}
-.runtime-values small {
-  font-size: 10px;
-  margin-left: 5px;
-  color: #9aaa9d;
-}
-.resource-track {
-  margin-top: 9px;
-}
-.runtime-details {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 9px;
-  color: #8b9d8f;
-}
-.runtime-details > span {
+.axis {
   display: flex;
   justify-content: space-between;
-  gap: 15px;
+  font: 10px var(--mono);
+  color: #7b807b;
+  margin: -6px 134px 0 164px;
 }
-.runtime-details b {
-  font-size: 10px;
-  font-weight: 400;
-  color: #6d8773;
+.cnt {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border-top: 1px solid #3b3f3b;
+  padding-top: 10px;
+}
+.cnt b {
+  font: 800 44px var(--mono);
+  color: #7fc79a;
+}
+.cnt span {
+  font-size: 13px;
+  color: #a3a8a3;
+}
+
+/* 中下行 */
+.row {
+  display: grid;
+  gap: 16px;
+  min-height: 0;
+  overflow: hidden;
+}
+.r2 {
+  grid-template-columns: 330px 1fr 1fr;
+}
+.r3 {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+.rate {
+  font: 800 92px/1 var(--mono);
+  letter-spacing: -0.05em;
+  margin: 8px 0 4px;
+}
+.rate em {
+  font-size: 36px;
+  color: var(--mut);
+}
+.bar {
+  height: 10px;
+  background: #e4e2dd;
+  position: relative;
+  margin: 6px 0;
+}
+.bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--ok);
+  transition: width 0.7s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+svg.ch text {
+  font-family: var(--mono);
+  font-size: 11px;
+  fill: var(--mut);
+}
+svg.ch text.val {
+  fill: var(--ink);
+  font-weight: 700;
+}
+svg.ch text.val.ok {
+  fill: var(--acc);
+}
+svg.ch text.val.bad {
+  fill: var(--bad);
+}
+.wbar {
+  fill: var(--ink2);
+  transition: width 0.5s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.wbar.hot {
+  fill: var(--acc);
+}
+.wait {
+  display: grid;
+  place-content: center;
+  height: 200px;
+  color: var(--mut);
+  font-size: 13px;
+}
+.res {
+  display: grid;
+  gap: 11px;
+  margin-top: 12px;
+}
+.res > div {
+  display: grid;
+  grid-template-columns: 40px 1fr 118px;
+  gap: 8px;
+  align-items: center;
+  font: 12px var(--mono);
+}
+.res .bar {
+  height: 16px;
+  margin: 0;
+}
+.res b {
+  text-align: right;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.trio {
+  display: flex;
+  gap: 22px;
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.big2 {
+  font: 800 34px/1 var(--mono);
+  letter-spacing: -0.04em;
+}
+.big2 small {
+  font-size: 12px;
+  letter-spacing: 0;
+}
+.big2.ok,
+.big3.ok {
+  color: var(--ok);
+}
+.cmp {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+.big3 {
+  font: 800 54px/1 var(--mono);
+  letter-spacing: -0.04em;
+}
+.big3.mut {
+  color: var(--mut);
+}
+.conf-t {
+  margin-top: 14px;
+}
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-top: 1px solid var(--line);
+  font: 11px var(--mono);
+  color: var(--mut);
+}
+.foot .s {
+  width: 1px;
+  height: 12px;
+  background: var(--line);
+}
+.foot .msg {
+  margin-left: auto;
+  color: var(--bad);
+  font-weight: 700;
+}
+.phases {
+  display: flex;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.phases li {
+  font: 600 11px var(--mono);
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  color: var(--mut);
+}
+.phases li.done {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+.phases li.on {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+.hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--ink2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tally {
+  font: 800 84px/1 var(--mono);
+  letter-spacing: -0.05em;
+  margin: 10px 0 2px;
+  animation: bump 0.5s cubic-bezier(0.2, 1.4, 0.4, 1);
+  transform-origin: left center;
+}
+.tally em {
+  font-size: 26px;
+  margin-left: 6px;
+  color: var(--mut);
+  letter-spacing: 0;
+}
+@keyframes bump {
+  from {
+    transform: scale(1.12);
+    color: var(--ok);
+  }
+}
+.rate-line {
+  font-size: 13px;
+  color: var(--ink2);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.rate-line b {
+  font: 800 28px var(--mono);
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+.rate-line small {
+  margin-left: auto;
+  font: 11px var(--mono);
+  color: var(--mut);
+}
+.rule {
+  margin-top: 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--mut);
+}
+.tabs button {
+  padding: 5px 16px;
+  font: 600 13px var(--sans);
+  color: var(--mut);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.tabs button.on {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+.alt {
+  display: grid;
+  gap: 16px;
+  padding: 16px 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.alt4 {
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: 1fr 1fr;
+}
+.alt3 {
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 300px 1fr;
+}
+.alt .span2 {
+  grid-column: span 2;
+}
+.bigs {
+  font: 800 76px/1 var(--mono);
+  letter-spacing: -0.05em;
+  margin: 14px 0 6px;
+}
+.bigs.sm {
+  font-size: 34px;
+  letter-spacing: -0.02em;
+}
+.bigs small {
+  font-size: 0.4em;
+  color: var(--mut);
+  letter-spacing: 0;
+}
+.trace {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.trace.ok {
+  stroke: var(--ok);
+}
+.dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 16px;
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+.dl dt {
+  color: var(--mut);
+}
+.dl dd {
+  margin: 0;
+  font: 600 13px var(--mono);
+  text-align: right;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 70%;
 }
-@media (min-width: 1101px) and (min-height: 980px) {
-  .showcase .show-header {
-    height: 74px;
-  }
-  .showcase .intro {
-    padding: 18px 0;
-  }
-  .showcase .intro h1 {
-    font-size: 30px;
-    margin: 8px 0;
-  }
-  .showcase .intro-copy {
-    font-size: 11px;
-  }
-  .showcase .insight-column {
-    gap: 15px;
-  }
-  .showcase .verdict-card,
-  .showcase .compute-card {
-    padding: 15px 22px;
-  }
-  .showcase .verdict-main {
-    margin: 15px 0 12px;
-    gap: 17px;
-  }
-  .showcase .verdict-symbol {
-    width: 54px;
-    height: 54px;
-  }
-  .showcase .verdict-main h3 {
-    font-size: 29px;
-  }
-  .showcase .verdict-symbol :deep(svg) {
-    width: 30px;
-    height: 30px;
-  }
-  .showcase .verdict-foot {
-    margin-top: 11px;
-    padding-top: 11px;
-  }
-  .showcase .compute-body {
-    margin: 14px 0;
-  }
-  .showcase .processor-icon {
-    height: 48px;
-    width: 48px;
-    border-radius: 14px;
-  }
-  .showcase .fps-value {
-    font-size: 31px;
-  }
-  .showcase .compute-foot {
-    padding-top: 11px;
-  }
-  .showcase .start-button {
-    height: 47px;
-  }
-  .showcase .metric {
-    padding: 16px 22px;
-  }
-  .showcase .metrics-row {
-    margin-top: 20px;
-  }
-  .showcase .technical-grid {
-    margin-top: 18px;
-  }
-  .showcase .technical-card {
-    padding: 16px 20px;
-  }
-  .showcase .bottom-row {
-    padding: 13px 0;
-  }
-  .showcase .show-footer {
-    padding-top: 12px;
-  }
-  .showcase .technical-note {
-    font-size: 8px;
-  }
+.hb {
+  display: grid;
+  grid-template-columns: 44px 1fr 56px;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+  font: 12px var(--mono);
 }
-@media (max-width: 1100px) {
-  .technical-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-  .technical-card:last-child {
-    grid-column: 1/-1;
-  }
-  .runtime-values {
-    margin: 16px 0;
-  }
-  .runtime-details {
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 22px;
-  }
-  .runtime-details > span {
-    gap: 10px;
-  }
-  .runtime-details b {
-    max-width: none;
-  }
+.hb.wide {
+  grid-template-columns: 1fr 120px 36px;
 }
-@media (max-width: 700px) {
-  .technical-grid {
-    grid-template-columns: 1fr;
-  }
-  .technical-card:last-child {
-    grid-column: auto;
-  }
-  .runtime-details {
-    flex-direction: column;
-    gap: 10px;
-  }
+.hb span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-
-@media (min-width: 1101px) and (min-height: 980px) {
-  .showcase {
-    overflow: auto;
+.hb b {
+  text-align: right;
+}
+.hb .bar {
+  margin: 0;
+  height: 12px;
+}
+.bar i.badfill {
+  background: var(--bad);
+}
+.stack {
+  display: flex;
+  height: 28px;
+  margin: 20px 0 10px;
+  background: #e4e2dd;
+}
+.stack i.ok {
+  background: var(--ok);
+}
+.stack i.bad {
+  background: var(--bad);
+}
+.stack i.mid {
+  background: var(--amb);
+}
+.rec {
+  display: grid;
+  grid-template-columns: 70px 90px 1fr 60px;
+  gap: 12px;
+  align-items: baseline;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+  font: 13px var(--mono);
+  color: var(--ink);
+  text-decoration: none;
+}
+.rec b {
+  color: var(--ok);
+}
+.rec.bad b {
+  color: var(--bad);
+}
+.rec.mid b {
+  color: var(--amb);
+}
+.rec .rs {
+  font-family: var(--sans);
+  color: var(--ink2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tally {
+    animation: none;
   }
-  .showcase .show-header {
-    height: 64px;
+  .stamp-enter-active,
+  .cell-enter-active,
+  .live.up i,
+  .trk.pl {
+    animation: none;
   }
-  .showcase .intro {
-    padding: 12px 0;
-  }
-  .showcase .intro h1 {
-    font-size: 28px;
-    margin: 6px 0;
-  }
-  .showcase .intro-copy {
-    display: none;
-  }
-  .showcase .technical-card {
-    padding: 13px 20px;
-  }
-  .showcase .pipeline-nodes {
-    margin: 14px 0;
-  }
-  .showcase .technical-note {
-    margin-top: 10px !important;
-  }
-  .showcase .bottom-row {
-    padding: 9px 0;
+  .bar i,
+  .wbar,
+  .ruler .ptr {
+    transition: none;
   }
 }
 </style>

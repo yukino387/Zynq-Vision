@@ -187,6 +187,7 @@ def heartbeat_once():
                    'model': inspection.get('model'), 'product': inspection.get('product'),
                    'total': inspection.get('total', 0), 'counts': inspection.get('counts', {}),
                    'runTotal': inspection.get('runTotal', 0), 'runCounts': inspection.get('runCounts', {}),
+                   'beltCaps': inspection.get('beltCaps', 0),
                    'production': inspection.get('production', False),
                    'productionRunId': inspection.get('productionRunId') or None,
                    'passagePhase': inspection.get('passagePhase', 'STOPPED'),
@@ -682,6 +683,10 @@ class PreviewHandler(http.server.BaseHTTPRequestHandler):
                 kind = command.get('type')
                 if kind == 'START_INSPECTION':result = engine('/production', {'enabled': True})
                 elif kind == 'STOP_INSPECTION':result = engine('/production', {'enabled': False})
+                elif kind == 'RESET_COUNTS':
+                    again = engine().get('production', False)
+                    engine('/reset', {})
+                    result = engine('/production', {'enabled': True}) if again else engine()
                 elif kind == 'CHECK_ONE':
                     identifier = command.get('requestId')
                     if not isinstance(identifier, str) or not re.fullmatch(r'[0-9a-f-]{36}', identifier):
@@ -689,7 +694,7 @@ class PreviewHandler(http.server.BaseHTTPRequestHandler):
                     result = engine('/check', {'requestId': identifier})
                 elif kind in ('GET_STATUS', 'CONNECT'):result = engine()
                 else:raise ValueError('当前设备不支持该控制操作')
-                if kind in ('START_INSPECTION', 'STOP_INSPECTION', 'CHECK_ONE'):
+                if kind in ('START_INSPECTION', 'STOP_INSPECTION', 'RESET_COUNTS', 'CHECK_ONE'):
                     REFRESH.set()
                 self.reply(200, json.dumps(result).encode());return
             if path == '/runtime/model':
