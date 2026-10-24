@@ -201,6 +201,8 @@ public:
                 const std::string request=saved.at("requestId");
                 bool acknowledged=false;
                 if(fs::exists(entry.path().string()+".ack")){try{const auto receipt=json::parse(read_text(entry.path().string()+".ack"));acknowledged=receipt.at("rawSha256")==payload.at("rawSha256") && receipt.at("id").get<std::string>().find(":"+payload.at("bootId").get<std::string>()+":"+std::to_string(payload.at("sequence").get<unsigned>()))!=std::string::npos;}catch(const std::exception&){}}
+                // 被平台永久拒绝的记录保留证据但不再计入待上传，避免堵住后续记录。
+                if(fs::exists(entry.path().string()+".rejected"))acknowledged=true;
                 const auto inserted=records.emplace(request,Record{entry.path(),compact_payload(payload),request,acknowledged,true,saved.at("decision"),fs::last_write_time(entry.path()).time_since_epoch().count()});
                 if(inserted.second)count_record(inserted.first->second,!has_baseline || !counts_baseline_ids.count(entry.path().filename().string()));
                 if(payload.at("bootId")==boot_id)sequence=std::max(sequence,payload.at("sequence").get<uint32_t>());
@@ -358,7 +360,16 @@ public:
                 Record record;{std::lock_guard<std::mutex> lock(mutex);record=records.at(key);}
                 const auto saved=read_record(record.path);const auto payload=saved.at("payload");const auto serialized=payload.dump();
                 const auto reply=client.Post("/api/terminal/records",serialized,"application/json");
-                if(!reply || reply->status!=201)throw std::runtime_error(reply?"Server rejected offline record (HTTP "+std::to_string(reply->status)+")":"Server is unreachable");
+                if(!reply)throw std::runtime_error("Server is unreachable");
+                if(reply->status!=201){
+                    // 方案或模型已被改动时平台会永久拒绝这类记录。保留证据并跳过，
+                    // 不能让一条过期记录堵住后面所有记录。401/408/429 与 5xx 仍按可重试处理。
+                    const bool permanent=reply->status>=400 && reply->status<500 && reply->status!=401 && reply->status!=408 && reply->status!=429;
+                    if(!permanent)throw std::runtime_error("Server rejected offline record (HTTP "+std::to_string(reply->status)+")");
+                    durable_write(record.path.string()+".rejected",reply->body);
+                    {std::lock_guard<std::mutex> lock(mutex);if(!records.at(key).acknowledged){records.at(key).acknowledged=true;--pending_count;}}
+                    continue;
+                }
                 const auto receipt=json::parse(reply->body);const auto expected="terminal:"+connection.at("deviceId").get<std::string>()+":"+record.payload.at("bootId").get<std::string>()+":"+std::to_string(record.payload.at("sequence").get<unsigned>());
                 if(receipt.at("id")!=expected || receipt.at("rawSha256")!=record.payload.at("rawSha256"))throw std::runtime_error("Offline acknowledgement mismatch");
                 durable_write(record.path.string()+".ack",receipt.dump());
