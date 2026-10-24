@@ -1,9 +1,23 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, nextTick, getCurrentInstance } from "vue";
+import {
+  computed,
+  ref,
+  onMounted,
+  onUnmounted,
+  nextTick,
+  getCurrentInstance,
+} from "vue";
 import { onResize } from "@dcloudio/uni-app";
 import { displayName } from "@vision/shared";
 import type { DetectionBox } from "@vision/contracts";
-import { live, liveDevice, frameAge, type LiveFrame } from "../live";
+import {
+  live,
+  liveDevice,
+  frameAge,
+  attachLivePreview,
+  detachLivePreview,
+  type LiveFrame,
+} from "../live";
 
 const props = defineProps<{
   /** 回看时传入历史帧；不传就跟随实时流。 */
@@ -40,6 +54,8 @@ function measure() {
   });
 }
 onMounted(measure);
+onMounted(attachLivePreview);
+onUnmounted(detachLivePreview);
 onResize(measure);
 const imageSrc = computed(() =>
   frame.value ? `data:image/jpeg;base64,${frame.value.jpeg}` : "",

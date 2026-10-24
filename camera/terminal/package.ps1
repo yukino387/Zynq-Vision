@@ -1,4 +1,4 @@
-param([string]$UiFont = "C:/Windows/Fonts/simsun.ttc")
+param([string]$UiFont = (Join-Path $PSScriptRoot 'assets/fonts/NotoSansCJKsc-Regular.otf'))
 $ErrorActionPreference = 'Stop'
 $output = Join-Path $PSScriptRoot 'build/delivery'
 $prefix = Join-Path $output 'rootfs'
@@ -16,8 +16,9 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'build/deps/python/paho') -Desti
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'build/deps/python/paho_mqtt-2.1.0.dist-info/licenses/LICENSE.txt') -Destination (Join-Path $output 'licenses/paho-mqtt.txt')
 foreach ($name in @('vision-engine.service','vision-panel.service','vision-manager.service')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot "linux/$name") -Destination (Join-Path $prefix 'etc/systemd/system') }
 foreach ($name in @('vision_accel.c','vision_fb.c','vision_uapi.h','Makefile','vision-pl.dtsi','navigator-v3.9.dts','navigator-v3.9-usb.dtsi','kernel.config','uboot.config','build-kernel.sh','build-uboot.sh','build-modules.sh','build-rootfs.sh','build-initramfs.sh','build-sd-image.sh','install-rootfs.sh','rcS','udhcpc.script','inittab')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot "linux/$name") -Destination (Join-Path $output 'kernel') }
-$font = Join-Path $prefix 'usr/share/vision/simsun.ttc'
+$font = Join-Path $prefix 'usr/share/vision/NotoSansCJKsc-Regular.otf'
 Copy-Item -LiteralPath $UiFont -Destination $font
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets/fonts/OFL.txt') -Destination (Join-Path $output 'licenses/Noto-CJK-OFL.txt')
 foreach ($name in @('XP.css-LICENSE.txt','winXP-LICENSE.txt')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot "assets/xp/$name") -Destination (Join-Path $output "licenses/$name") }
 $licenses = @(
     @('lvgl/LICENCE.txt','LVGL.txt'), @('json/LICENSE.MIT','nlohmann-json.txt'),

@@ -6,7 +6,7 @@ Requires=vision-engine.service
 [Service]
 Type=simple
 ExecStartPre=/sbin/modprobe vision_fb
-ExecStart=/usr/local/bin/vision-panel /usr/share/vision/simsun.ttc
+ExecStart=/usr/local/bin/vision-panel /usr/share/vision/NotoSansCJKsc-Regular.otf
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true

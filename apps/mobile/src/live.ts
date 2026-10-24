@@ -1,4 +1,4 @@
-import { computed, reactive, markRaw } from "vue";
+import { computed, reactive, markRaw, watch } from "vue";
 import type {
   DetectionBox,
   DeviceSnapshot,
@@ -49,6 +49,42 @@ let starting = false;
 let arrivals: number[] = [];
 /** 胶片条只按每秒两帧留取，避免 30 FPS 时反复重建缩略图。 */
 let lastStripAt = 0;
+let reconnectAttempt = 0;
+let previewConsumers = 0;
+let watchedDevice = "";
+
+function syncPreviewWatch() {
+  if (!socket || !live.ready) return;
+  const next = previewConsumers > 0 ? live.deviceId : "";
+  if (next === watchedDevice) return;
+  if (watchedDevice)
+    socket.send({
+      data: JSON.stringify({
+        type: "preview.unwatch",
+        deviceId: watchedDevice,
+      }),
+    });
+  watchedDevice = next;
+  if (next)
+    socket.send({
+      data: JSON.stringify({ type: "preview.watch", deviceId: next }),
+    });
+}
+
+// 只在画面可见时向平台订阅；切设备与重连后重新订阅。
+export function attachLivePreview() {
+  previewConsumers++;
+  syncPreviewWatch();
+}
+export function detachLivePreview() {
+  previewConsumers = Math.max(0, previewConsumers - 1);
+  syncPreviewWatch();
+  if (!previewConsumers) {
+    live.frame = null;
+    live.frames = [];
+  }
+}
+watch(() => live.deviceId, syncPreviewWatch);
 
 export const liveDevice = computed<DeviceSnapshot | null>(
   () => live.devices.find((d) => d.id === live.deviceId) ?? null,
@@ -146,6 +182,7 @@ function handle(event: PlatformEvent) {
     live.ready = true;
     live.connecting = false;
     live.error = "";
+    syncPreviewWatch();
     if (authTimer) {
       clearTimeout(authTimer);
       authTimer = null;
@@ -154,6 +191,7 @@ function handle(event: PlatformEvent) {
     return;
   }
   if (event.type === "device.preview.frame") {
+    if (!previewConsumers) return;
     const frame = event.payload as LiveFrame;
     if (!frame?.jpeg) return;
     if (live.deviceId && event.entityId !== live.deviceId) return;
@@ -213,15 +251,16 @@ function handle(event: PlatformEvent) {
 }
 
 function scheduleReconnect() {
-  if (stopped || retry) return;
+  if (stopped || retry || !session.online) return;
+  const delay = Math.min(15000, 1000 * 2 ** reconnectAttempt++);
   retry = setTimeout(() => {
     retry = null;
     startLive();
-  }, 2000);
+  }, delay);
 }
 
 export function startLive() {
-  if (!session.token) return;
+  if (!session.token || !session.online) return;
   stopped = false;
   if (!heartbeat)
     heartbeat = setInterval(() => {
@@ -237,6 +276,8 @@ export function startLive() {
   if (!snapshotTimer)
     snapshotTimer = setInterval(() => void refreshDevices(), 5000);
   if (socket || starting) return;
+  if (retry) clearTimeout(retry);
+  retry = null;
   let task: UniNamespace.SocketTask;
   try {
     starting = true;
@@ -251,23 +292,48 @@ export function startLive() {
     return;
   }
   socket = task;
-  task.onOpen(() => {
+  const disconnect = (reason: string) => {
+    if (socket !== task) return;
+    socket = null;
+    watchedDevice = "";
     starting = false;
     live.connecting = false;
-    task.send({ data: JSON.stringify({ token: session.token }) });
+    live.ready = false;
+    live.error = reason;
+    if (authTimer) clearTimeout(authTimer);
+    authTimer = null;
+    try {
+      task.close({});
+    } catch {
+      // 部分 Android 网络错误只触发 onError，不再触发 onClose。
+    }
+    scheduleReconnect();
+  };
+  // 包括 TCP 握手在内，防止 onOpen 永远不来的半连接卡住重试。
+  authTimer = setTimeout(() => disconnect("实时连接超时，正在重连"), 10000);
+  task.onOpen(() => {
+    if (socket !== task || stopped) return;
+    starting = false;
+    task.send({
+      data: JSON.stringify({ token: session.token }),
+      fail: () => disconnect("实时连接鉴权发送失败"),
+    });
+    if (socket !== task) return;
     if (authTimer) clearTimeout(authTimer);
     // 连上了但服务器不认 token 时，onClose 也会到；这里兜底避免一直转圈。
     authTimer = setTimeout(() => {
       authTimer = null;
       if (live.ready || socket !== task) return;
-      live.error = "实时连接鉴权超时";
-      task.close({});
+      disconnect("实时连接鉴权超时");
     }, 6000);
   });
   task.onMessage((message) => {
     try {
-      if (socket === task)
-        handle(JSON.parse(String(message.data)) as PlatformEvent);
+      if (socket === task) {
+        const event = JSON.parse(String(message.data)) as PlatformEvent;
+        if (event.type === "session.ready") reconnectAttempt = 0;
+        handle(event);
+      }
     } catch {
       // 非 JSON 帧直接忽略，不让一帧坏数据拆掉整条连接。
     }
@@ -275,6 +341,7 @@ export function startLive() {
   task.onClose((result) => {
     if (socket !== task) return;
     socket = null;
+    watchedDevice = "";
     starting = false;
     live.connecting = false;
     live.ready = false;
@@ -292,8 +359,7 @@ export function startLive() {
     scheduleReconnect();
   });
   task.onError(() => {
-    live.error = "实时连接失败";
-    if (socket === task) task.close({});
+    disconnect("实时连接失败，正在重连");
   });
 }
 
@@ -309,9 +375,12 @@ export function stopLive() {
   authTimer = null;
   const task = socket;
   socket = null;
+  watchedDevice = "";
   starting = false;
   live.ready = false;
   live.connecting = false;
+  arrivals = [];
+  live.fps = 0;
   try {
     task?.close({});
   } catch {

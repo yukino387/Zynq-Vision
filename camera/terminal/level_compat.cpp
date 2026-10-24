@@ -52,18 +52,45 @@ double percentile(const std::array<unsigned,256>& histogram,unsigned total,doubl
 }
 }
 
-LevelFrame prepare_level_bgr(const uint8_t* bgr,unsigned width,unsigned height){
+namespace {
+struct RedTables {
+    std::array<int,256> saturation{},hue{};
+    RedTables(){for(int i=1;i<256;++i){saturation[i]=rounded(double(255<<12)/i);hue[i]=rounded(double(180<<12)/(6*i));}}
+};
+bool red_pixel(int b,int g,int r){
+    static const RedTables tables;
+    const int v=std::max({r,g,b}),delta=v-std::min({r,g,b});
+    const int s=(delta*tables.saturation[v]+2048)>>12;
+    int h=(v==r?g-b:v==g?b-r+2*delta:r-g+4*delta);h=(h*tables.hue[delta]+2048)>>12;if(h<0)h+=180;
+    return (h<=8 || h>=170) && s>=110 && v>=60;
+}
+struct PixelTables {
+    std::array<std::array<uint8_t,4>,65536> values{};
+    PixelTables(){for(unsigned p=0;p<values.size();++p){auto& c=values[p];c[0]=(p&31)*255/31;c[1]=((p>>5)&63)*255/63;c[2]=(p>>11)*255/31;c[3]=red_pixel(c[0],c[1],c[2])?255:0;}}
+};
+LevelFrame prepare_level(const uint8_t* bgr,const uint16_t* pixels,unsigned width,unsigned height){
     LevelFrame result;result.active=true;result.gray.assign(224*224,0);
     if(width<32 || height<32)return result;
-    Image mask(width*height);std::array<int,256> saturation{},hue{};
-    for(int i=1;i<256;++i){saturation[i]=rounded(double(255<<12)/i);hue[i]=rounded(double(180<<12)/(6*i));}
-    for(unsigned i=0;i<width*height;++i){
-        const int b=bgr[3*i],g=bgr[3*i+1],r=bgr[3*i+2],v=std::max({r,g,b}),minimum=std::min({r,g,b}),delta=v-minimum;
-        const int s=(delta*saturation[v]+2048)>>12;
-        int h=(v==r?g-b:v==g?b-r+2*delta:r-g+4*delta);h=(h*hue[delta]+2048)>>12;if(h<0)h+=180;
-        mask[i]=((h<=8 || h>=170) && s>=110 && v>=60)?255:0;
+    const PixelTables* lookup=nullptr;
+    if(pixels){static const PixelTables tables;lookup=&tables;}
+    Image mask(width*height);
+    int left=width,top=height,right=-1,bottom=-1;
+    for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){
+        const unsigned i=y*width+x;
+        const bool red=pixels?lookup->values[pixels[i]][3]!=0:red_pixel(bgr[3*i],bgr[3*i+1],bgr[3*i+2]);
+        if(red){mask[i]=255;left=std::min(left,int(x));right=std::max(right,int(x));top=std::min(top,int(y));bottom=std::max(bottom,int(y));}
     }
-    morph(mask,width,height,7,true);morph(mask,width,height,7,false);morph(mask,width,height,4,false);morph(mask,width,height,4,true);
+    if(right<0)return result;
+    // Closing radius 7 then opening radius 4 has a 22-pixel dependency halo.
+    // Keep 24 pixels and original image borders so ROI processing is identical.
+    left=std::max(0,left-24);right=std::min(int(width)-1,right+24);
+    top=std::max(0,top-24);bottom=std::min(int(height)-1,bottom+24);
+    const int roi_width=right-left+1,roi_height=bottom-top+1;
+    Image roi(roi_width*roi_height);
+    for(int y=0;y<roi_height;++y)std::copy_n(mask.data()+(top+y)*width+left,roi_width,roi.data()+y*roi_width);
+    morph(roi,roi_width,roi_height,7,true);morph(roi,roi_width,roi_height,7,false);morph(roi,roi_width,roi_height,4,false);morph(roi,roi_width,roi_height,4,true);
+    std::fill(mask.begin(),mask.end(),0);
+    for(int y=0;y<roi_height;++y)std::copy_n(roi.data()+y*roi_width,roi_width,mask.data()+(top+y)*width+left);
     Image visited(mask.size());std::vector<int> component;double best=0;
     for(unsigned start=0;start<mask.size();++start)if(mask[start] && !visited[start]){
         component.clear();component.push_back(start);visited[start]=1;int xmin=start%width,xmax=xmin,ymin=start/width,ymax=ymin;
@@ -91,7 +118,7 @@ LevelFrame prepare_level_bgr(const uint8_t* bgr,unsigned width,unsigned height){
         const int by=rounded(sy*2048),ay=2048-by,iy1=std::min(y1-y0-1,iy+1);
         for(int x=0;x<224;++x){
             const int ix=xindex[x],bx=xweight[x],ax=2048-bx,ix1=std::min(x1-x0-1,ix+1);int color[3];
-            for(int c=0;c<3;++c){auto at=[&](int yy,int xx){return bgr[3*((y0+yy)*width+x0+xx)+c];};
+            for(int c=0;c<3;++c){auto at=[&](int yy,int xx){const unsigned i=(y0+yy)*width+x0+xx;return pixels?lookup->values[pixels[i]][c]:bgr[3*i+c];};
                 const int top=at(iy,ix)*ax+at(iy,ix1)*bx,bottom=at(iy1,ix)*ax+at(iy1,ix1)*bx;
                 color[c]=(top*ay+bottom*by+(1<<21))>>22;
             }
@@ -102,10 +129,9 @@ LevelFrame prepare_level_bgr(const uint8_t* bgr,unsigned width,unsigned height){
     if(hi-lo>=8){std::array<uint8_t,256> lut{};for(int i=0;i<256;++i)lut[i]=uint8_t(std::clamp((float(i)-float(lo))*float(255.0/(hi-lo)),0.0f,255.0f));for(auto& value:result.gray)value=lut[value];}
     measure_level(result);return result;
 }
-LevelFrame prepare_level_rgb565(const uint16_t* pixels){
-    Image bgr(416*416*3);for(unsigned i=0;i<416*416;++i){const unsigned p=pixels[i];bgr[i*3]=(p&31)*255/31;bgr[i*3+1]=((p>>5)&63)*255/63;bgr[i*3+2]=(p>>11)*255/31;}
-    return prepare_level_bgr(bgr.data(),416,416);
-}
+} // namespace
+LevelFrame prepare_level_bgr(const uint8_t* bgr,unsigned width,unsigned height){return prepare_level(bgr,nullptr,width,height);}
+LevelFrame prepare_level_rgb565(const uint16_t* pixels){return prepare_level(nullptr,pixels,416,416);}
 void measure_level(LevelFrame& frame){
     frame.row=-1;frame.strength=0;frame.fallback=false;if(!frame.label_found || frame.gray.size()!=224*224)return;
     // With no visible surface above the label, report no row at all: the

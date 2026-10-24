@@ -2,7 +2,7 @@
 ttyPS0::respawn:/bin/sh
 ::respawn:/usr/local/bin/vision-engine /var/lib/vision
 ::respawn:/usr/bin/python3 /usr/local/bin/vision-manager.py
-::respawn:/usr/local/bin/vision-panel /usr/share/vision/simsun.ttc
+::respawn:/usr/local/bin/vision-panel /usr/share/vision/NotoSansCJKsc-Regular.otf
 ::ctrlaltdel:/sbin/reboot
 ::shutdown:/bin/sync
 ::shutdown:/bin/umount -a -r

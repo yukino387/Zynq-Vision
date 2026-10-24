@@ -4,15 +4,18 @@ import { onLaunch, onShow, onHide } from "@dcloudio/uni-app";
 import { session } from "./state";
 import { syncQueue } from "./queue";
 import { startLive, stopLive, live } from "./live";
+let foreground = true;
 onLaunch(() => {
   uni.getNetworkType({
     success: (state) => {
       session.online = state.networkType !== "none";
+      if (!session.online) stopLive();
     },
   });
   uni.onNetworkStatusChange((state) => {
     session.online = state.isConnected;
-    if (state.isConnected) {
+    stopLive();
+    if (state.isConnected && foreground) {
       if (session.token) {
         void syncQueue();
         startLive();
@@ -25,7 +28,9 @@ onLaunch(() => {
 watch(
   () => session.token,
   (token) => {
-    if (token) startLive();
+    if (token) {
+      if (foreground) startLive();
+    }
     else {
       stopLive();
       live.devices = [];
@@ -38,12 +43,16 @@ watch(
   },
 );
 onShow(() => {
+  foreground = true;
   if (session.token) {
     startLive();
     void syncQueue();
   }
 });
-onHide(() => stopLive());
+onHide(() => {
+  foreground = false;
+  stopLive();
+});
 </script>
 <style>
 page {

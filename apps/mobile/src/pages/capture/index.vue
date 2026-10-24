@@ -242,7 +242,7 @@ async function capture() {
         {
           orientation: system.deviceOrientation ?? "UNKNOWN",
           deviceModel: system.model,
-          appVersion: "0.2.0",
+          appVersion: "0.2.1",
           planId: session.taskId
             ? undefined
             : device.value?.terminal?.state?.product?.id,

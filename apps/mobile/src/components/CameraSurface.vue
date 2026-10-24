@@ -1,3 +1,8 @@
+<script lang="ts">
+// 原生 close 返回时硬件释放仍可能未完成，跨组件重建也要留出间隔。
+let nativeReleasedAt = 0;
+</script>
+
 <script setup lang="ts">
 import { getCurrentInstance, nextTick, onMounted, onUnmounted, ref } from "vue";
 import { onResize } from "@dcloudio/uni-app";
@@ -16,10 +21,16 @@ let stream: MediaStream | null = null,
 let track: MediaStreamTrack | null = null,
   generation = 0;
 let previewTimer: ReturnType<typeof setTimeout> | null = null;
+let startupTimer: ReturnType<typeof setTimeout> | null = null;
+let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+let disposed = false;
+let switching = false;
+let rejectCapture: ((reason: Error) => void) | null = null;
 interface NativeCamera {
   preview(): void;
   switchCamera(): void;
   close(): void;
+  setStyles(styles: Record<string, string>): void;
   addEventListener(
     event: string,
     callback: (event: { detail: { code?: number; message?: string } }) => void,
@@ -35,20 +46,47 @@ function stop() {
   generation++;
   if (previewTimer) clearTimeout(previewTimer);
   previewTimer = null;
-  native?.close();
+  if (startupTimer) clearTimeout(startupTimer);
+  startupTimer = null;
+  if (resizeTimer) clearTimeout(resizeTimer);
+  resizeTimer = null;
+  rejectCapture?.(new Error("相机已关闭，请重新拍摄"));
+  rejectCapture = null;
+  const camera = native;
   native = null;
+  if (camera) {
+    try {
+      camera.close();
+    } catch {
+      // 页面销毁时原生控件可能已被系统关闭。
+    }
+    nativeReleasedAt = Date.now();
+  }
   stream?.getTracks().forEach((item) => item.stop());
   stream = null;
   track = null;
-  video?.remove();
+  if (video) {
+    video.pause();
+    video.srcObject = null;
+    video.remove();
+  }
   video = null;
   active.value = false;
   starting.value = false;
   torchOn.value = false;
   torchSupported.value = false;
+  switching = false;
+}
+function fail(reason: string) {
+  stop();
+  error.value = reason;
+}
+function clearStartupTimer() {
+  if (startupTimer) clearTimeout(startupTimer);
+  startupTimer = null;
 }
 async function start() {
-  if (starting.value || active.value) return;
+  if (disposed || starting.value || active.value) return;
   const attempt = ++generation;
   starting.value = true;
   error.value = "";
@@ -59,8 +97,8 @@ async function start() {
     const acquired = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: { ideal: facing.value },
-        width: { ideal: 1920 },
-        height: { ideal: 1440 },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
       },
       audio: false,
     });
@@ -70,6 +108,7 @@ async function start() {
     }
     stream = acquired;
     await nextTick();
+    if (attempt !== generation) return;
     const host = document.getElementById(hostId);
     if (!host) throw new Error("相机尚未就绪");
     const player = document.createElement("video");
@@ -105,6 +144,11 @@ async function start() {
     }
     if (attempt !== generation) return;
     await nextTick();
+    // 等待上一实例释放相机；权限回调和页面切换可能同时发生。
+    const releaseDelay = Math.max(0, 400 - (Date.now() - nativeReleasedAt));
+    if (releaseDelay)
+      await new Promise((resolve) => setTimeout(resolve, releaseDelay));
+    if (attempt !== generation) return;
     const bounds = await new Promise<{
       left: number;
       top: number;
@@ -135,7 +179,7 @@ async function start() {
       width: `${bounds.width}px`,
       height: `${bounds.height}px`,
       position: "static",
-      mode: "FHD",
+      mode: "HD",
       aspect: "3:4",
       muted: true,
       "auto-focus": true,
@@ -148,23 +192,50 @@ async function start() {
       $getAppWebview(): { append(view: unknown): void };
     };
     page.$getAppWebview().append(camera);
+    let initialSwitch = facing.value === "environment";
     camera.addEventListener("statechange", (event) => {
       if (attempt !== generation) return;
+      if ((event.detail?.code ?? 0) < 0) {
+        fail(`相机不可用（${event.detail.code}），请检查权限后重试`);
+        return;
+      }
       if (event.detail.code === 1007) {
+        // 必须等摄像头首帧就绪后再切换，不能紧跟 preview 调用。
+        if (initialSwitch) {
+          initialSwitch = false;
+          switching = true;
+          previewTimer = setTimeout(() => {
+            previewTimer = null;
+            if (attempt !== generation) return;
+            try {
+              camera.switchCamera();
+            } catch {
+              fail("切换相机失败，请重试");
+            }
+          }, 300);
+          return;
+        }
+        clearStartupTimer();
+        switching = false;
         active.value = true;
         starting.value = false;
       }
     });
     camera.addEventListener("error", () => {
       if (attempt !== generation) return;
-      stop();
-      error.value = "相机启动失败，请重试";
+      fail("相机启动失败，请重试");
     });
+    startupTimer = setTimeout(() => {
+      if (attempt === generation) fail("相机启动超时，请检查权限后重试");
+    }, 12000);
     previewTimer = setTimeout(() => {
       previewTimer = null;
       if (attempt !== generation) return;
-      camera.preview();
-      if (facing.value === "environment") camera.switchCamera();
+      try {
+        camera.preview();
+      } catch {
+        fail("相机预览启动失败，请重试");
+      }
     }, 500);
     // #endif
   } catch (e) {
@@ -179,11 +250,19 @@ async function start() {
   }
 }
 async function flip() {
-  if (!active.value) return;
+  if (!active.value || switching || rejectCapture) return;
   facing.value = facing.value === "environment" ? "user" : "environment";
   // #ifdef APP-PLUS
   if (native) {
-    native.switchCamera();
+    switching = true;
+    active.value = false;
+    starting.value = true;
+    startupTimer = setTimeout(() => fail("切换相机超时，请重试"), 12000);
+    try {
+      native.switchCamera();
+    } catch {
+      fail("切换相机失败，请重试");
+    }
     return;
   }
   // #endif
@@ -206,13 +285,37 @@ async function toggleTorch() {
 async function capture(): Promise<string> {
   if (!active.value) throw new Error("等待相机就绪");
   // #ifdef APP-PLUS
-  if (native)
-    return new Promise((resolve, reject) =>
-      native!.snapshot(
-        (event) => resolve(event.tempImagePath),
-        (event) => reject(new Error(event.message || "拍摄失败")),
-      ),
-    );
+  if (native) {
+    if (rejectCapture) throw new Error("正在拍摄，请稍候");
+    const camera = native;
+    const attempt = generation;
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (path?: string, reason?: string) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        rejectCapture = null;
+        if (reason) reject(new Error(reason));
+        else if (attempt !== generation) reject(new Error("相机已关闭"));
+        else if (path) resolve(path);
+        else reject(new Error("拍摄未返回图片，请重试"));
+      };
+      const timer = setTimeout(
+        () => finish(undefined, "拍摄超时，请重试"),
+        10000,
+      );
+      rejectCapture = (reason) => finish(undefined, reason.message);
+      try {
+        camera.snapshot(
+          (event) => finish(event.tempImagePath),
+          (event) => finish(undefined, event.message || "拍摄失败"),
+        );
+      } catch {
+        finish(undefined, "拍摄失败，请重试");
+      }
+    });
+  }
   // #endif
   // #ifdef H5
   if (video) {
@@ -239,10 +342,42 @@ async function capture(): Promise<string> {
 }
 onMounted(() => void start());
 onResize(() => {
-  stop();
-  void start();
+  // 尺寸变化只更新原生控件位置，不反复占用/释放摄像头。
+  if (resizeTimer) clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    resizeTimer = null;
+    const camera = native;
+    if (!camera || disposed) return;
+    uni
+      .createSelectorQuery()
+      .in(instance?.proxy)
+      .select(`#${hostId}`)
+      .boundingClientRect((rect) => {
+        const bounds = rect as {
+          left: number;
+          top: number;
+          width: number;
+          height: number;
+        } | null;
+        if (native !== camera || !bounds?.width || !bounds.height) return;
+        try {
+          camera.setStyles({
+            top: `${bounds.top}px`,
+            left: `${bounds.left}px`,
+            width: `${bounds.width}px`,
+            height: `${bounds.height}px`,
+          });
+        } catch {
+          fail("相机布局更新失败，请重试");
+        }
+      })
+      .exec();
+  }, 200);
 });
-onUnmounted(stop);
+onUnmounted(() => {
+  disposed = true;
+  stop();
+});
 defineExpose({
   capture,
   stop,

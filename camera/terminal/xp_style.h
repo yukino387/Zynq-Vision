@@ -3,7 +3,7 @@
 #include "xp_assets.h"
 
 namespace xp {
-constexpr uint32_t face=0xece9d8, selection=0x316ac5, desktop=0x004e98;
+constexpr uint32_t face=0xf0f4f8, selection=0x176bde, desktop=0xf0f4f8;
 enum class Skin { Window,Title,Button,Menu,MenuBar,Task,Start,Taskbar,Tray,Combo,Tab,Status,Minimize,Maximize,Restore,Close };
 enum class Icon { Computer,Control,Network,Records,Device,Disk,Document,Jobs };
 void skin(lv_obj_t* object,Skin kind);

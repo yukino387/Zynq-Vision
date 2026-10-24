@@ -2,8 +2,8 @@
     "name" : "视觉采样",
     "appid" : "__UNI__05C60CA",
     "description" : "本地局域网现场视觉采样",
-    "versionName" : "0.2.0",
-    "versionCode" : "200",
+    "versionName" : "0.2.1",
+    "versionCode" : "201",
     "transformPx" : false,
     "vueVersion" : "3",
     "h5" : {
