@@ -273,7 +273,9 @@ public:
         const auto meta=metadata.dump();
         const uint32_t size=meta.size();std::string bytes(reinterpret_cast<const char*>(&size),4);bytes+=meta;bytes.append(reinterpret_cast<const char*>(snapshot.pixels.data()),snapshot.pixels.size()*2);
         std::lock_guard<std::mutex> lock(mutex);
-        if(frame.pixels.empty() || paused || !error.empty() || model.is_null() || frame.monotonic_ns!=snapshot.monotonic_ns)throw std::runtime_error("No current frame");
+        // 帧在拼装期间前进是连续流的正常情况，返回已取好的快照即可；
+        // 只有暂停、故障或换模型这类真正的失效状态才拒绝。
+        if(frame.pixels.empty() || paused || !error.empty() || model.is_null())throw std::runtime_error("No current frame");
         if(frame.monotonic_ns==snapshot.monotonic_ns){preview_bytes=bytes;preview_frame_ns=snapshot.monotonic_ns;}
         return bytes;
     }
