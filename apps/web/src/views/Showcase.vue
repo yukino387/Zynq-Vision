@@ -1365,8 +1365,13 @@ const stat = computed(() => {
   background: var(--card);
 }
 .vid.no-ruler {
-  grid-template-columns: 652px;
-  justify-self: center;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+/* 没有刻度列时画面撑满整列，左边缘与下方卡片对齐 */
+.vid.no-ruler .sq {
+  aspect-ratio: auto;
+  min-height: 0;
 }
 .sq {
   position: relative;
