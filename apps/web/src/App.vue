@@ -22,10 +22,10 @@ import ProductWorkflow from "./components/ProductWorkflow.vue";
 import Icon from "./components/Icon.vue";
 import { UiSelect, UiBadge, UiButton, UiThemeToggle } from "./components/ui";
 const navIcons: Record<string, string> = {
-  showcase: "scan",
+  showcase: "monitor",
   overview: "dashboard",
   plans: "clipboard",
-  production: "scan",
+  production: "chart",
   workbench: "camera",
   records: "audit",
   data: "database",

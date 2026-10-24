@@ -9,6 +9,7 @@ import "@vision/design-tokens/tokens.css";
 import "./style.css";
 import "./workspace.css";
 import "./instrument.css";
+import "./demo.css";
 
 const pinia = createPinia();
 const router = createRouter({

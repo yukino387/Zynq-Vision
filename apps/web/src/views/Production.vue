@@ -44,6 +44,9 @@ watch(
     tab.value = value === "stats" ? "stats" : "batches";
   },
 );
+/** 批次名带的 ISO 时间戳对观众没有意义。 */
+const batchTitle = (name: string) =>
+  name.replace(/\s*·\s*\d{4}-\d\d-\d\dT[\d:.]+Z$/, "");
 const batches = ref<InspectionBatch[]>([]),
   selected = ref(""),
   summary = ref<BatchSummary | null>(null),
@@ -86,6 +89,7 @@ async function loadBatches() {
     if (requested) selected.value = requested.id;
     if (!batches.value.some((b) => b.id === selected.value))
       selected.value =
+        batches.value.find((b) => (b._count?.inspections ?? 0) > 0)?.id ??
         batches.value.find((b) => b.status === "OPEN")?.id ??
         batches.value[0]?.id ??
         "";
@@ -187,7 +191,7 @@ watch(
       <UiSelect v-model="selected" aria-label="生产批次" size="md">
         <option value="">请选择批次</option>
         <option v-for="b in batches" :key="b.id" :value="b.id">
-          {{ b.name }} · {{ b.status === "OPEN" ? "进行中" : "已结束" }} ·
+          {{ batchTitle(b.name) }} · {{ b.status === "OPEN" ? "进行中" : "已结束" }} ·
           {{ b._count?.inspections ?? 0 }} 件
         </option>
       </UiSelect>
@@ -214,7 +218,7 @@ watch(
     <UiCard v-if="batch" variant="accent" padding="md" class="batch-info-card">
       <div class="batch-info-header">
         <div class="batch-title-row">
-          <h3>当前批次：{{ batch.name }}</h3>
+          <h3>当前批次：{{ batchTitle(batch.name) }}</h3>
 
           <UiBadge
             :tone="batch.status === 'OPEN' ? 'success' : 'neutral'"

@@ -1,0 +1,350 @@
+/* 演示层：统一到演示大屏的绿色体系，并收敛后台页的视觉噪声。最后加载，覆盖前面的样式。 */
+:root {
+  --paper: #f3f4f0;
+  --surface: #fdfdfb;
+  --forest: #1f7a4d;
+  --forest-hover: #186340;
+  --forest-ink: #fff;
+  --green: #1f7a4d;
+  --ok-bg: #dff0e5;
+  --radius: 10px;
+  --card-radius: 16px;
+  --card-shadow:
+    0 1px 2px rgba(20, 30, 22, 0.04), 0 12px 32px -18px rgba(20, 30, 22, 0.28);
+  --stage: #151917;
+  --stage-2: #1d221f;
+  --stage-line: #2f3631;
+  --stage-ink: #eef0e8;
+  --stage-green: #4fd08e;
+}
+:root[data-theme="dark"] {
+  --forest: #4fc088;
+  --forest-hover: #6bd09c;
+  --forest-ink: #0f1a13;
+  --green: #66cf9a;
+  --ok-bg: #1f3a2b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --forest: #4fc088;
+    --forest-hover: #6bd09c;
+    --forest-ink: #0f1a13;
+    --green: #66cf9a;
+    --ok-bg: #1f3a2b;
+  }
+}
+
+/* ── 外壳 ── */
+.sidebar {
+  background: linear-gradient(180deg, #151917 0%, #101311 100%);
+}
+.sidebar .menu-search-wrap,
+.topbar .ui-theme-toggle {
+  display: none;
+}
+.sidebar nav a.leaf.selected,
+.sidebar nav a.sub.selected,
+.sidebar .nav-parent.current {
+  background: color-mix(in srgb, var(--stage-green) 16%, transparent);
+  color: #fff;
+  box-shadow: inset 3px 0 0 var(--stage-green);
+}
+.sidebar nav .selected .icon,
+.sidebar .nav-parent.current .icon {
+  color: var(--stage-green);
+}
+.topbar {
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom-color: transparent;
+}
+main {
+  background:
+    radial-gradient(
+      900px 360px at 85% -80px,
+      color-mix(in srgb, var(--forest) 9%, transparent),
+      transparent 70%
+    ),
+    var(--paper);
+}
+
+/* ── 页面标题 ── */
+.page-heading {
+  margin-bottom: 26px;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.page-heading h1 {
+  font-size: 32px;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+.page-heading p {
+  font-size: 14px;
+  margin-top: 6px;
+}
+hr,
+.page-heading + hr {
+  display: none;
+}
+
+/* ── 卡片 / 面板 ── */
+.ui-card,
+.panel,
+.batch-list,
+.workbench-toolbar,
+.product-workflow {
+  border-color: transparent;
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
+}
+.ui-card,
+.panel {
+  background: var(--surface);
+}
+.ui-stat {
+  border-color: transparent;
+  border-radius: 14px;
+  box-shadow: var(--card-shadow);
+  background: var(--surface);
+}
+
+/* ── 表格 ── */
+table th {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+}
+table td {
+  border-color: color-mix(in srgb, var(--line) 60%, transparent);
+}
+table tbody tr:hover td {
+  background: color-mix(in srgb, var(--forest) 5%, transparent);
+}
+
+/* ── 按钮：一屏只让主操作最醒目 ── */
+button.primary,
+.ui-button.variant-primary {
+  border-radius: 999px;
+  padding-inline: 20px;
+  box-shadow: 0 6px 16px -8px color-mix(in srgb, var(--forest) 80%, #000);
+}
+button.danger,
+.sample-card button.danger {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  box-shadow: none;
+}
+button.danger:hover {
+  color: var(--red);
+  background: var(--crit-bg);
+}
+
+/* ── 流程条：只在需要时占位，不当页首大块 ── */
+.product-workflow {
+  margin-bottom: 18px;
+  padding: 10px 16px;
+  min-height: 0;
+}
+
+/* ── 概览 ── */
+main .page-content .current-device {
+  background: linear-gradient(135deg, var(--stage) 0%, #1f2a23 100%);
+  color: var(--stage-ink);
+  border-radius: 20px;
+  padding: 34px 40px;
+  position: relative;
+  overflow: hidden;
+}
+main .page-content .current-device::after {
+  content: "";
+  position: absolute;
+  right: -60px;
+  top: -80px;
+  width: 360px;
+  height: 360px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(79, 208, 142, 0.32),
+    transparent 68%
+  );
+  pointer-events: none;
+}
+main .page-content .current-device h2 {
+  font-size: 40px;
+  letter-spacing: -0.03em;
+  color: #fff;
+  margin: 18px 0 10px;
+}
+main .page-content .current-device .muted,
+main .page-content .current-device p {
+  color: #b9c2b5;
+}
+main .page-content .current-device .ui-button {
+  position: relative;
+  z-index: 1;
+  background: var(--stage-green);
+  border-color: var(--stage-green);
+  color: #0d1a12;
+  font-size: 15px;
+  min-height: 48px;
+  padding-inline: 28px;
+}
+.batch-row {
+  padding: 20px 24px;
+}
+.batch-row b {
+  font-size: 15px;
+}
+.batch-state {
+  font-size: 12px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+}
+.batch-state.open {
+  background: var(--ok-bg);
+  color: var(--green);
+}
+
+/* ── 现场工作台：结果优先，维护信息退场 ── */
+main[data-page="workbench"] .runtime-card,
+main[data-page="workbench"] .task-requirements,
+main[data-page="workbench"] .model-readout,
+main[data-page="workbench"] .telemetry-trend,
+main[data-page="workbench"] .field-technical,
+main[data-page="workbench"] .side-card:not(.level-reading) .note,
+main[data-page="workbench"] section[aria-label="当前检测步骤"] {
+  display: none;
+}
+main[data-page="workbench"] .workbench-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 520px);
+  gap: 20px;
+}
+main[data-page="workbench"] .workbench-stage .vision-canvas {
+  background: var(--stage);
+  border: 0;
+  border-radius: 20px;
+  box-shadow: var(--card-shadow);
+}
+main[data-page="workbench"] .workbench-side {
+  background: transparent;
+  border: 0;
+  display: grid;
+  gap: 16px;
+  overflow: visible;
+}
+main[data-page="workbench"] .workbench-side > * {
+  border: 0;
+  border-radius: 20px;
+  box-shadow: var(--card-shadow);
+}
+main[data-page="workbench"] .level-reading,
+main[data-page="workbench"] .live-verdict {
+  padding: 26px 30px;
+  background: var(--stage);
+  color: var(--stage-ink);
+  border-left: 0;
+  position: relative;
+}
+main[data-page="workbench"] .level-reading .side-card-title,
+main[data-page="workbench"] .level-guide,
+main[data-page="workbench"] .level-reading small,
+main[data-page="workbench"] .level-reading p,
+main[data-page="workbench"] .live-verdict .verdict-caption,
+main[data-page="workbench"] .live-verdict span {
+  color: #9aa597;
+}
+main[data-page="workbench"] .level-status,
+main[data-page="workbench"] .live-verdict strong {
+  display: block;
+  font-size: 34px;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: #fff;
+}
+main[data-page="workbench"] .level-reading.is-pass .level-status,
+main[data-page="workbench"] .verdict-pass strong {
+  color: var(--stage-green);
+}
+main[data-page="workbench"] .level-reading.is-fail .level-status,
+main[data-page="workbench"] .verdict-fail strong {
+  color: #ff8b73;
+}
+main[data-page="workbench"] .verdict-review strong {
+  color: #f0c869;
+}
+main[data-page="workbench"] .level-value b {
+  font-size: 64px;
+  color: #fff;
+}
+main[data-page="workbench"] .level-value span {
+  color: #9aa597;
+}
+main[data-page="workbench"] .workbench-toolbar {
+  background: var(--surface);
+  padding: 14px 20px;
+}
+.recent-inspections-card {
+  margin-top: 20px;
+}
+
+/* ── 标注 / 样本库：缩略图更大气，删除退到次要 ── */
+.sample-card button.danger,
+.sample-card .danger {
+  min-height: 30px;
+  font-size: 12px;
+}
+
+/* ── 修正 ── */
+.page-heading::after {
+  display: none;
+}
+.brand-mark {
+  color: var(--stage-green);
+  border-color: color-mix(in srgb, var(--stage-green) 40%, transparent);
+  background: color-mix(in srgb, var(--stage-green) 12%, #151917);
+}
+main .page-content .current-device {
+  display: block;
+}
+main .page-content .current-device .ui-card-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 32px;
+  width: 100%;
+  padding: 0;
+}
+main[data-page="workbench"] .workbench-grid {
+  grid-template-columns: minmax(0, 640px) minmax(0, 1fr);
+}
+main[data-page="workbench"] details.section-space,
+main[data-page="workbench"] .side-card .task-instructions {
+  display: none;
+}
+main[data-page="workbench"] .product-info-badge {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex: 1;
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+main[data-page="workbench"] .product-info-badge .product-name {
+  font-size: 20px;
+  letter-spacing: -0.02em;
+}
+main[data-page="models"] tbody td:first-child {
+  border-left: 0 !important;
+}
+main[data-page="models"] .product-workflow {
+  display: none;
+}

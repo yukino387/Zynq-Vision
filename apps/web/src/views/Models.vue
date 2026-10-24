@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import InfoFields from "../components/InfoFields.vue";
 import { chinese, displayName } from "@vision/shared";
-import { ref, computed, watch } from "vue";
+import { ref, computed, watch, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import type { InspectionPlan } from "@vision/contracts";
 import type { Named, Dataset, Model } from "../types";
@@ -64,6 +64,19 @@ const endpoint = computed(
   ),
   list = useList<Named>(endpoint);
 list.realOnly.value = "true";
+// 模型仓库默认只展示已批准版本；切换子页时恢复全部状态。
+list.status.value = tab.value === "registry" ? "APPROVED" : "";
+watch(
+  tab,
+  (t) => {
+    list.status.value = t === "registry" ? "APPROVED" : "";
+    list.filter();
+  },
+  { flush: "post" },
+);
+onMounted(() => {
+  if (list.status.value) list.filter();
+});
 const form = ref(false),
   detail = ref<Named | null>(null),
   datasets = ref<Dataset[]>([]),
@@ -798,7 +811,7 @@ watch(
                     :fields="['mAP50', 'precision', 'recall']"
                   />
                 </div>
-                <span v-else class="muted">未评估</span>
+                <span v-else class="muted">—</span>
               </td>
               <td v-else>
                 <span class="mono">{{

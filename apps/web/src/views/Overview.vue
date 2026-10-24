@@ -29,6 +29,9 @@ const batchLink = computed(() => ({
   name: "production",
   query: { run: state.value?.productionRunId || undefined },
 }));
+/** 批次名带的 ISO 时间戳对观众没有意义，时间已在副标题里。 */
+const batchTitle = (name: string) =>
+  name.replace(/\s*·\s*\d{4}-\d\d-\d\dT[\d:.]+Z$/, "");
 async function load() {
   const id = device.value?.id;
   batches.value = [];
@@ -39,7 +42,7 @@ async function load() {
     const result = await api<Page<InspectionBatch>>(
       `/batches?deviceId=${encodeURIComponent(id)}&pageSize=5&sort=createdAt&order=desc`,
     );
-    if (device.value?.id === id) batches.value = result.items;
+    if (device.value?.id === id) batches.value = result.items.slice(0, 4);
   } catch (e) {
     error.value = errorText(e);
   } finally {
@@ -164,12 +167,14 @@ watch(() => state.value?.productionRunId, load);
           }"
         >
           <div>
-            <b>{{ batch.name }}</b
+            <b>{{ batchTitle(batch.name) }}</b
             ><small>{{
               new Date(batch.createdAt).toLocaleString("zh-CN")
             }}</small>
           </div>
-          <span>{{ batch.status === "OPEN" ? "进行中" : "已结束" }}</span>
+          <span class="batch-state" :class="{ open: batch.status === 'OPEN' }">{{
+            batch.status === "OPEN" ? "进行中" : "已结束"
+          }}</span>
           <span>查看结果 →</span>
         </RouterLink>
       </div>
