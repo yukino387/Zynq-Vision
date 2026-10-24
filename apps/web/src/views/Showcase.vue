@@ -64,6 +64,10 @@ const product = computed(
     "尚未配置产品",
 );
 const level = computed(() => preview.value?.level);
+/** 只有液位模型才有液位尺；瓶盖计数等产品不显示。 */
+const liquidModel = computed(() =>
+  (state.value?.model?.classes ?? []).includes("level_deviation"),
+);
 const timing = computed(() =>
   online.value && state.value?.fresh ? state.value.timing : null,
 );
@@ -649,7 +653,7 @@ const stat = computed(() => {
 
       <main v-if="view === 'live'" class="main">
         <div class="lcol">
-          <div class="vid">
+          <div class="vid" :class="{ 'no-ruler': !liquidModel }">
             <div class="sq">
               <template v-if="preview">
                 <img
@@ -731,7 +735,7 @@ const stat = computed(() => {
                 </div>
               </Transition>
             </div>
-            <div class="ruler">
+            <div v-if="liquidModel" class="ruler">
               <template v-if="level">
                 <template v-for="n in 12" :key="n">
                   <i class="tk" :style="{ top: `${((n - 1) * 20 / 223) * 100}%` }"></i>
@@ -1360,6 +1364,10 @@ const stat = computed(() => {
   grid-template-columns: 652px 64px;
   background: var(--card);
 }
+.vid.no-ruler {
+  grid-template-columns: 652px;
+  justify-self: center;
+}
 .sq {
   position: relative;
   aspect-ratio: 1;
@@ -1767,11 +1775,15 @@ svg.ch text.val.bad {
   white-space: nowrap;
 }
 .trio {
-  display: flex;
-  gap: 22px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 18px;
   margin-top: 12px;
   border-top: 1px solid var(--line);
   padding-top: 10px;
+}
+.trio .big2 {
+  font-size: 28px;
 }
 .big2 {
   font: 800 34px/1 var(--mono);
