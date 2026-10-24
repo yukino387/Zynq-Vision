@@ -52,6 +52,8 @@ compile_commands.json
 # Local documentation is kept outside version control
 *.md
 !/AGENTS.md
+!/docs/**
+!/skill/**
 *.rst
 *.adoc
 *.pdf
@@ -87,18 +89,6 @@ node_modules/
 .env.*
 !.env.example
 !/pnpm-lock.yaml
-!/docs/architecture.md
-!/docs/device-protocol.md
-!/docs/database.md
-!/docs/api.md
-!/docs/design-system.md
-!/docs/web-screens.md
-!/docs/websocket.md
-!/docs/offline-sync.md
-!/docs/deployment.md
-!/docs/development.md
-!/docs/hardware-integration.md
-!/docs/design-system.md
 
 /temporary/iot_platform_test/run-*/
 /temporary/iot_platform_test/*.db*
