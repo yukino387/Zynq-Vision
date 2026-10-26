@@ -1,5 +1,7 @@
 # 硬件接入与差异
 
+本页保留裸机 UDP 接入记录。Linux 终端的 HLS 装载重叠优化、实测性能及验证边界见 [CNN 加速器性能记录](cnn-accelerator-performance.md)。
+
 不改 `hardware/`、`camera/` 或 `vitis_live/`。适配位置 `apps/server/src/devices/zynq.ts`、`packages/device-protocol/`。业务服务不接触 UDP socket。
 
 主机配置 169.254.140.109，当前板端配置 169.254.140.110:5001；以 .env 和实际网卡为准。Zynq 注册项是配置端点，不冒充固件报告的唯一身份。固件目前没有版本发现字段。
