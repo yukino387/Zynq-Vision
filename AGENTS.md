@@ -4,7 +4,8 @@
 - 实际开发仓库：`C:/00_workplace/fpga/cnn_accelerator`。不要修改同级作者参考工程。
 - 首先查看 `git status --short`、`git log -5 --oneline`，再按当前任务读取相关代码；不要全量读取历史、日志和报告。
 - 本文件记录长期约定；性能、板卡连接和程序运行状态必须重新确认，不能沿用旧结论。
-- 最新已知进度（2026-10-23）：液位判定已升到 LEVEL-ROW-v1.3：合格带 85.0~102.9、无液面显式判过低、权重 sha `3aca8253`（包头版本字符串仍是 `LEVEL-BAND-v1`，engine 按包头校验）；板端 engine/panel 已更新并切换到液位模型/产品，生产处于停止。平台数据库尚未导入 v1.3 模型记录，跑生产记录前需先在平台导入并重新分配。瓶盖便携训练包已核对，回退底座 `2658b41a` 与上板 CAPS-RGB-v1 一致。
+- 最新已知进度（2026-10-26）：48×8 INT8 行读取/解包重叠新版已更新正式 HLS、Linux bitstream、交付 BOOT，并写入 QSPI 与 SD BOOT；QSPI 普通/四线读回及软件复位启动验证通过，断电冷启动尚未验证。固定输入卷积约 56.916→54.247 ms（降低 4.689%），启动后复测 54.242 ms，INT8 一致；实现 Slice 99.97%、WNS +0.045 ns。当前板端为 CAPS-RGB-v1-20261022（权重 `2658b41a`）、瓶盖计数产品，生产停止，governor 恢复 ondemand。详见 `docs/cnn-accelerator-performance.md`。部署期间 SLCR 锁定引发 SD I/O 异常，已备份、离线修复并复测文件系统/模型/配置/计数；备份保存在 `temporary/load_overlap_deploy_20261026/`。
+- 进度（2026-10-23）：液位判定已升到 LEVEL-ROW-v1.3：合格带 85.0~102.9、无液面显式判过低、权重 sha `3aca8253`（包头版本字符串仍是 `LEVEL-BAND-v1`，engine 按包头校验）；当时板端 engine/panel 已更新并切换到液位模型/产品，生产处于停止。平台数据库尚未导入 v1.3 模型记录，跑生产记录前需先在平台导入并重新分配。瓶盖便携训练包已核对，回退底座 `2658b41a` 与 CAPS-RGB-v1 一致。
 - 进度（2026-10-20）：工作区（未提交）已实现 Linux 终端单一运行时：模型、产品、批次分离，平台与板端面板双向启停/检查，预览统一为 `device.preview.frame`，批次随生产开始/停止自动创建/关闭。板端已部署到 SD 根文件系统并通过断电重启验证：engine/panel/manager、16bpp `vision_fb.ko`、rcS/inittab 均持久化，重启后自动加载模型/产品。长期稳定性、真实产线精度和 30 FPS 预览未验证；以最新实测为准。
 
 ## 修改原则
@@ -28,7 +29,7 @@
 - AMD 工具安装在 `C:/AMDDesignTools/2026.1`；PowerShell 环境入口为 `hardware/camera/vivado_env.ps1`。
 - 正式 ELF：`vitis_live/camera_live/build/camera_live.elf`；正式 bitstream：`hardware/camera/build/system_wrapper.bit`。
 - 正式加载入口：`vitis_live/run_live.tcl`，通过 AMD XSDB 执行。它会复位 PS、初始化 DDR、下载 bitstream/ELF 并运行；不要与 Vitis Run/Debug 并发操作板卡。
-- 当前加载入口为 JTAG 加载；不能据此宣称已更新 SD/QSPI 启动镜像或上电自动运行。
+- 上述入口为裸机 JTAG 加载；当前 Linux 终端从 QSPI 启动 FSBL/FPGA/U-Boot，SD 提供内核和根文件系统。Linux 正式 bitstream 为 `hardware/camera/build/terminal/system_wrapper.bit`，启动交付镜像为 `camera/terminal/build/delivery/boot/BOOT.bin`；JTAG 临时加载不能作为持久启动证据。
 - 软件改动优先复用平台构建应用；只有硬件改动需要时才重新执行 HLS/Vivado。综合及布局布线允许最多 16 线程，避免并发重型构建。
 - 长构建复用已有会话和完成标记，不重复启动或频繁轮询完整日志；异常时再读取相关尾部和报告。
 - JTAG 连接异常先检查目标和已有进程；确需断电时再请用户操作，不反复要求重启。

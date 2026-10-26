@@ -56,4 +56,16 @@ Linux 6.6.159；CPU1 推理；测量期间 governor=performance，面板进程�
 3. 跨输出块的偏置初始化、计算、量化/写回仍串行。增加输出双缓冲前必须重新核算 BRAM、Slice 和时序，当前仅余 4 个 Slice。
 4. 使用临时周期计数或 AXI 观测分别记录输入装载、权重装载、计算活动、暴露等待和写回，再选择下一项改动。保持 48×8 阵列，避免凭理论差值扩大并行度。
 
-部署必须区别 JTAG 临时加载与持久启动：当前板卡为 QSPI FSBL/FPGA/U-Boot，Linux 内核和根文件系统在 SD。只有 QSPI 读回和实际启动验证完成，才能称新版已持久启用。
+## 正式启用与持久启动验证
+
+2026-10-26 已将通过验证的 HLS 工程和 Linux bitstream 更新到正式生成路径 `hardware/hls/build/conv/`、`hardware/camera/build/terminal/`。裸机路径 `hardware/camera/build/system_wrapper.bit` 不属于本次 Linux 交付物。
+
+新版 `camera/terminal/build/delivery/boot/BOOT.bin` 的 SHA-256 为 `de5301d2429f0e566ed07ac8f1f5501ee9a307da31e717a35766191350e7fee6`。复用原 FSBL、U-Boot 和分区头，只替换 FPGA 分区；QSPI 普通及四线读回逐字节一致，SD `/boot/BOOT.bin` 同步更新并核对哈希。
+
+板卡启动模式为 QSPI（BOOT_MODE=1），Linux 内核和根文件系统位于 SD。写入后通过完整系统软件复位，从 QSPI 启动到 SD Linux，未再临时下载 bitstream。新 boot ID 为 `19406669-0a3d-4fa9-ab73-c2d195134489`；125 MHz 时钟配置、16bpp 显示、预览帧递增、模型/产品哈希、累计计数和停止生产状态均已核对。尚未进行断电冷启动或长期稳定性验证。
+
+该次启动后用同一固定输入复测，12 次普通轮询样本的卷积中位数为 **54.242113 ms**，33 条命令为 **59.313562 ms**；另 12 次插桩样本不纳入性能统计。共 26 次前向（含 2 次预热），8,085 个 INT8 输出均与归档结果相同。复测期间 governor=performance、面板暂停，结束后恢复面板、engine 和原 governor=ondemand；不能直接用该命令计时代表实时预览吞吐。
+
+部署前的临时试验脚本错误地重新锁定了 SLCR，部署中出现 SD I/O 与日志中止异常。已修正脚本、解锁 SLCR，在 RAM 救援环境备份完整 SD 两分区和业务数据后离线修复日志/空闲计数及 FAT dirty bit；复查两文件系统均通过，模型、产品、inittab 哈希和业务累计计数与部署前一致。正常启动后根文件系统写入/fsync/读回通过，未发现新的 MMC、EXT4 或日志错误，SLCR 锁状态为 0。该事件不归因于加速器性能优化。
+
+部署与恢复证据位于 `temporary/load_overlap_deploy_20261026/`：`boot_manifest.json`、`promotion.json`、`postboot_summary.json`、`download/postboot.check.json`、`download/postboot.verification.json`；`sd-backup/` 保留修复前两分区快照及业务数据，`flash-backup/` 保留覆盖范围的原 QSPI 内容，原正式生成文件位于 `before/`。SD 同时保留旧启动镜像 `/boot/BOOT.before-row-overlap-20261026.bin`。
