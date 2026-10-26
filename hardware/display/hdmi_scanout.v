@@ -1,16 +1,16 @@
 module hdmi_scanout (
     (* X_INTERFACE_INFO="xilinx.com:signal:clock:1.0 axi_clk CLK", X_INTERFACE_PARAMETER="ASSOCIATED_BUSIF s_axis, ASSOCIATED_RESET resetn, FREQ_HZ 125000000" *) input wire axi_clk,
     (* X_INTERFACE_INFO="xilinx.com:signal:reset:1.0 resetn RST", X_INTERFACE_PARAMETER="POLARITY ACTIVE_LOW" *) input wire resetn,
-    (* X_INTERFACE_INFO="xilinx.com:signal:clock:1.0 pixel_clk CLK", X_INTERFACE_PARAMETER="FREQ_HZ 74250000" *) input wire pixel_clk,
-    (* X_INTERFACE_INFO="xilinx.com:signal:clock:1.0 serial_clk CLK", X_INTERFACE_PARAMETER="FREQ_HZ 371250000" *) input wire serial_clk,input wire locked,
+    (* X_INTERFACE_INFO="xilinx.com:signal:clock:1.0 pixel_clk CLK", X_INTERFACE_PARAMETER="FREQ_HZ 30937500" *) input wire pixel_clk,
+    (* X_INTERFACE_INFO="xilinx.com:signal:clock:1.0 serial_clk CLK", X_INTERFACE_PARAMETER="FREQ_HZ 154687500" *) input wire serial_clk,input wire locked,
     (* X_INTERFACE_INFO="xilinx.com:interface:axis:1.0 s_axis TDATA" *) input wire [31:0] s_axis_tdata,
     (* X_INTERFACE_INFO="xilinx.com:interface:axis:1.0 s_axis TVALID" *) input wire s_axis_tvalid,
     (* X_INTERFACE_INFO="xilinx.com:interface:axis:1.0 s_axis TREADY" *) output wire s_axis_tready,
     (* X_INTERFACE_INFO="xilinx.com:interface:axis:1.0 s_axis TLAST" *) input wire s_axis_tlast,
     (* X_INTERFACE_INFO="xilinx.com:interface:axis:1.0 s_axis TUSER" *) input wire s_axis_tuser,
     output wire [2:0] hdmi_data_p,output wire [2:0] hdmi_data_n,
-    (* X_INTERFACE_INFO="xilinx.com:signal:clock:1.0 hdmi_clk_p CLK", X_INTERFACE_PARAMETER="FREQ_HZ 74250000" *) output wire hdmi_clk_p,
-    (* X_INTERFACE_INFO="xilinx.com:signal:clock:1.0 hdmi_clk_n CLK", X_INTERFACE_PARAMETER="FREQ_HZ 74250000" *) output wire hdmi_clk_n,
+    (* X_INTERFACE_INFO="xilinx.com:signal:clock:1.0 hdmi_clk_p CLK", X_INTERFACE_PARAMETER="FREQ_HZ 30937500" *) output wire hdmi_clk_p,
+    (* X_INTERFACE_INFO="xilinx.com:signal:clock:1.0 hdmi_clk_n CLK", X_INTERFACE_PARAMETER="FREQ_HZ 30937500" *) output wire hdmi_clk_n,
     output wire [31:0] underflows
 );
     (* ASYNC_REG="TRUE" *) reg [2:0] reset_pipe=0;

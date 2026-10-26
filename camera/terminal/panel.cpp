@@ -128,7 +128,7 @@ void inspection_worker(){
             if(data.size()>=4){uint32_t size=0;std::memcpy(&size,data.data(),4);if(size<=100000 && data.size()>=4+size)last_frame=json::parse(data.substr(4,size)).at("frameId").get<uint32_t>();}
             {std::lock_guard<std::mutex> lock(inspection_mailbox);polled_state=std::move(state);polled_frame=std::move(data);poll_error.clear();polled_at=tick();if(polled_frame.size()>=4)frame_at=polled_at;++poll_revision;}
         }catch(const std::exception& e){std::lock_guard<std::mutex> lock(inspection_mailbox);poll_error=e.what();polled_frame.clear();++poll_revision;}
-        if(tick()-poll_started<10)std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        const auto elapsed=tick()-poll_started;if(elapsed<40)std::this_thread::sleep_for(std::chrono::milliseconds(40-elapsed));
     }
 }
 void perform(Action action) {
@@ -311,6 +311,6 @@ int main(int argc,char** argv) {
     lv_group_focus_obj(production_button);
     lv_evdev_discovery_start(discover,nullptr);
     engine.set_connection_timeout(0,300000);engine.set_read_timeout(0,600000);engine.set_write_timeout(0,600000);
-    unconfirmed=!pending.empty();std::thread(inspection_worker).detach();lv_timer_create(refresh,16,nullptr);
+    unconfirmed=!pending.empty();std::thread(inspection_worker).detach();lv_timer_create(refresh,40,nullptr);
     for(;;){lv_timer_handler();std::this_thread::sleep_for(std::chrono::milliseconds(5));}
 }

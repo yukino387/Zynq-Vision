@@ -4,7 +4,7 @@ module video_timing (
     output wire frame_start, output wire line_end,
     output reg [10:0] x=0, output reg [9:0] y=0
 );
-    // CEA 720p60: 74.25 MHz, 1650 x 750 total, positive sync.
+    // Custom 720p25: 30.9375 MHz, 1650 x 750 total, positive sync.
     always @(posedge clk) begin
         if(reset) begin x<=0;y<=0;end
         else if(x==1649) begin x<=0;if(y==749)y<=0;else y<=y+1'b1;end

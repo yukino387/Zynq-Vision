@@ -6,7 +6,7 @@ set_property CONFIG.PCW_FPGA1_PERIPHERAL_FREQMHZ {100.000000} $ps
 set_property -dict [list CONFIG.PCW_USB0_PERIPHERAL_ENABLE {1} CONFIG.PCW_USB0_USB0_IO {MIO 28 .. 39}] $ps
 set_property CONFIG.NUM_MI 5 [get_bd_cells axi_smc]
 create_bd_cell -type ip -vlnv xilinx.com:ip:clk_wiz:6.0 display_clocks
-set_property -dict [list CONFIG.PRIM_IN_FREQ {100.000} CONFIG.CLKOUT1_REQUESTED_OUT_FREQ {74.250} CONFIG.CLKOUT2_USED {true} CONFIG.CLKOUT2_REQUESTED_OUT_FREQ {371.250} CONFIG.USE_RESET {false}] [get_bd_cells display_clocks]
+set_property -dict [list CONFIG.PRIM_IN_FREQ {100.000} CONFIG.CLKOUT1_REQUESTED_OUT_FREQ {30.9375} CONFIG.CLKOUT2_USED {true} CONFIG.CLKOUT2_REQUESTED_OUT_FREQ {154.6875} CONFIG.USE_RESET {false}] [get_bd_cells display_clocks]
 connect_bd_net [get_bd_pins $ps/FCLK_CLK1] [get_bd_pins display_clocks/clk_in1]
 create_bd_cell -type module -reference hdmi_scanout display_scanout
 create_bd_cell -type ip -vlnv xilinx.com:ip:axi_vdma:6.3 display_vdma
