@@ -1,0 +1,60 @@
+{
+  "rawMeasuredRows": 309,
+  "rawLayerRows": 10197,
+  "armSamples": 9,
+  "plSamples": 300,
+  "noMeasuredExclusions": true,
+  "threeInputs": 3,
+  "int8Equal": true,
+  "png": {
+    "headless_arm_pl": {
+      "pixels": [
+        5905,
+        2952
+      ],
+      "dpi": [
+        599.9988,
+        599.9988
+      ],
+      "opaque": true
+    },
+    "layer_latency": {
+      "pixels": [
+        5905,
+        2598
+      ],
+      "dpi": [
+        599.9988,
+        599.9988
+      ],
+      "opaque": true
+    },
+    "repeat_distribution": {
+      "pixels": [
+        5905,
+        2716
+      ],
+      "dpi": [
+        599.9988,
+        599.9988
+      ],
+      "opaque": true
+    },
+    "statistics_table": {
+      "pixels": [
+        7086,
+        2480
+      ],
+      "dpi": [
+        599.9988,
+        599.9988
+      ],
+      "opaque": true
+    }
+  },
+  "pdfWidthMm": 249.99999999998778,
+  "pdfFontsEmbedded": true,
+  "palette": "Graphical blue/orange contrast against white passes 3:1 screen; grayscale L* separation flagged by heuristic. Circles/diamonds, solid/dashed lines, direct labels and hatching provide redundant encodings. Normal annotations use dark text or blue. This is not an accessibility or publisher compliance certification.",
+  "rawResultSha256": "f29c2ac1a6b37c73b54941d4b05b796b84508d1f8a110fac8a07f6e9c3c0a4bc",
+  "manualVisualReview": "All four figures inspected after export; no clipped labels, legend overlap or missing glyphs observed"
+}

@@ -96,3 +96,22 @@ QSPI 普通/四线读回通过，SD BOOT 与实际面板已持久写入；软件
 固化写 SD 时再次出现 I/O 错误，当时 SLCR 锁为 0。停止写入后转入 RAM 环境，模型、产品、inittab 和面板哈希正确；离线 e2fsck/fsck.fat 均返回 0，无需修复。重新初始化控制器后完成 SD BOOT 写入及卸载/重挂载读回；持久启动后又通过 4 MiB 写入、fsync、丢弃文件缓存后读回，之后固定输入推理通过。**这些短检不证明 SD 异常已根治，根因仍未定位。** 不应将该基线称为产线长期稳定性已验证版本。
 
 最终证据位于 `temporary/hdmi25_deploy_20261026/`：`manifest.json`、`postboot_summary.json`、`download/postboot.json`、`download/postboot.verification.json`、`flash-backup/`。旧 SD BOOT 保留为 `/boot/BOOT.before-hdmi25-20261026.bin`；正式生成文件的旧版本保存在该任务 `before/`。试验过程见 `temporary/hdmi25_20261026/experiment_manifest.json`：标准消隐方案的全量路由未完成，增量实现受 BASIC 许可证限制，实际采用的是合格布线文件上的显示时钟修改。
+
+## 无显示与采集的纯推理：既有 ARM 标量基线与 PL
+
+2026-10-26 在同一固化版本上，停止 engine、panel、manager，卸载 framebuffer 驱动，确认摄像头和 HDMI DMA 运行位为 0，并将传感器置为 PWDN；不重新配置 PL、不修改正式 ARM 算法或编译参数。两端均运行同一 CAPS-RGB-v1 模型（SHA `2658b41a…`）和相同的 3×224×224 INT8 输入，CPU1、666.667 MHz、governor=performance，PL=125 MHz。
+
+| 匹配统计范围 | 既有单核 ARM 标量 INT8 | 无显示/采集 PL | 中位延时之比 |
+| --- | ---: | ---: | ---: |
+| 完整 33 算子（主结果） | 12,284.421 ms | 56.590 ms | **217.08×** |
+| 其中 21 条卷积命令 | 12,247.924 ms | 51.493 ms | **237.86×** |
+
+![无显示与采集条件下的延时和加速比](../temporary/headless_arm_pl_20261026/figures/headless_arm_pl.svg)
+
+ARM 使用既有 O3 单核标量直接卷积参考，自动向量化关闭、NEON 未启用。原 ELF 的 SHA-256 为 `089a856f804839a50dbf4e111601efb9e75bf67c77afcb61fe7611682a7c2992`，源码与构建参数保持原样。PL 在 Linux 下由 PS 调度，计时包括寄存器配置和完成轮询。两端计时均覆盖相同算子，模型装载、输入准备/复制和输出提取在计时区间之外。
+
+输入预先固定为原回放照片序列前三份（纸箱 `photo_23`、瓶盖 `photo_02`、瓶子 `photo_15`）。每输入 ARM 3 次、PL 100 次，保留全部 9/300 次测量；首输入 ARM 预热 1 次，各输入 PL 预热 3 次。先取每输入中位数，再对三个输入等权取中位数；加速比使用相同范围的中位延时相除。每个 ARM 前向（含预热）和 PL 重复均对拍，输出 8,085 字节一致。统计表给出中位数、均值、样本标准差（SD）和次数；重复分布图展示全部测量及观察范围。
+
+完整 33 算子的等效纯推理吞吐为 ARM 0.0814 次/s、PL 17.671 次/s。完整采集/预览状态另测得约 16.24 FPS。测量后已恢复原 25 Hz HDMI、所有服务和 ondemand，模型/产品/计数及正式文件哈希一致，无新增 SD I/O 错误。
+
+[完整报告、数据与绘图方法引用](../temporary/headless_arm_pl_20261026/report.md)；[逐算子图](../temporary/headless_arm_pl_20261026/figures/layer_latency.svg)、[完整统计表](../temporary/headless_arm_pl_20261026/figures/statistics_table.svg)、[重复分布图](../temporary/headless_arm_pl_20261026/figures/repeat_distribution.svg)。原始数据在 `download/fixed_results.json`，数据表为 `comparison.csv`、`descriptive_statistics.csv`、`raw_timings.csv` 和 `raw_layer_timings.csv`；预先固定条件见 `plan.json`，分析与绘图代码为 `analyze_plot.py`、`render_figures.py`。PNG/SVG/PDF 和导出来源记录均保存在该任务 `figures/`。
