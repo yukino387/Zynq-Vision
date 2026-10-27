@@ -1,0 +1,48 @@
+===== board_verify.py.serial.log
+python3 -c "import urllib.request;op=urllib.request.build_opener(urllib.requ
+est.ProxyHandler({}));exec(op.open('http://169.254.140.109:28471/board_verify.py
+',timeout=10).read())"; echo BOARD_EXPERIMENT_EXIT=$?
+EXP_STATE_TOP beltCaps,counts,diagnostics,error,frameId,fresh,inspectionRequestId,last,model,passagePhase,passageSamples,paused,pendingRequestId,pendingSync,product,production,productionRunId,runCounts,runTotal,syncError,total
+EXP_STATE_SEL {"product": {"acceptance": {"confidence": 0.7, "qualityGate": true}, "checks": [{"classId": 0, "label": "cap", "max": 6, "min": 1}], "id": "cmvjqm6960008uer8h6gaq0vq", "instructions": "\u56fa\u5b9a\u5de5\u4f4d\u3001\u4f20\u9001\u5e26\u505c\u6b62\uff0c\u5355\u5c42\u5e73\u94fa\u74f6\u76d6\uff1b\u53ea\u4fdd\u7559\u5206\u6570 \u22650.65 \u7684\u6846\uff0c\u6846\u5fc3\u8ddd\u5c0f\u4e8e 22 px\uff08224 \u53e3\u5f84\uff09\u89c6\u4e3a\u540c\u4e00\u4e2a\u76d6\u3002", "name": "\u74f6\u76d6\u8ba1\u6570", "postprocess": {"algorithm": "BOX_FILTER_V3", "containment": 0.9, "maxDetections": 20, "mergeDistance": 22.0, "minArea": 2e-05, "minScore": 0.65, "nmsIou": 0.45, "trackIou": 0.3, "trackMaxGapMs": 1000, "trackMaxMisses": 3, "trackMinHits": 2}, "product": "\u74f6\u76d6\u8ba1\u6570", "purpose": "COUNT", "region": {"height": 1, "width": 1, "x": 0, "y": 0}, "version": 2}, "model": {"classes": ["cap", "_unused_1", "_unused_2", "_unused_3", "_unused_4", "_unused_5"], "id": "cmvjqezfy0004uev41ghiccm3", "payloadSha256": "3b81eb7e922c85abc9fa05b57123236704f7437bacdc88ffbcea8329eeb107f8", "version": "CAPS-RGB-v1-20261022", "weightsSha256": "2658b41a492ab4879a36e38225d0d90d2d41636ec0422f84f78955e958cdbdaa"}, "paused": false, "production": false, "error": ""}
+EXP_STATE_DEVICE {}
+EXP_GOVERNOR ondemand cpu1=ondemand
+EXP_CPUINFO 2 
+EXP_LSMOD_VISION 1
+EXP_SLCR 0x00000000 fclk0=0x00200400
+EXP_SERVICES | | |
+EXP_MMC_ERRORS ERR:Command 'dmesg | grep -ci 'mmc0.*error'' returned non-zero exit status 1. sd_errors_total=ERR:Command 'dmesg | grep -ci 'I/O error'' returned non-zero exit status 1.
+EXP_TMPFS tmpfs                   494.8M      4.4M    490.4M   1% /run
+EXP_RESTORED 0 log_tail=EXP_UPLOAD_FAIL partial_run_meta.json;EXP_UPLOAD_FAIL restored.json;RESTORE_PASS;
+BOARD_EXPERIMENT_EXIT=0
+~ # [6n===== board_verify2.py.serial.log
+python3 -c "import urllib.request;op=urllib.request.build_opener(urllib.requ
+est.ProxyHandler({}));exec(op.open('http://169.254.140.109:28471/board_verify2.p
+y',timeout=10).read())"; echo BOARD_EXPERIMENT_EXIT=$?
+EXP_PIDS engine=23882 panel=23884 manager=rc!=0
+EXP_FRESH True frameId 154193 -> 154226 (advancing=True) paused=False error='' syncError=''
+EXP_LAST {}
+EXP_COUNTS {"ERROR": 0, "FAIL": 0, "PASS": 11, "REVIEW": 2}
+EXP_MMC rc!=0 | io_err=rc!=0 | last_mmc=[    1.808184] mmcblk0: mmc0:0001 SD16G 29.1 GiB
+EXP_UPTIME 46040.13 6460.34 | mode=console=ttyPS0,115200 root=/dev/mmcblk0p2 rw rootwait cma=64M
+EXP_TS 1970-01-01T12:47:20
+BOARD_EXPERIMENT_EXIT=0
+~ # [6n===== board_verify3.py.serial.log
+python3 -c "import urllib.request;op=urllib.request.build_opener(urllib.requ
+est.ProxyHandler({}));exec(op.open('http://169.254.140.109:28471/board_verify3.p
+y',timeout=10).read())"; echo BOARD_EXPERIMENT_EXIT=$?
+EXP_PS 23882 root /usr/local/bin/vision-engine /var/lib/vision|23883 root /usr/bin/python3 /usr/local/bin/vision-manager.py|23884 root /usr/local/bin/vision-panel /usr/share/vision/NotoSansCJKsc-Regular.otf|
+EXP_INITTAB 8 lines; vision_entries=[::respawn:/usr/local/bin/vision-engine /var/lib/vision;::respawn:/usr/bin/python3 /usr/local/bin/vision-manager.py;::respawn:/usr/local/bin/vision-panel /usr/share/vision/NotoSansCJKsc-Regular.otf;]
+EXP_MOUNT rc!=0 bind mounts of inittab
+EXP_SHA /boot/BOOT.bin 13ef13af6355e472bb06ddfad33eee44c532e001c09fe6d495f1ee16b7c9b3c0
+EXP_SHA /usr/local/bin/vision-panel f020b1fcec62081b5ea9e14b06bb2cc22e8bb158d60f7c15aa6ec082e3a0e02d
+EXP_SHA /usr/local/bin/vision-engine 9add33e99f587723cf0b97b6d3bf2de83d79448965731f6f1a7b55143ff115e4
+EXP_SHA /var/lib/vision/model/model.bin 2658b41a492ab4879a36e38225d0d90d2d41636ec0422f84f78955e958cdbdaa
+EXP_SHA /var/lib/vision/product.json e7607ea957f5f0d4b6451cf3cd5d288e4036ced04a4aff1375af6d9516415269
+EXP_SHA /etc/inittab f780f0a897bf05876d251af33ff5c2566e7d145ea547e7db09af06b9d1b6865f
+EXP_RUNSTATE arm-pl-stats-20261027 armpl_board.log armpl_board.pid armpl_board_run.py headless-arm-pl-20261026
+EXP_INITTAB_BAK -rw-r--r--    1 root     root           323 Jan  1 02:21 /etc/inittab|
+BOARD_EXPERIMENT_EXIT=0
+~ # [6n
+===== measured binary recovered from the board (2026-10-27)
+EXP_BOARDSHA 4818cc44376f7ea6a3e0c2ea005bdd63c6a7d6a595df3755d75b036fe9c1498f 441364
+EXP_UPLOAD_RESP OK

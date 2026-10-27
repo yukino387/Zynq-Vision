@@ -1,0 +1,36 @@
+{
+  "design": "Smoke pre-flight: one interleaved round, one input, no -O0 condition.",
+  "seed": 20261027,
+  "cpuPin": 1,
+  "budgetMs": 300000,
+  "phases": [
+    {
+      "name": "calibration",
+      "kind": "calibration",
+      "rounds": 3,
+      "n": 1024,
+      "repsScalar": 50,
+      "repsNeon": 500,
+      "inputs": []
+    },
+    {
+      "name": "main",
+      "permuteInputs": false,
+      "inputs": [
+        "photo_23"
+      ],
+      "armConditions": [
+        "arm_novec",
+        "arm_vec"
+      ],
+      "rounds": 1,
+      "plPerRound": 2,
+      "warmup": {
+        "pl": 1,
+        "arm_novec": 1,
+        "arm_vec": 0,
+        "arm_o0": 0
+      }
+    }
+  ]
+}

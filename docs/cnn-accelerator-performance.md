@@ -115,3 +115,31 @@ ARM 使用既有 O3 单核标量直接卷积参考，自动向量化关闭、NEO
 完整 33 算子的等效纯推理吞吐为 ARM 0.0814 次/s、PL 17.671 次/s。完整采集/预览状态另测得约 16.24 FPS。测量后已恢复原 25 Hz HDMI、所有服务和 ondemand，模型/产品/计数及正式文件哈希一致，无新增 SD I/O 错误。
 
 [完整报告、数据与绘图方法引用](../temporary/headless_arm_pl_20261026/report.md)；[逐算子图](../temporary/headless_arm_pl_20261026/figures/layer_latency.svg)、[完整统计表](../temporary/headless_arm_pl_20261026/figures/statistics_table.svg)、[重复分布图](../temporary/headless_arm_pl_20261026/figures/repeat_distribution.svg)。原始数据在 `download/fixed_results.json`，数据表为 `comparison.csv`、`descriptive_statistics.csv`、`raw_timings.csv` 和 `raw_layer_timings.csv`；预先固定条件见 `plan.json`，分析与绘图代码为 `analyze_plot.py`、`render_figures.py`。PNG/SVG/PDF 和导出来源记录均保存在该任务 `figures/`。
+
+## 统计口径的 ARM 与 PL 对比：重复测量、随机交错与假设检验
+
+2026-10-27 在上一节同一固化版本、同一无头 PL 条件、同一出厂标量 ARM 参考上，重做了一次可作统计推断的对比。与上一节的区别是：不再只报中位数，而是 3 张输入 × 12 轮随机交错、每轮 17 次 PL 重复，共 714 次测量（ARM 42、PL 660），逐次对拍 8,085 字节 INT8 输出，无剔除、无截断。
+
+| 口径 | ARM | PL | 中位延时之比 |
+| --- | ---: | ---: | ---: |
+| 完整 33 算子（标题，n=36 / 612） | 12,013.94 ms | 56.5905 ms | **212.30×**（BCa 95% CI 212.14–212.43） |
+| 仅 21 条卷积 | 11,976.49 ms | 51.4935 ms | **232.58×** |
+| 最不利单点配对 | 12,000.05 ms | 56.918 ms | 210.8× |
+| `-O0` 构建（敏感性） | 47,195.38 ms | 56.5903 ms | 834.0× |
+| `-O3` 自动向量化（敏感性） | 12,105.35 ms | 56.5903 ms | 213.9× |
+| NEON 微内核天花板下的 ARM 界 | 1,262.58 ms | 51.49 ms | 24.52× |
+
+统计检验：Mann–Whitney `p = 6.0e-24`，Welch（log10）`p = 1.8e-132`，Yuen 20% 截尾均值差 11,954.68 ms（`p = 3.3e-23`），置换检验 5.0e-5（分辨率下限），Cliff's δ = 1.00（两组分布零重叠）。Type II 双因素方差分解给出 η²_条件 = 0.9999998、η²_输入 = 8.5e-11（`p = 0.88`），当前样本量下的最小可检测比值为 1.00086。
+
+三项对报告口径有影响的发现：
+
+- GCC 13.4 在 `-O3 -mcpu=cortex-a9 -mfpu=neon` 下**没有**为这段标量卷积生成任何 NEON（三个 ARM 构建的 `conv_layer` 均为 0 条向量指令）。因此自动向量化构建只比禁向量化构建慢 0.785%，标题的 212× 不是"关掉向量化"造成的假象。
+- 手写 NEON 微内核实测 1.17 MAC/cycle（标量微内核 0.248 的 4.71 倍），即 ARM 网络达到其标量天花板的 49.7%；而 PL 达到 384 MAC/cycle 峰值的 39.8%（152.99 MAC/cycle）。把 ARM 提升到 NEON 天花板后，PL 仍快 24.5×；再考虑分块调优（2–4 倍），PL 仍有 6–12× 优势。
+- 上一节与本节的 ARM 中位数相差 −2.2%（12,284.42 → 12,013.94 ms），PL 完全相同（差 0.00%）。差异来自测试二进制的代码布局与内存分配顺序，两轮加速比（217.08× 与 212.30×）同量级。
+
+![统计对比主图](../temporary/arm_pl_stats_20261027/figures/fig1_overview.svg)
+
+测量后已恢复显示、采集、三个服务、inittab、governor 与全部持久文件哈希，`dmesg` 无新增 `mmc0`/I/O 错误，生产仍处停止。单板、3 张回放照片、1 个模型，结论不外推到其他板卡或其他网络；未做能耗测量与精度评估。
+
+[完整统计报告](../temporary/arm_pl_stats_20261027/report.md)、[逐算子图](../temporary/arm_pl_stats_20261027/figures/fig3_operators.svg)、[规模律](../temporary/arm_pl_stats_20261027/figures/fig4_scaling.svg)、[稳定性与方差分解](../temporary/arm_pl_stats_20261027/figures/fig5_stability.svg)、[编译敏感性](../temporary/arm_pl_stats_20261027/figures/fig6_sensitivity.svg)、[Roofline](../temporary/arm_pl_stats_20261027/figures/fig7_roofline.svg)、[统计表](../temporary/arm_pl_stats_20261027/figures/table1_statistics.svg)。原始数据 `download/raw_trials.csv`、`download/raw_layers.csv`、`download/raw_calibration.csv`；检验结果 `analysis/tests.json`；预先固定条件 `plan.json`、`schedule.json`；分析与绘图 `analyze.py`、`figures.py`；恢复核对 `download/restored_verify.txt`。
+

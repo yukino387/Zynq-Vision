@@ -1,0 +1,16 @@
+{
+  "mode": "full",
+  "cpuCurrentKHz": "666667",
+  "governor": "performance",
+  "captureDmaControl": 65538,
+  "displayDmaControl": 65538,
+  "gpioControl": 15,
+  "fclk0": 2098176,
+  "framebufferDriverLoaded": false,
+  "runtimeServicePids": [],
+  "benchmarkSha256": "4818cc44376f7ea6a3e0c2ea005bdd63c6a7d6a595df3755d75b036fe9c1498f",
+  "modelSha256": "2658b41a492ab4879a36e38225d0d90d2d41636ec0422f84f78955e958cdbdaa",
+  "thermalZone": "",
+  "kernel": "6.6.159-vision-terminal",
+  "scope": "33 operators; PL includes PS register programming and completion polling; both paths exclude model load, input preparation and output extraction"
+}
