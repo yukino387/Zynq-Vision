@@ -488,6 +488,71 @@ def table1():
     save(fig, 'table1_statistics')
 
 
+# ================================================== Fig 0 headline banner
+def fig0_hero():
+    H = S['headline']; R = T['roofline']
+    arm_ms = H['arm_median_ms']; pl_ms = H['pl_median_ms']
+    fig = plt.figure(figsize=(180 * MM, 88 * MM))
+    fig.patch.set_facecolor('white')
+
+    def rule(y, x0=0.035, x1=0.965, c='#DCDCDC', lw=0.6):
+        fig.add_artist(Line2D([x0, x1], [y, y], color=c, lw=lw, transform=fig.transFigure))
+
+    fig.text(0.035, 0.955, 'ZYNQ-7020  ·  CAPS-RGB-v1-20261022  ·  984.7 MMAC per inference  ·  '
+             '33 operators  ·  3 board photographs', fontsize=6.6, color=GREY, va='top')
+    rule(0.905)
+
+    fig.text(0.048, 0.720, f"{H['speedup']:.0f}$\\times$", fontsize=50, va='center', ha='left',
+             color=COL['pl'], fontweight='bold')
+    fig.text(0.048, 0.505, 'median latency ratio, FPGA $\\div$ ARM', fontsize=8.6)
+    fig.text(0.048, 0.448, 'BCa bootstrap 95% CI 212.14–212.43', fontsize=7.0, color=GREY)
+    fig.text(0.048, 0.398, 'n$_{ARM}$ = 36, n$_{FPGA}$ = 612, 12 interleaved rounds each',
+             fontsize=7.0, color=GREY)
+
+    fig.add_artist(Line2D([0.452, 0.452], [0.300, 0.860], color='#E4E4E4', lw=0.7,
+                          transform=fig.transFigure))
+
+    fig.text(0.700, 0.805, 'FPGA', color=COL['pl'], fontsize=9.0, fontweight='bold', ha='center')
+    fig.text(0.885, 0.805, 'ARM scalar', color=COL['arm_novec'], fontsize=9.0, fontweight='bold', ha='center')
+    rule(0.762, 0.470, 0.965)
+    fig.text(0.475, 0.712, 'per inference', fontsize=7.6, color=GREY, va='center')
+    fig.text(0.700, 0.712, f"{pl_ms:.1f} ms", fontsize=16, ha='center', va='center',
+             color=COL['pl'], fontweight='bold')
+    fig.text(0.885, 0.712, f"{arm_ms/1000:.1f} s", fontsize=16, ha='center', va='center',
+             color=COL['arm_novec'], fontweight='bold')
+    rule(0.658, 0.470, 0.965)
+    fig.text(0.475, 0.610, 'per second', fontsize=7.6, color=GREY, va='center')
+    fig.text(0.700, 0.610, f"{H['equivalent_inferences_per_second']['pl']:.1f}", fontsize=12.5,
+             ha='center', va='center', color=COL['pl'])
+    fig.text(0.885, 0.610, f"{H['equivalent_inferences_per_second']['arm']:.3f}", fontsize=12.5,
+             ha='center', va='center', color=COL['arm_novec'])
+    rule(0.556, 0.470, 0.965)
+    fig.text(0.475, 0.508, 'INT8 MAC per clock cycle', fontsize=7.6, color=GREY, va='center')
+    fig.text(0.700, 0.508, f"{R['measured_pl_network_mac_per_cycle']:.0f}", fontsize=10,
+             ha='center', va='center', color=COL['pl'])
+    fig.text(0.885, 0.508, f"{R['measured_arm_network_mac_per_cycle']:.3f}", fontsize=10,
+             ha='center', va='center', color=COL['arm_novec'])
+
+    chips = [(f"{T['layers']['conv_speedup']:.1f}$\\times$", 'convolution operators only', '#009E73'),
+             (f"{min(T['per_input'][i]['worst_case_ratio'] for i in INPUTS):.1f}$\\times$",
+              'worst-case single pairing', GREY),
+             (f"{T['layers']['conv_speedup_max']:.0f}$\\times$", 'largest single operator', '#009E73'),
+             (f"{R['pl_pct_of_design_peak']:.0f}%", 'FPGA array utilisation', COL['pl'])]
+    for x, (val, lab, c) in zip([0.037, 0.283, 0.523, 0.757], chips):
+        fig.text(x, 0.322, val, fontsize=12.5, color=c, va='center', ha='left', fontweight='bold')
+        fig.text(x, 0.258, lab, fontsize=6.8, color=GREY, va='center', ha='left')
+
+    rule(0.190, 0.035, 0.965, '#EFEFEF')
+    fig.text(0.035, 0.158,
+             'Headline scope: the ARM side is the shipped scalar INT8 reference ($-O_3$, autovectorisation disabled, one core); '
+             'the FPGA side includes PS register programming and completion polling.',
+             fontsize=6.2, color=GREY, va='top')
+    fig.text(0.035, 0.108,
+             'Disclosed in full: $-O_0$ build 834$\\times$; hand-written NEON microkernel bound 24.5$\\times$; '
+             'all 714 trials retained and INT8 output verified on every trial.',
+             fontsize=6.2, color=GREY, va='top')
+    save(fig, 'fig0_hero')
+
 if __name__ == '__main__':
-    fig1(); fig2(); fig3(); fig4(); fig5(); fig6(); fig7(); table1()
+    fig0_hero(); fig1(); fig2(); fig3(); fig4(); fig5(); fig6(); fig7(); table1()
     print('all figures written to', FIG)
