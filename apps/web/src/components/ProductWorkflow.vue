@@ -104,36 +104,58 @@ const steps = [
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 14px;
-  padding: 14px 18px;
-  margin: 0 0 20px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
+  gap: 8px 16px;
+  padding: 8px 0;
+  margin: 0 0 16px;
+  border: 0;
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
 }
 label,
 nav {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 label {
-  font-size: 13px;
+  margin: 0;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
 }
 .ui-select {
-  max-width: 300px;
+  max-width: 280px;
 }
 nav a {
-  font-size: 13px;
-  padding: 7px 9px;
-  text-decoration: none;
+  padding: 3px 0;
   color: var(--muted);
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  text-decoration: none;
+}
+nav a + a {
+  margin-left: 6px;
 }
 nav a[aria-current] {
   color: var(--forest);
-  background: var(--surface-2);
-  border-radius: 6px;
-  font-weight: 600;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: inset 0 -1px 0 var(--forest);
+  font-weight: 400;
+}
+details summary {
+  color: var(--muted);
+  font-size: 9px;
+  padding: 2px 0;
+}
+details nav {
+  margin-top: 6px;
+}
+details nav a {
+  padding: 2px 8px 2px 0;
 }
 </style>

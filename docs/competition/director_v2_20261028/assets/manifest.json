@@ -1,0 +1,38 @@
+[
+  {
+    "asset": "assets/cap.jpg",
+    "source": "temporary/paper_experiments_20261026/delivery/evidence/photo_008.jpg",
+    "sha256": "a5cfbb4f50c893a9930c030f42e04ad63f5fcbd278c49902b87c6c86376fbe09",
+    "role": "archived reference, not new live footage"
+  },
+  {
+    "asset": "assets/caps_failure.jpg",
+    "source": "temporary/paper_experiments_20261026/delivery/evidence/photo_015.jpg",
+    "sha256": "47c4ba235b2c676a8e593f2af49518c5abd88b64d9f93101b8c0f0851cfcadcf",
+    "role": "archived reference, not new live footage"
+  },
+  {
+    "asset": "assets/milk.jpg",
+    "source": "temporary/milk_int8_20261017/给队长_牛奶换型包_int8_20261017/牛奶_int8_w8a8/golden_patches_4/golden_photo.jpg",
+    "sha256": "630ff34f7ae613ddb5261ca5d1ec930ef8715ff772e1310894bcda70fd0c082f",
+    "role": "archived reference, not new live footage"
+  },
+  {
+    "asset": "assets/record.png",
+    "source": "temporary/video_demo_20261024/shots/detail-1.png",
+    "sha256": "34ab184a1824421bd0270860476c1d309ab0d48e4ed877ab939c647cd2f4855c",
+    "role": "archived reference, not new live footage"
+  },
+  {
+    "asset": "assets/placement.png",
+    "source": "temporary/vivado_video_materials_20261027/4K横屏/01_device_clean.png",
+    "sha256": "c1fa16f8c7da637985608e543dfba3436878b01dd088497e67df80b896a65cdd",
+    "role": "archived reference, not new live footage"
+  },
+  {
+    "asset": "assets/dsp.png",
+    "source": "temporary/vivado_video_materials_20261027/4K横屏/23_dsp_sites.png",
+    "sha256": "d2ee58e195d3cbc275963b236019d70adf7bc28b6bd5dc99bb93fe3ca637381a",
+    "role": "archived reference, not new live footage"
+  }
+]

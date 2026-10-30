@@ -1,6 +1,7 @@
 #pragma once
 #include "core.h"
 #include "hardware.h"
+#include "belt_counter.h"
 #include <array>
 #include <algorithm>
 
@@ -91,15 +92,14 @@ public:
             if(!active_)armed_=false;
         }
         last_ns_=frame.monotonic_ns;
-        unsigned primary=6;for(const auto& c:rules.checks)if(c.minimum>0)primary=std::min(primary,c.class_id);
-        bool detected=false,strong=false,complete=false;
+        const CountingRegion region(rules);
+        bool detected=false,strong=false,complete=true;
         for(const auto& box:boxes) {
-            const auto x=(box.x1+box.x2)/832.0,y=(box.y1+box.y2)/832.0;
-            if(box.class_id!=primary || box.confidence<.35 || x<rules.region[0] || x>rules.region[0]+rules.region[2] || y<rules.region[1] || y>rules.region[1]+rules.region[3])continue;
+            if(box.confidence<.35 || !region.overlaps(box))continue;
             detected=true;
+            complete&=region.complete(box);
             if(box.confidence>=rules.confidence && box.track_confirmed) {
                 strong=true;
-                if(box.x1>=rules.region[0]*416+2 && box.y1>=rules.region[1]*416+2 && box.x2<=(rules.region[0]+rules.region[2])*416-2 && box.y2<=(rules.region[1]+rules.region[3])*416-2)complete=true;
             }
         }
         if(active_ && !strong && detected) {
@@ -113,8 +113,8 @@ public:
         } else {
             empty_=0;empty_since_=0;
             if(!armed_)return false;
-            if(!strong){entering_=0;previous_=8;return false;}
-            auto observed=decision;if(!complete)observed.result=Result::Review;
+            if(!strong || !complete){entering_=0;previous_=8;return false;}
+            const auto& observed=decision;
             if(!active_) {
                 if(entering_<2){entering_frames_[entering_]=frame;entering_decisions_[entering_]=observed;++entering_;return false;}
                 active_=true;

@@ -1631,113 +1631,6 @@ main[data-page="diagnostics"] .advanced-metrics .cells strong {
 .sample-review-workspace .image-stage {
   min-height: 460px;
 }
-/* Physical front panel for authentication */
-.login-screen {
-  background: var(--paper);
-  min-height: 100vh;
-  display: grid;
-  grid-template-columns: minmax(320px, 1fr) minmax(400px, 0.8fr);
-  align-items: stretch;
-  padding: 0;
-  gap: 0;
-}
-.auth-faceplate {
-  background: var(--instrument);
-  color: #eff0e7;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 9vw 7vw;
-  position: relative;
-  border-right: 7px solid #e76536;
-}
-.auth-faceplate .workspace-index {
-  color: #adb79e;
-  font-size: 11px;
-}
-.auth-faceplate h2 {
-  font-size: clamp(40px, 5vw, 78px);
-  line-height: 1.25;
-  font-weight: 450;
-  letter-spacing: -0.06em;
-  margin: 24px 0 45px;
-}
-.auth-faceplate h2 > span {
-  color: #e76536;
-}
-.auth-instrument {
-  display: flex;
-  border-top: 1px solid #657053;
-  border-bottom: 1px solid #657053;
-  padding: 20px 0;
-  gap: 25px;
-  font-size: 11px;
-  color: #c3ceb5;
-}
-.auth-faceplate > small {
-  position: absolute;
-  bottom: 30px;
-  left: 7vw;
-  color: #aab59e;
-  font-size: 11px;
-}
-.login-screen .auth-wrap {
-  width: 100%;
-  padding: 8vw 6vw;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  max-width: 580px;
-  margin: auto;
-}
-.login-screen .auth-product {
-  text-align: left;
-  font-size: 13px;
-  margin: 0 0 28px;
-  color: var(--muted);
-}
-.login-screen .login-form {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  width: 100%;
-  border-radius: 0;
-}
-.login-form h1 {
-  font-size: 29px;
-}
-.login-form label {
-  font-size: 11px;
-  margin: 20px 0;
-  gap: 9px;
-}
-.login-form input {
-  min-height: 44px;
-  background: var(--surface);
-  font-size: 13px;
-}
-.login-form > button.primary {
-  width: 100%;
-  min-height: 45px;
-  margin-top: 8px;
-}
-.auth-caption {
-  text-align: left;
-  font-size: 12px;
-  margin: 12px 0 28px;
-}
-.login-form .server {
-  text-align: left;
-  margin-top: 30px;
-  border-top: 1px solid var(--line);
-  padding-top: 16px;
-  font-size: 10px;
-}
-.auth-switch {
-  text-align: left;
-  font-size: 11px;
-}
 .toasts {
   width: min(440px, calc(100vw - 48px));
 }
@@ -1917,9 +1810,6 @@ main[data-page="diagnostics"] .advanced-metrics .cells strong {
   }
   .sample-review-workspace {
     grid-template-columns: 1fr;
-  }
-  .auth-instrument {
-    gap: 12px;
   }
 }
 @media (max-width: 760px) {
@@ -2254,40 +2144,6 @@ main[data-page="diagnostics"] .advanced-metrics .cells strong {
   }
   .sample-review-workspace .image-stage {
     min-height: 300px;
-  }
-  .login-screen {
-    grid-template-columns: 1fr;
-  }
-  .auth-faceplate {
-    padding: 28px 25px;
-    border-right: 0;
-    border-bottom: 4px solid #e76536;
-    min-height: 230px;
-  }
-  .auth-faceplate h2 {
-    font-size: 36px;
-    margin: 12px 0 18px;
-  }
-  .auth-faceplate h2 br {
-    display: none;
-  }
-  .auth-faceplate > small {
-    display: none;
-  }
-  .auth-instrument {
-    padding: 12px 0;
-    font-size: 10px;
-    gap: 20px;
-  }
-  .login-screen .auth-wrap {
-    padding: 30px 25px 45px;
-    max-width: 480px;
-  }
-  .auth-product {
-    display: none;
-  }
-  .login-form h1 {
-    font-size: 25px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -27,13 +27,19 @@ foreach ($dependency in $dependencies) {
         if ($LASTEXITCODE) { throw "Dependency checkout failed: $($dependency.Name)" }
     }
     if ($dependency.Name -eq 'lvgl') {
-        $patch = Join-Path $PSScriptRoot 'lvgl-evdev-bounds.patch'
-        & git -C $path apply --reverse --check $patch 2>$null
-        if ($LASTEXITCODE) {
-            & git -C $path apply --check $patch
-            if ($LASTEXITCODE) { throw 'LVGL mouse patch does not match the pinned source' }
-            & git -C $path apply $patch
-            if ($LASTEXITCODE) { throw 'LVGL mouse patch failed' }
+        # The recovery patch builds on bounds; check it first on repeat runs.
+        $recovery = Join-Path $PSScriptRoot 'lvgl-evdev-recovery.patch'
+        & git -C $path apply --reverse --check $recovery 2>$null
+        if (!$LASTEXITCODE) { continue }
+        foreach ($patchName in @('lvgl-evdev-bounds.patch','lvgl-evdev-recovery.patch')) {
+            $patch = Join-Path $PSScriptRoot $patchName
+            & git -C $path apply --reverse --check $patch 2>$null
+            if ($LASTEXITCODE) {
+                & git -C $path apply --check $patch
+                if ($LASTEXITCODE) { throw 'LVGL mouse patch does not match the pinned source' }
+                & git -C $path apply $patch
+                if ($LASTEXITCODE) { throw 'LVGL mouse patch failed' }
+            }
         }
     }
 }

@@ -1,0 +1,103 @@
+--- a/src/drivers/evdev/lv_evdev.c
++++ b/src/drivers/evdev/lv_evdev.c
+@@ -86,6 +86,7 @@
+     void * cb_user_data;
+     int inotify_fd;
+     bool inotify_watch_active;
++    uint32_t last_scan;
+     lv_timer_t * timer;
+ };
+ #endif
+@@ -212,7 +213,9 @@
+     struct input_event in = { 0 };
+     ssize_t br;
+     int wheel_y = 0, wheel_x = 0;
+-    while((br = read(dsc->fd, &in, sizeof(in))) > 0) {
++    unsigned events = 0;
++    /* A continuously reporting mouse must not monopolize the UI thread. */
++    while(events++ < 256 && (br = read(dsc->fd, &in, sizeof(in))) > 0) {
+         if(in.type == EV_REL) {
+             if(in.code == REL_WHEEL) wheel_y += in.value;
+             if(in.code == REL_HWHEEL) wheel_x += in.value;
+@@ -427,6 +430,16 @@
+     char dev_path[EVDEV_DISCOVERY_PATH_BUF_SIZE];
+     lv_snprintf(dev_path, sizeof(dev_path), EVDEV_DISCOVERY_PATH "%s", file_name);
+ 
++    /* Rescans should not reopen devices already owned by LVGL. */
++    struct stat sb;
++    if(stat(dev_path, &sb) != 0) return;
++    lv_indev_t * registered = NULL;
++    while(NULL != (registered = lv_indev_get_next(registered))) {
++        if(lv_indev_get_read_cb(registered) != _evdev_read) continue;
++        lv_evdev_t * existing = lv_indev_get_driver_data(registered);
++        if(!existing->deleting && existing->st_dev == sb.st_dev && existing->st_ino == sb.st_ino) return;
++    }
++
+     lv_indev_t * indev = lv_evdev_create(LV_INDEV_TYPE_NONE, dev_path);
+     if(indev == NULL) return;
+ 
+@@ -457,23 +470,14 @@
+     }
+ }
+ 
+-static bool _evdev_discovery_inotify_try_init_watcher(int inotify_fd)
+-{
+-    int inotify_wd = inotify_add_watch(inotify_fd, EVDEV_DISCOVERY_PATH, IN_CREATE);
+-    if(inotify_wd == -1) {
+-        if(errno != ENOENT) {
+-            LV_LOG_ERROR("inotify_add_watch failed: %s", strerror(errno));
+-        }
+-        return false;
+-    }
+-
++static void _evdev_discovery_scan(void)
++{
+     DIR * dir = opendir(EVDEV_DISCOVERY_PATH);
+     if(dir == NULL) {
+         if(errno != ENOENT) {
+             LV_LOG_ERROR("opendir failed: %s", strerror(errno));
+         }
+-        inotify_rm_watch(inotify_fd, inotify_wd);
+-        return false;
++        return;
+     }
+     while(1) {
+         struct dirent * dirent = readdir(dir);
+@@ -482,12 +486,20 @@
+         if(evdev_discovery == NULL) {
+             /* was stopped by the callback. cleanup was already done */
+             closedir(dir);
+-            return false;
++            return;
+         }
+     }
+     closedir(dir);
+-
+-    return true;
++}
++
++static bool _evdev_discovery_inotify_try_init_watcher(int inotify_fd)
++{
++    if(inotify_add_watch(inotify_fd, EVDEV_DISCOVERY_PATH, IN_CREATE | IN_ATTRIB | IN_MOVED_TO) == -1) {
++        if(errno != ENOENT) LV_LOG_ERROR("inotify_add_watch failed: %s", strerror(errno));
++        return false;
++    }
++    _evdev_discovery_scan();
++    return evdev_discovery != NULL;
+ }
+ 
+ static void _evdev_discovery_timer_cb(lv_timer_t * tim)
+@@ -495,6 +507,13 @@
+     LV_UNUSED(tim);
+     lv_evdev_discovery_t * ed = evdev_discovery;
+     LV_ASSERT_NULL(ed);
++
++    /* Retry nodes that were not ready on IN_CREATE, and recover lost events. */
++    if(lv_tick_elaps(ed->last_scan) >= 1000) {
++        ed->last_scan = lv_tick_get();
++        _evdev_discovery_scan();
++        if(evdev_discovery == NULL) return;
++    }
+ 
+     if(!ed->inotify_watch_active) {
+         ed->inotify_watch_active = _evdev_discovery_inotify_try_init_watcher(ed->inotify_fd);

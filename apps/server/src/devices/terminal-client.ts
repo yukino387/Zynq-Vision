@@ -2,6 +2,33 @@ import type { Device } from "@prisma/client";
 import { config } from "../config.js";
 import { DomainError } from "../core/errors.js";
 
+function terminalHost(device: Device) {
+  const metadata = device.metadata as Record<string, unknown>;
+  return typeof metadata.terminalAddress === "string" &&
+    metadata.terminalAddress
+    ? metadata.terminalAddress
+    : config.ZYNQ_HOST;
+}
+
+export async function terminalPreviewStream(
+  device: Device,
+  signal: AbortSignal,
+) {
+  const response = await fetch(
+    `http://${terminalHost(device)}:8880/preview-stream`,
+    {
+      signal,
+    },
+  );
+  if (
+    !response.ok ||
+    !response.body ||
+    response.headers.get("content-type") !== "application/x-vision-frame-stream"
+  )
+    throw new DomainError("UNAVAILABLE", "设备预览流不可用", 503);
+  return response.body;
+}
+
 export async function terminalRequest(
   device: Device,
   path: string,
@@ -9,14 +36,9 @@ export async function terminalRequest(
   body?: unknown,
   timeout = 10000,
 ) {
-  const metadata = device.metadata as Record<string, unknown>;
-  const host =
-    typeof metadata.terminalAddress === "string" && metadata.terminalAddress
-      ? metadata.terminalAddress
-      : config.ZYNQ_HOST;
   let response: Response;
   try {
-    response = await fetch(`http://${host}:8879${path}`, {
+    response = await fetch(`http://${terminalHost(device)}:8879${path}`, {
       method: body === undefined ? "GET" : "POST",
       headers: { authorization, "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),

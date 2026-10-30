@@ -1,1 +1,0 @@
-void cache_probe() {}

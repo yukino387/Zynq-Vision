@@ -14,13 +14,12 @@ import { useAuthStore } from "./stores/auth";
 import { useDeviceStore } from "./stores/devices";
 import { useNotificationStore } from "./stores/notifications";
 import { useTaskStore } from "./stores/tasks";
-import { useAppStore, type Theme } from "./stores/app";
-import { canAccess, navItems, roleDuties } from "./navigation";
+import { canAccess, navItems } from "./navigation";
 import type { RouteRecordRaw } from "vue-router";
 import AuthPanel from "./components/AuthPanel.vue";
 import ProductWorkflow from "./components/ProductWorkflow.vue";
 import Icon from "./components/Icon.vue";
-import { UiSelect, UiBadge, UiButton, UiThemeToggle } from "./components/ui";
+import { UiBadge, UiButton, UiThemeToggle } from "./components/ui";
 const navIcons: Record<string, string> = {
   showcase: "monitor",
   overview: "dashboard",
@@ -40,11 +39,31 @@ const auth = useAuthStore(),
   devices = useDeviceStore(),
   notices = useNotificationStore(),
   tasks = useTaskStore(),
-  app = useAppStore(),
   route = useRoute();
-function onTheme(event: Event) {
-  app.setTheme((event.target as HTMLSelectElement).value as Theme);
+/** 顶栏的整点脉冲：只显示本地时间，不做联网校时。 */
+const clock = ref("--:--:--");
+let clockTimer = 0;
+function tickClock() {
+  const now = new Date(),
+    pad = (value: number) => String(value).padStart(2, "0");
+  clock.value = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 }
+/** 页面编号沿用工作流顺序，让页眉与侧栏形成同一套索引。 */
+const pageIndex: Record<string, string> = {
+  showcase: "00",
+  overview: "01",
+  plans: "02",
+  workbench: "03",
+  production: "04",
+  records: "05",
+  inspection: "05",
+  data: "06",
+  models: "07",
+  diagnostics: "08",
+  system: "09",
+  access: "10",
+  account: "11",
+};
 function focusMain() {
   document.getElementById("main")?.focus();
 }
@@ -113,9 +132,26 @@ function trapNavigation(event: KeyboardEvent) {
     first?.focus();
   }
 }
-onMounted(() => narrowScreen.addEventListener("change", closeWideNavigation));
+const menuSearch = ref<HTMLInputElement | null>(null);
+function focusSearch(event: KeyboardEvent) {
+  if (!auth.engineer || event.metaKey || event.ctrlKey || event.altKey) return;
+  const target = event.target as HTMLElement | null;
+  if (target?.closest("input, textarea, select, [contenteditable=true]")) return;
+  if (event.key !== "/" && event.key !== "?") return;
+  event.preventDefault();
+  if (narrowScreen.matches) sidebarOpen.value = true;
+  nextTick(() => menuSearch.value?.focus());
+}
+onMounted(() => {
+  tickClock();
+  clockTimer = window.setInterval(tickClock, 1000);
+  narrowScreen.addEventListener("change", closeWideNavigation);
+  window.addEventListener("keydown", focusSearch);
+});
 onUnmounted(() => {
+  window.clearInterval(clockTimer);
   narrowScreen.removeEventListener("change", closeWideNavigation);
+  window.removeEventListener("keydown", focusSearch);
   if (sidebarOpen.value) document.body.style.overflow = previousOverflow;
 });
 const matches = (text: string) =>
@@ -222,11 +258,19 @@ watch(
     >
       <div class="brand-row">
         <RouterLink to="/" class="brand" @click="choose">
-          <span class="brand-mark"><Icon name="scan" :size="23" /></span>
-          <span
-            >边缘视觉工作站<small>{{
-              roleDuties[auth.user.role].name
-            }}</small></span
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none">
+              <circle cx="16" cy="16" r="10.6" stroke="currentColor" />
+              <circle cx="16" cy="16" r="4.2" stroke="currentColor" />
+              <path
+                d="M16 2.4v4.2M16 25.4v4.2M2.4 16h4.2M25.4 16h4.2"
+                stroke="currentColor"
+              />
+              <circle cx="16" cy="16" r="1.2" fill="currentColor" />
+            </svg>
+          </span>
+          <span class="brand-text"
+            >视觉物联网平台<small>VISION IOT PLATFORM</small></span
           >
         </RouterLink>
         <button
@@ -238,14 +282,19 @@ watch(
         </button>
       </div>
       <div v-if="auth.engineer" class="menu-search-wrap">
-        <Icon name="search" :size="16" />
+        <Icon name="search" :size="15" />
         <input
+          ref="menuSearch"
           v-model="menuQuery"
           class="menu-search"
           type="search"
           aria-label="搜索功能"
-          placeholder="搜索功能"
+          placeholder="搜索工作区"
         />
+        <kbd aria-hidden="true">/</kbd>
+      </div>
+      <div class="nav-index-label" aria-hidden="true">
+        <span>工作区</span><em>WORKSPACE INDEX</em>
       </div>
       <nav aria-label="主导航">
         <template v-for="entry in sidebarItems" :key="String(entry.item.name)">
@@ -350,13 +399,20 @@ watch(
         >
           <Icon name="menu" />
         </button>
-        <span class="topbar-location"
-          ><Icon
+        <span class="topbar-location">
+          <span class="topbar-index mono">{{
+            pageIndex[String(route.name)] ?? "—"
+          }}</span>
+          <span class="topbar-divider" aria-hidden="true"></span>
+          <Icon
             :name="navIcons[String(route.name)] ?? 'clipboard'"
-            :size="16"
-          />{{ currentPage }}</span
-        >
+            :size="15"
+          />{{ currentPage }}
+        </span>
         <div class="topbar-actions">
+          <span class="topbar-clock mono" title="本机时间"
+            ><i aria-hidden="true"></i>{{ clock }}<em>LOCAL</em></span
+          >
           <RouterLink
             class="account-link"
             to="/account"
@@ -364,25 +420,26 @@ watch(
             title="账号设置"
             @click="choose"
           >
-            <Icon name="users" :size="15" />
-            <span>账号设置</span>
+            <Icon name="users" :size="14" />
+            <span>账号</span>
           </RouterLink>
           <UiBadge
             :tone="devices.connected ? 'success' : 'warn'"
-            chip
+            variant="outline"
             dot
             :pulse="!devices.connected"
             size="sm"
           >
-            {{ devices.connected ? "平台连接正常" : "平台连接中" }}
+            {{ devices.connected ? "节点在线" : "节点连接中" }}
           </UiBadge>
           <UiButton
             v-if="auth.engineer"
             variant="ghost"
             size="sm"
+            class="topbar-system"
             :to="{ path: '/system/health' }"
           >
-            系统状态
+            系统
           </UiButton>
           <UiThemeToggle />
         </div>

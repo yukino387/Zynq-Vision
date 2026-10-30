@@ -1,2 +1,0 @@
-from pathlib import Path
-p=Path('apps/web/src/views/Operations.vue');s=p.read_text(encoding='utf-8').replace('import { chinese, displayName }','import { chinese, displayName, errorMessage }');s=s.replace('<p v-if="device?.error" class="error-box">{{ device.error }}</p>','''<details v-if="device?.error" class="error-box device-error"><summary>{{ errorMessage(/No matching UDP|timeout|timed out/i.test(device.error) ? 'DEVICE_TIMEOUT' : 'COMMAND_REJECTED', device.error) }}</summary><pre>{{ device.error }}</pre></details>''');p.write_bytes(s.encode())

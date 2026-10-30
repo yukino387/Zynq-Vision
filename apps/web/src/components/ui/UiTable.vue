@@ -35,23 +35,19 @@ withDefaults(defineProps<UiTableProps>(), {
 <style scoped>
 .ui-table-container {
   position: relative;
-  background: var(--surface);
-  background-image: linear-gradient(
-    180deg,
-    var(--lui-surface-top, var(--surface)) 0%,
-    var(--surface) 38%,
-    var(--surface) 100%
-  );
-  border-radius: var(--radius, 8px);
+  background: transparent;
+  background-image: none;
+  border-radius: 0;
   overflow: hidden;
   box-sizing: border-box;
 }
 
 .ui-table-container.is-bordered {
-  border: 1px solid var(--line);
-  box-shadow:
-    inset 0 1px 0 var(--lui-rim, transparent),
-    var(--lui-shadow, 0 1px 3px rgba(0, 0, 0, 0.03));
+  border-top: 1px solid var(--ink);
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  box-shadow: none;
 }
 
 .ui-table-scroll {
@@ -64,51 +60,52 @@ withDefaults(defineProps<UiTableProps>(), {
   width: 100%;
   border-collapse: collapse;
   text-align: left;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--ink);
 }
 
 :deep(th) {
-  background: var(--surface-2);
-  background-image: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--surface-2) 88%, #fff) 0%,
-    var(--surface-2) 100%
-  );
-  color: var(--ink-2);
-  font-weight: 600;
-  font-size: 12px;
+  background: transparent;
+  background-image: none;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-weight: 400;
+  font-size: 8.5px;
   text-transform: uppercase;
-  letter-spacing: 0.02em;
-  padding: 10px 14px;
+  letter-spacing: 0.15em;
+  padding: 11px 15px;
   border-bottom: 1px solid var(--line-strong);
   white-space: nowrap;
 }
 
 :deep(td) {
-  padding: 12px 14px;
+  padding: 13px 15px;
   border-bottom: 1px solid var(--line);
   vertical-align: middle;
+  color: var(--ink-2);
 }
 
 :deep(tbody tr) {
-  transition: background-color var(--lui-quick, 140ms) var(--lui-ease, ease);
+  transition: background-color 140ms ease;
 }
 
 .is-compact :deep(th) {
-  padding: 6px 10px;
+  padding: 9px 13px;
 }
 .is-compact :deep(td) {
-  padding: 7px 10px;
+  padding: 10px 13px;
 }
 
 .is-hover :deep(tbody tr:hover) {
-  background-color: color-mix(in srgb, var(--surface-2) 60%, transparent);
+  background-color: color-mix(in srgb, var(--surface-2) 58%, transparent);
+}
+.is-hover :deep(tbody tr:hover td:first-child) {
+  box-shadow: inset 2px 0 0 var(--forest);
 }
 
 .is-striped :deep(tbody tr:nth-child(even)) {
-  background-color: color-mix(in srgb, var(--surface-2) 35%, transparent);
+  background-color: color-mix(in srgb, var(--surface-2) 28%, transparent);
 }
 
 :deep(tbody tr:last-child td) {

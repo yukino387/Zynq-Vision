@@ -49,11 +49,15 @@ Hardware::Hardware() {
     }
 }
 Hardware::~Hardware() {
+    {std::lock_guard<std::mutex> lock(exposure_mutex);exposure_stopped=true;}
+    exposure_ready.notify_one();
+    if(exposure_worker.joinable())exposure_worker.join();
     if(fd<0)return;
     gpio[0]=control&~16u;dma[0x30/4]=4;
     munmap(buffer,VISION_BUFFER_BYTES);munmap(const_cast<uint32_t*>(gpio),4096);munmap(const_cast<uint32_t*>(dma),4096);munmap(const_cast<uint32_t*>(conv),4096);close(fd);
 }
-void Hardware::pin(unsigned mask,bool high){control=high?control|mask:control&~mask;gpio[0]=control;
+void Hardware::pin(unsigned mask,bool high){
+    {std::lock_guard<std::mutex> lock(gpio_mutex);control=high?control|mask:control&~mask;gpio[0]=control;}
     if(mask==16){const auto end=clock_ns()+5000;while(clock_ns()<end){}}
     else delay(5);
 }
@@ -72,7 +76,60 @@ void Hardware::initialize_camera() {
     for(const auto& r:camera_registers)if(!write_register(r.address,r.value))throw std::runtime_error("OV5640 configuration failed");
     for(const auto& r:camera_output_registers){uint8_t value=0;if(!write_register(r.address,r.value)||!read_register(r.address,value)||value!=r.value)throw std::runtime_error("OV5640 mode verification failed");}
     delay(300000);
+    initialize_exposure();
 }
+void Hardware::set_exposure_target(unsigned target) {
+    const std::pair<uint16_t,uint8_t> values[]={
+        {0x3a0f,uint8_t(target+4)},{0x3a10,uint8_t(target-4)},
+        {0x3a1b,uint8_t(target+6)},{0x3a1e,uint8_t(target-6)},
+        {0x3a11,uint8_t(target*2)},{0x3a1f,uint8_t(target/3)}
+    };
+    for(const auto& value:values){uint8_t readback=0;
+        if(!write_register(value.first,value.second) || !read_register(value.first,readback) || readback!=value.second)
+            throw std::runtime_error("Exposure target verification failed");
+    }
+}
+void Hardware::initialize_exposure() {
+    auto read=[&](uint16_t address){uint8_t value=0;if(!read_register(address,value))throw std::runtime_error("Exposure register read failed");return unsigned(value);};
+    auto& status=exposure_status;
+    status.manual=read(0x3503);status.aec_control=read(0x3a00);
+    status.vts=(read(0x380e)<<8)|read(0x380f);
+    status.maximum=(read(0x3a02)<<8)|read(0x3a03);
+    const auto maximum50=(read(0x3a14)<<8)|read(0x3a15);
+    status.gain_ceiling=(read(0x3a18)<<8)|read(0x3a19);
+    status.gain=((read(0x350a)&3)<<8)|read(0x350b);
+    status.exposure_q4=((read(0x3500)&15)<<16)|(read(0x3501)<<8)|read(0x3502);
+    if((status.manual&3) || (status.aec_control&4) || status.maximum+4>status.vts || maximum50+4>status.vts)
+        throw std::runtime_error("Exposure auto/fixed-frame safety check failed");
+    // Sensor coordinates are reversed relative to the displayed 180-degree view.
+    // Display weights: 1,1,1,1 / 2,4,4,2 / 4,8,8,4 / 4,6,6,4.
+    const uint8_t weights[]={0x64,0x46,0x84,0x48,0x42,0x24,0x11,0x11};
+    for(unsigned i=0;i<8;++i){uint8_t actual=0;
+        if(!write_register(0x5688+i,weights[i]) || !read_register(0x5688+i,actual) || actual!=weights[i])
+            throw std::runtime_error("Exposure metering verification failed");
+    }
+    set_exposure_target(status.target);
+    exposure_worker=std::thread([this]{exposure_loop();});
+}
+void Hardware::exposure_loop() {
+    for(;;){
+        ExposureMeter meter;
+        {std::unique_lock<std::mutex> lock(exposure_mutex);
+         exposure_ready.wait(lock,[this]{return exposure_stopped || exposure_pending;});
+         if(exposure_stopped)return;
+         meter=exposure_status.corrected;meter.high=std::max(meter.high,exposure_status.raw.high);exposure_pending=false;}
+        const auto target=exposure_policy.update(meter,clock_ns());
+        {std::lock_guard<std::mutex> lock(exposure_mutex);if(target==exposure_status.target)continue;}
+        try{
+            // Slow SCCB traffic runs outside the capture/preprocessing thread.
+            set_exposure_target(target);
+            std::lock_guard<std::mutex> lock(exposure_mutex);exposure_status.target=target;++exposure_status.updates;
+        }catch(const std::exception& e){
+            std::lock_guard<std::mutex> lock(exposure_mutex);exposure_status.error=e.what();return;
+        }
+    }
+}
+CameraExposure Hardware::camera_exposure() {std::lock_guard<std::mutex> lock(exposure_mutex);return exposure_status;}
 void Hardware::set_shading(std::vector<uint16_t> gains) {shading=std::move(gains);}
 void Hardware::load_model(const std::vector<uint8_t>& file,const std::string& version,const std::string& expected_payload,const std::string& expected_file) {
     if(!(conv[0]&4))throw std::runtime_error("Accelerator is busy; reset the PL before loading a model");
@@ -161,6 +218,9 @@ uint64_t Hardware::prepare_capture(unsigned index) {
     std::atomic_thread_fence(std::memory_order_seq_cst);
     captured_pixels.resize(416*416);
     std::memcpy(captured_pixels.data(),buffer+pixels_offset+index*camera_bytes,camera_bytes);
+    const bool meter_due=captured>=next_metering_ns;
+    ExposureMeter raw_meter;
+    if(meter_due)raw_meter=exposure_meter(captured_pixels.data(),true);
     if(!shading.empty()){
         // Gains remain Q8 with the same rounding and saturation as the scalar path.
         for(unsigned i=0;i<416u*416u;i+=8){
@@ -178,9 +238,17 @@ uint64_t Hardware::prepare_capture(unsigned index) {
             vst1q_u16(captured_pixels.data()+i,vorrq_u16(vorrq_u16(vshlq_n_u16(vshrq_n_u16(r,3),11),vshlq_n_u16(vshrq_n_u16(g,2),5)),vshrq_n_u16(b,3)));
         }
     }
+    // Rotate the corrected RGB565 frame by 180 degrees before both inference
+    // preprocessing and preview consume it. Shading remains in sensor coordinates.
+    std::reverse(captured_pixels.begin(),captured_pixels.end());
     // The previous pixels are cached now; rearm the other DMA buffer immediately,
     // as in the bare-metal pipeline, before preprocessing or the next inference.
     start_capture(index^1);
+    if(meter_due){
+        const auto corrected=shading.empty()?raw_meter:exposure_meter(captured_pixels.data(),false);
+        {std::lock_guard<std::mutex> lock(exposure_mutex);exposure_status.raw=raw_meter;exposure_status.corrected=corrected;++exposure_status.samples;exposure_pending=true;}
+        next_metering_ns=captured+500000000ULL;exposure_ready.notify_one();
+    }
     if(level_enabled){
         captured_level=prepare_level_rgb565(captured_pixels.data());
         for(unsigned i=0;i<224*224;++i)gray[i]=int8_t((unsigned(captured_level.gray[i])*127+127)/255);

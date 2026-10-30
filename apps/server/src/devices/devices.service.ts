@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import {
   Injectable,
   Inject,
@@ -17,7 +18,7 @@ import {
   terminalCapabilities,
 } from "./terminal-state.js";
 import { SimulatorTransport } from "./simulator.js";
-import { readTerminalPreview } from "./terminal-preview.js";
+import { readTerminalPreviewStream } from "./terminal-preview.js";
 import type { DeviceTransport, CapturedFrame } from "./transport.js";
 @Injectable()
 export class DevicesService implements OnModuleInit, OnModuleDestroy {
@@ -26,8 +27,7 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
     string,
     {
       timer: ReturnType<typeof setTimeout> | null;
-      busy: boolean;
-      frameId: number;
+      controller: AbortController;
       stopped: boolean;
     }
   >();
@@ -325,6 +325,7 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
     for (const [id, poller] of this.previewPollers) {
       if (online.has(id) && this.events.watching(id)) continue;
       poller.stopped = true;
+      poller.controller.abort();
       if (poller.timer) clearTimeout(poller.timer);
       this.previewPollers.delete(id);
     }
@@ -332,17 +333,17 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
       if (!this.events.watching(id) || this.previewPollers.has(id)) continue;
       const poller: {
         timer: ReturnType<typeof setTimeout> | null;
-        busy: boolean;
-        frameId: number;
+        controller: AbortController;
         stopped: boolean;
-      } = { busy: false, frameId: -1, timer: null, stopped: false };
+      } = { controller: new AbortController(), timer: null, stopped: false };
       this.previewPollers.set(id, poller);
       const loop = async () => {
         if (poller.stopped) return;
         try {
           await this.pollTerminalPreview(id);
         } finally {
-          if (!poller.stopped) poller.timer = setTimeout(() => void loop(), 0);
+          if (!poller.stopped)
+            poller.timer = setTimeout(() => void loop(), 500);
         }
       };
       poller.timer = setTimeout(() => void loop(), 0);
@@ -350,25 +351,38 @@ export class DevicesService implements OnModuleInit, OnModuleDestroy {
   }
   private async pollTerminalPreview(id: string) {
     const poller = this.previewPollers.get(id);
-    if (!poller || poller.busy) return;
-    poller.busy = true;
+    if (!poller || poller.stopped) return;
     try {
       const device = await this.db.device.findUnique({ where: { id } });
       if (!device || !isLinuxTerminal(device)) return;
-      const frame = await readTerminalPreview(device, poller.frameId);
-      if (!frame || frame.frameId === poller.frameId) return;
-      poller.frameId = frame.frameId;
-      this.events.emit("device.preview.frame", id, frame, "BOARD");
+      let firstCapture: bigint | undefined;
+      let playbackStart = 0;
+      for await (const { frame, capturedNs } of readTerminalPreviewStream(
+        device,
+        poller.controller.signal,
+      )) {
+        if (firstCapture === undefined) {
+          firstCapture = capturedNs;
+          playbackStart = performance.now() + 40;
+        }
+        const due = playbackStart + Number(capturedNs - firstCapture) / 1e6;
+        const wait = due - performance.now();
+        if (wait < -500) throw new Error("Preview playback fell behind");
+        if (wait > 0)
+          await delay(wait, undefined, { signal: poller.controller.signal });
+        if (poller.stopped) return;
+        this.events.emit("device.preview.frame", id, frame, "BOARD");
+      }
     } catch {
-      // Paused, stale or unreachable terminals simply skip this tick.
-    } finally {
-      poller.busy = false;
+      // Stream failures reconnect after a short pause; unwatch aborts immediately.
     }
   }
+
   async onModuleDestroy() {
     if (this.timer) clearInterval(this.timer);
     for (const poller of this.previewPollers.values()) {
       poller.stopped = true;
+      poller.controller.abort();
       if (poller.timer) clearTimeout(poller.timer);
     }
     this.previewPollers.clear();

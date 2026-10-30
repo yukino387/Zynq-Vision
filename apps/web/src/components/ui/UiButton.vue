@@ -104,93 +104,58 @@ const isLink = computed(() => !!props.to && !isDisabled.value);
   justify-content: center;
   position: relative;
   gap: 7px;
-  font-family: inherit;
-  font-weight: 550;
+  font-family: var(--font);
+  font-weight: 500;
+  letter-spacing: 0.03em;
   text-decoration: none;
   white-space: nowrap;
   vertical-align: middle;
-  border-radius: var(--radius, 8px);
+  border-radius: 2px;
   border: 1px solid transparent;
   cursor: pointer;
   user-select: none;
-  transition:
-    background-color 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease,
-    box-shadow 0.15s ease,
-    transform var(--lui-quick, 140ms) var(--lui-ease, ease);
   min-width: 0;
   box-sizing: border-box;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
 }
 
 .ui-button:focus-visible {
-  outline: 2px solid var(--forest);
-  outline-offset: 2px;
-}
-
-/* 按压时只在表面层出现一次短促高光，文字和图标保持清晰 */
-.ui-button::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  border-radius: inherit;
-  background: radial-gradient(
-    circle at 50% 45%,
-    rgba(255, 255, 255, 0.22),
-    transparent 62%
-  );
-  opacity: 0;
-  transition: opacity var(--lui-quick, 140ms) var(--lui-ease, ease);
-  pointer-events: none;
-}
-.variant-secondary::after,
-.variant-outline::after,
-.variant-ghost::after {
-  background: radial-gradient(
-    circle at 50% 45%,
-    color-mix(in srgb, var(--forest) 12%, transparent),
-    transparent 65%
-  );
-}
-.ui-button:active:not(:disabled)::after {
-  opacity: 1;
-}
-.ui-button > * {
-  position: relative;
-  z-index: 1;
+  outline: 1px solid var(--forest);
+  outline-offset: 3px;
 }
 
 .ui-button:active:not(:disabled) {
-  transform: translateY(0.5px) scale(var(--lui-press, 0.985));
+  transform: none;
 }
 
-/* 尺寸体系 */
 .size-sm {
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1.3;
-  padding: 5px 10px;
-  min-height: 30px;
+  padding: 5px 9px;
+  min-height: 28px;
 }
 
 .size-md {
-  font-size: 13px;
+  font-size: 11.5px;
   line-height: 1.4;
-  padding: 8px 14px;
-  min-height: 38px;
+  padding: 7px 13px;
+  min-height: 34px;
 }
 
 .size-lg {
-  font-size: 14px;
+  font-size: 12.5px;
   line-height: 1.45;
-  padding: 10px 20px;
-  min-height: 44px;
+  padding: 9px 18px;
+  min-height: 42px;
 }
 
 .is-chip {
-  border-radius: 999px;
-  padding-left: 12px;
-  padding-right: 12px;
+  border-radius: 2px;
+  padding-left: 10px;
+  padding-right: 10px;
 }
 
 .is-block {
@@ -198,61 +163,29 @@ const isLink = computed(() => !!props.to && !isDisabled.value);
   width: 100%;
 }
 
-/* 变体体系 */
 .variant-primary {
   background: var(--forest);
-  background-image: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--forest) 86%, #fff) 0%,
-    var(--forest) 58%
-  );
   border-color: var(--forest);
   color: var(--forest-ink);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.22),
-    0 1px 2px rgba(0, 0, 0, 0.08);
 }
 .variant-primary:hover:not(:disabled) {
   background: var(--forest-hover);
-  background-image: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--forest-hover) 86%, #fff) 0%,
-    var(--forest-hover) 58%
-  );
   border-color: var(--forest-hover);
   color: var(--forest-ink);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.24),
-    0 3px 8px rgba(0, 0, 0, 0.12);
 }
 .variant-primary:active:not(:disabled) {
   background: var(--forest);
-  background-image: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--forest) 92%, #fff) 0%,
-    var(--forest) 58%
-  );
-  box-shadow:
-    inset 0 1px 2px rgba(0, 0, 0, 0.12),
-    0 1px 2px rgba(0, 0, 0, 0.08);
+  filter: brightness(0.94);
 }
 
 .variant-secondary {
-  background: var(--surface);
-  background-image: linear-gradient(
-    180deg,
-    var(--lui-surface-top, var(--surface)) 0%,
-    var(--surface) 100%
-  );
-  border-color: var(--line);
+  background: transparent;
+  border-color: var(--line-strong);
   color: var(--ink);
-  box-shadow:
-    inset 0 1px 0 var(--lui-rim, transparent),
-    0 1px 2px rgba(0, 0, 0, 0.03);
 }
 .variant-secondary:hover:not(:disabled) {
   background: var(--surface-2);
-  border-color: var(--line-strong);
+  border-color: var(--ink);
 }
 .variant-secondary:active:not(:disabled) {
   background: var(--surface-3);
@@ -260,19 +193,19 @@ const isLink = computed(() => !!props.to && !isDisabled.value);
 
 .variant-outline {
   background: transparent;
-  border-color: var(--line-strong);
-  color: var(--ink);
+  border-color: var(--line);
+  color: var(--ink-2);
 }
 .variant-outline:hover:not(:disabled) {
   background: var(--surface-2);
-  border-color: var(--forest);
-  color: var(--forest);
+  border-color: var(--line-strong);
+  color: var(--ink);
 }
 
 .variant-ghost {
   background: transparent;
   border-color: transparent;
-  color: var(--ink-2);
+  color: var(--muted);
 }
 .variant-ghost:hover:not(:disabled) {
   background: var(--surface-2);
@@ -283,41 +216,39 @@ const isLink = computed(() => !!props.to && !isDisabled.value);
   background: transparent;
   border-color: transparent;
   color: var(--forest);
-  padding-left: 6px;
-  padding-right: 6px;
+  padding-left: 3px;
+  padding-right: 3px;
   min-height: auto;
 }
 .variant-text:hover:not(:disabled) {
+  background: transparent;
   color: var(--forest-hover);
   text-decoration: underline;
-  text-underline-offset: 3px;
+  text-underline-offset: 4px;
 }
 
 .variant-danger {
-  background: var(--crit-bg, #f5e0da);
-  border-color: var(--crit-line, #d9a097);
-  color: var(--red, #b6372a);
+  background: transparent;
+  border-color: transparent;
+  color: var(--red);
 }
 .variant-danger:hover:not(:disabled) {
-  background: var(--red, #b6372a);
-  border-color: var(--red, #b6372a);
-  color: #ffffff;
+  background: var(--crit-bg);
+  border-color: var(--crit-line);
+  color: var(--red);
 }
 
-/* 禁用态与加载态 */
 .ui-button:disabled,
 .ui-button.is-loading {
-  opacity: 0.55;
+  opacity: 0.45;
   cursor: not-allowed;
   pointer-events: none;
-  box-shadow: none;
-  transform: none;
 }
 
 .spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid currentColor;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid currentColor;
   border-right-color: transparent;
   border-radius: 50%;
   animation: ui-spin 0.7s linear infinite;
@@ -332,6 +263,7 @@ const isLink = computed(() => !!props.to && !isDisabled.value);
 
 .button-icon {
   flex-shrink: 0;
+  opacity: 0.85;
 }
 
 .button-label {

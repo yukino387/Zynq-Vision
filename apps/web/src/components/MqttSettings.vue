@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { randomUUID } from "../uuid";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { mqttConfigSchema, type MqttConfig } from "@vision/contracts";
 import { api, post } from "../api";
@@ -174,7 +175,7 @@ const example = computed(() =>
   JSON.stringify(
     {
       type: "TRIGGER",
-      requestId: crypto.randomUUID(),
+      requestId: randomUUID(),
       pieceId: "P0001",
       sessionId: status.value?.sessionId,
       windowMs: 500,

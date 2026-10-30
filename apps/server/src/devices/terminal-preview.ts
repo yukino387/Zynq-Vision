@@ -3,7 +3,7 @@ import sharp from "sharp";
 import { decodeRgb565 } from "@vision/device-protocol";
 import type { DetectionBox } from "@vision/contracts";
 import { DomainError } from "../core/errors.js";
-import { terminalRequest } from "./terminal-client.js";
+import { terminalPreviewStream } from "./terminal-client.js";
 
 export interface TerminalPreview {
   frameId: number;
@@ -25,6 +25,7 @@ interface TerminalFrameMetadata {
   planId?: string | null;
   planVersion?: number | null;
   fresh: boolean;
+  capturedMonotonicNs: string;
   boxes?: Omit<DetectionBox, "label">[];
   modelClasses?: string[];
 }
@@ -41,40 +42,68 @@ export function parseTerminalFrame(binary: Buffer) {
   return { metadata, raw: binary.subarray(4 + length) };
 }
 
-export async function readTerminalPreview(
+export async function* readPreviewPackets(body: ReadableStream<Uint8Array>) {
+  const reader = body.getReader();
+  let pending: Buffer = Buffer.alloc(0);
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) throw new DomainError("UNAVAILABLE", "设备预览流已断开", 503);
+      pending = pending.length
+        ? Buffer.concat([pending, value])
+        : Buffer.from(value);
+      while (pending.length >= 8) {
+        const size = pending.readUInt32LE(0);
+        const bufferMs = pending.readUInt32LE(4);
+        if (size < 4 || size > 4 + 65536 + 416 * 416 * 2)
+          throw new DomainError("INVALID_FRAME", "设备预览流长度无效", 502);
+        if (pending.length < 8 + size) break;
+        const binary = pending.subarray(8, 8 + size);
+        pending = pending.subarray(8 + size);
+        yield { binary, bufferMs };
+      }
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      /* Already aborted. */
+    }
+    reader.releaseLock();
+  }
+}
+
+export async function* readTerminalPreviewStream(
   device: Device,
-  after = 0,
-): Promise<TerminalPreview | null> {
-  const response = await terminalRequest(
-    device,
-    after > 0 ? `/preview?after=${after}` : "/preview",
-    "",
-    undefined,
-    1500,
-  );
-  const binary = Buffer.from(await response.arrayBuffer());
-  const { metadata, raw } = parseTerminalFrame(binary);
-  if (metadata.frameId === after) return null;
-  if (!metadata.fresh)
-    throw new DomainError("DEVICE_TIMEOUT", "当前画面已过期", 409);
-  const jpeg = await sharp(decodeRgb565(raw), {
-    raw: { width: 416, height: 416, channels: 3 },
-  })
-    .jpeg({ quality: 80 })
-    .toBuffer();
-  return {
-    frameId: metadata.frameId,
-    level: metadata.level,
-    postprocess: metadata.postprocess,
-    planId: metadata.planId,
-    planVersion: metadata.planVersion,
-    receivedAt: new Date().toISOString(),
-    width: 416,
-    height: 416,
-    jpeg: jpeg.toString("base64"),
-    detections: (metadata.boxes ?? []).map((box) => ({
-      ...box,
-      label: metadata.modelClasses?.[box.classId] ?? `类别 ${box.classId + 1}`,
-    })),
-  };
+  signal: AbortSignal,
+) {
+  const body = await terminalPreviewStream(device, signal);
+  for await (const { binary, bufferMs } of readPreviewPackets(body)) {
+    const { metadata, raw } = parseTerminalFrame(binary);
+    if (!metadata.fresh || bufferMs > 1000)
+      throw new DomainError("DEVICE_TIMEOUT", "当前画面已过期", 409);
+    if (!/^\d{1,20}$/.test(metadata.capturedMonotonicNs ?? ""))
+      throw new DomainError("INVALID_FRAME", "设备画面缺少采集时间", 502);
+    const image = sharp(decodeRgb565(raw), {
+      raw: { width: 416, height: 416, channels: 3 },
+    });
+    const jpeg = await image.jpeg({ quality: 80 }).toBuffer();
+    const frame: TerminalPreview = {
+      frameId: metadata.frameId,
+      level: metadata.level,
+      postprocess: metadata.postprocess,
+      planId: metadata.planId,
+      planVersion: metadata.planVersion,
+      receivedAt: new Date().toISOString(),
+      width: 416,
+      height: 416,
+      jpeg: jpeg.toString("base64"),
+      detections: (metadata.boxes ?? []).map((box) => ({
+        ...box,
+        label:
+          metadata.modelClasses?.[box.classId] ?? `类别 ${box.classId + 1}`,
+      })),
+    };
+    yield { frame, capturedNs: BigInt(metadata.capturedMonotonicNs) };
+  }
 }

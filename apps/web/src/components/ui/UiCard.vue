@@ -61,61 +61,49 @@ withDefaults(defineProps<UiCardProps>(), {
 <style scoped>
 .ui-card {
   position: relative;
-  background: var(--surface);
-  background-image: linear-gradient(
-    180deg,
-    var(--lui-surface-top, var(--surface)) 0%,
-    var(--surface) 46%,
-    var(--lui-surface-bottom, var(--surface)) 100%
-  );
-  border: 1px solid var(--line);
-  border-radius: var(--radius, 8px);
-  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  box-shadow:
-    inset 0 1px 0 var(--lui-rim, transparent),
-    var(--lui-shadow, 0 1px 3px rgba(0, 0, 0, 0.04));
-  transition:
-    border-color var(--lui-base, 240ms) var(--lui-ease, ease),
-    box-shadow var(--lui-base, 240ms) var(--lui-ease, ease),
-    transform var(--lui-base, 240ms) var(--lui-ease, ease);
+  box-sizing: border-box;
+  background: var(--surface);
+  background-image: none;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  box-shadow: none;
+  transition: border-color 160ms ease;
 }
 
-.variant-default {
-  box-shadow:
-    inset 0 1px 0 var(--lui-rim, transparent),
-    var(--lui-shadow, 0 1px 3px rgba(0, 0, 0, 0.04));
+.ui-card::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  width: 9px;
+  height: 9px;
+  border-top: 1px solid var(--ink);
+  border-left: 1px solid var(--ink);
+  opacity: 0.4;
+  pointer-events: none;
 }
 
 .variant-flat {
   border-color: transparent;
   background: var(--surface-2);
-  background-image: none;
-  box-shadow: inset 0 1px 0 var(--lui-rim, transparent);
 }
-
 .variant-bordered {
   border-color: var(--line-strong);
-  box-shadow: inset 0 1px 0 var(--lui-rim, transparent);
 }
-
 .variant-accent {
-  border-left: 4px solid var(--forest);
-  box-shadow:
-    inset 0 1px 0 var(--lui-rim, transparent),
-    var(--lui-shadow, 0 2px 8px rgba(0, 0, 0, 0.05));
+  border-left: 2px solid var(--forest);
 }
 
 .is-hoverable:hover {
   border-color: var(--line-strong);
-  box-shadow:
-    inset 0 1px 0 var(--lui-rim, transparent),
-    var(--lui-shadow-lift, 0 4px 12px rgba(0, 0, 0, 0.08));
-  transform: translateY(-1px);
+}
+.is-hoverable:hover::before {
+  border-color: var(--forest);
+  opacity: 1;
 }
 
-/* 内边距体系 */
 .padding-none .ui-card-body {
   padding: 0;
 }
@@ -125,36 +113,35 @@ withDefaults(defineProps<UiCardProps>(), {
 }
 
 .padding-sm .ui-card-header {
-  padding: 10px 14px 6px;
+  padding: 9px 13px 7px;
 }
 .padding-sm .ui-card-body {
-  padding: 10px 14px;
+  padding: 10px 13px;
 }
 .padding-sm .ui-card-footer {
-  padding: 8px 14px;
+  padding: 8px 13px;
 }
 
 .padding-md .ui-card-header {
-  padding: 16px 20px 8px;
+  padding: 13px 17px 10px;
 }
 .padding-md .ui-card-body {
-  padding: 16px 20px;
+  padding: 16px 17px;
 }
 .padding-md .ui-card-footer {
-  padding: 12px 20px;
+  padding: 11px 17px;
 }
 
 .padding-lg .ui-card-header {
-  padding: 24px 28px 12px;
+  padding: 18px 22px 12px;
 }
 .padding-lg .ui-card-body {
-  padding: 24px 28px;
+  padding: 22px 22px;
 }
 .padding-lg .ui-card-footer {
-  padding: 16px 28px;
+  padding: 14px 22px;
 }
 
-/* 头部排版 */
 .ui-card-header {
   display: flex;
   align-items: center;
@@ -166,10 +153,9 @@ withDefaults(defineProps<UiCardProps>(), {
 .ui-card-title-group {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   min-width: 0;
 }
-
 .ui-card-icon {
   display: inline-flex;
   align-items: center;
@@ -177,46 +163,41 @@ withDefaults(defineProps<UiCardProps>(), {
   color: var(--forest);
   flex-shrink: 0;
 }
-
 .ui-card-text {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
-
 .ui-card-title {
   margin: 0;
-  font-size: 15px;
+  font-family: var(--font);
+  font-size: 11.5px;
   font-weight: 600;
+  letter-spacing: 0.05em;
   color: var(--ink);
   line-height: 1.4;
 }
-
 .ui-card-subtitle {
-  margin: 2px 0 0;
-  font-size: 12px;
+  margin: 3px 0 0;
+  font-size: 9.5px;
+  letter-spacing: 0.03em;
   color: var(--muted);
-  line-height: 1.4;
+  line-height: 1.5;
 }
-
 .ui-card-actions {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
 }
-
 .ui-card-body {
   flex: 1;
   min-width: 0;
 }
-
 .ui-card-footer {
   border-top: 1px solid var(--line);
-  background: var(--surface-2);
-  border-bottom-left-radius: inherit;
-  border-bottom-right-radius: inherit;
-  font-size: 13px;
-  color: var(--ink-2);
+  background: transparent;
+  font-size: 10px;
+  color: var(--muted);
 }
 </style>

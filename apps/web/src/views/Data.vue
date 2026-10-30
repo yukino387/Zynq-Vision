@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { randomUUID } from "../uuid";
 import InfoFields from "../components/InfoFields.vue";
 import { chinese, displayName } from "@vision/shared";
 import { ref, computed, watch, nextTick, onUnmounted } from "vue";
@@ -698,8 +699,8 @@ async function upload(e: Event) {
             source: "IMPORT",
             taskId: importTaskId.value || undefined,
             planId: importPlanId.value || undefined,
-            clientId: crypto.randomUUID(),
-            idempotencyKey: crypto.randomUUID(),
+            clientId: randomUUID(),
+            idempotencyKey: randomUUID(),
             localSequence: 0,
             capturedAt: new Date().toISOString(),
           }),

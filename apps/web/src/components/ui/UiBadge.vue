@@ -41,150 +41,137 @@ withDefaults(defineProps<UiBadgeProps>(), {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-family: inherit;
-  font-weight: 550;
-  line-height: 1;
+  font-family: var(--mono);
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: 0.05em;
   white-space: nowrap;
   vertical-align: middle;
-  border-radius: var(--radius, 4px);
+  border-radius: 0;
   box-sizing: border-box;
   user-select: none;
 }
 
 .is-chip {
-  border-radius: 999px;
+  border-radius: 0;
 }
 
-/* 尺寸体系 */
 .size-sm {
-  font-size: 11px;
+  font-size: 9px;
   padding: 3px 6px;
 }
 .size-sm.has-dot {
   padding-left: 5px;
 }
-
 .size-md {
-  font-size: 12px;
-  padding: 4px 8px;
+  font-size: 10px;
+  padding: 4px 7px;
 }
 .size-md.has-dot {
-  padding-left: 7px;
+  padding-left: 6px;
 }
 
-/* 变体与色调：subtle */
 .tone-forest.variant-subtle {
-  background: color-mix(in srgb, var(--forest) 12%, transparent);
   color: var(--forest);
+  background: color-mix(in srgb, var(--forest) 7%, transparent);
   border: 1px solid color-mix(in srgb, var(--forest) 25%, transparent);
 }
 .tone-success.variant-subtle {
-  background: var(--ok-bg, #e1eee2);
-  color: var(--green, #27734b);
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 7%, transparent);
   border: 1px solid color-mix(in srgb, var(--green) 25%, transparent);
 }
 .tone-warn.variant-subtle {
-  background: var(--warn-bg, #f6e9c9);
-  color: var(--amber, #98610b);
-  border: 1px solid var(--warn-line, #d8b66b);
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 26%, transparent);
 }
 .tone-crit.variant-subtle {
-  background: var(--crit-bg, #f5e0da);
-  color: var(--red, #b6372a);
-  border: 1px solid var(--crit-line, #d9a097);
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red) 25%, transparent);
 }
 .tone-info.variant-subtle {
-  background: var(--info-bg, #e5e8e1);
-  color: var(--info, #5c645d);
-  border: 1px solid color-mix(in srgb, var(--info) 25%, transparent);
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--info) 24%, transparent);
 }
 .tone-neutral.variant-subtle {
-  background: var(--surface-2);
-  color: var(--ink-2);
+  color: var(--muted);
+  background: transparent;
   border: 1px solid var(--line);
 }
 
-/* 变体：solid */
 .tone-forest.variant-solid {
   background: var(--forest);
   color: var(--forest-ink);
 }
 .tone-success.variant-solid {
-  background: var(--green, #27734b);
-  color: #fff;
+  background: var(--green);
+  color: var(--surface);
 }
 .tone-warn.variant-solid {
-  background: var(--amber, #98610b);
-  color: #fff;
+  background: var(--amber);
+  color: var(--surface);
 }
 .tone-crit.variant-solid {
-  background: var(--red, #b6372a);
-  color: #fff;
+  background: var(--red);
+  color: var(--surface);
 }
 .tone-info.variant-solid {
-  background: var(--info, #5c645d);
-  color: #fff;
+  background: var(--info);
+  color: var(--surface);
 }
 .tone-neutral.variant-solid {
-  background: var(--ink-2);
+  background: var(--ink);
   color: var(--surface);
 }
 
-/* 变体：outline */
 .variant-outline {
   background: transparent;
 }
 .tone-forest.variant-outline {
-  border: 1px solid var(--forest);
+  border: 1px solid color-mix(in srgb, var(--forest) 55%, transparent);
   color: var(--forest);
 }
 .tone-success.variant-outline {
-  border: 1px solid var(--green, #27734b);
-  color: var(--green, #27734b);
+  border: 1px solid color-mix(in srgb, var(--green) 55%, transparent);
+  color: var(--green);
 }
 .tone-warn.variant-outline {
-  border: 1px solid var(--amber, #98610b);
-  color: var(--amber, #98610b);
+  border: 1px solid color-mix(in srgb, var(--amber) 55%, transparent);
+  color: var(--amber);
 }
 .tone-crit.variant-outline {
-  border: 1px solid var(--red, #b6372a);
-  color: var(--red, #b6372a);
+  border: 1px solid color-mix(in srgb, var(--red) 55%, transparent);
+  color: var(--red);
 }
 .tone-info.variant-outline {
-  border: 1px solid var(--info, #5c645d);
-  color: var(--info, #5c645d);
+  border: 1px solid color-mix(in srgb, var(--info) 55%, transparent);
+  color: var(--info);
 }
 .tone-neutral.variant-outline {
   border: 1px solid var(--line-strong);
-  color: var(--ink-2);
+  color: var(--muted);
 }
 
-/* 状态小圆点 */
 .ui-badge-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 0;
   background: currentColor;
   flex-shrink: 0;
 }
-
 .ui-badge-dot.is-pulse {
-  animation: dot-pulse 1.8s ease-in-out infinite;
+  animation: dot-pulse 2.4s ease-in-out infinite;
 }
-
 @keyframes dot-pulse {
-  0% {
-    transform: scale(0.95);
-    opacity: 0.8;
+  0%,
+  100% {
+    opacity: 0.45;
   }
   50% {
-    transform: scale(1.3);
     opacity: 1;
-    box-shadow: 0 0 8px currentColor;
-  }
-  100% {
-    transform: scale(0.95);
-    opacity: 0.8;
   }
 }
 

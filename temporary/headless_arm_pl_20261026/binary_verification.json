@@ -1,5 +1,0 @@
-{
-  "binarySha256": "089a856f804839a50dbf4e111601efb9e75bf67c77afcb61fe7611682a7c2992",
-  "scalarConvSymbol": "0000804c 00000824 t conv_layer(Layer const&, signed char const*, int const*)",
-  "matchedVectorInstructions": []
-}

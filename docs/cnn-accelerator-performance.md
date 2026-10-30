@@ -1,6 +1,34 @@
-# CNN 加速器性能与装载重叠优化
+# CNN 加速器性能、两轮优化与 ARM/PL 对比
 
-## 2026-10-26 验证版本
+## ARM编译敏感性完整结果（2026-10-27）
+
+同一纸箱输入、同阶段6轮交错；ARM各条件6次，PL 48次。O0作用于标量参考变体。均为33算子前向中位耗时，双方排除模型加载、输入准备和输出提取，PL包含PS配置与轮询。
+
+| 实现 | n | 中位耗时 ms | 均值 ± SD ms | ARM/PL |
+|---|---:|---:|---:|---:|
+| ARM O0标量 | 6 | 47,195.384758 | 47,198.250 ± 7.341 | 833.98倍 |
+| ARM O3禁向量化 | 6 | 12,011.039459 | 12,010.246 ± 8.282 | 212.25倍 |
+| ARM O3自动向量化 | 6 | 12,105.349974 | 12,105.553 ± 1.066 | 213.91倍 |
+| PL | 48 | 56.590315 | 56.595889 ± 0.033224 | 1.00倍 |
+
+O0和O3相对PL的比值均为同阶段各自中位数相除；[完整报告](../temporary/arm_pl_stats_20261027/report.md)给出逐输入、全部33算子、原统计检验、漂移和微内核详细结果。
+
+## 当前基线与阅读口径（2026-10-27核对）
+
+当前正式Linux版本为48×8 INT8行读取/解包重叠，加自定义1280×720 RGB565 25 Hz扫描与25 Hz面板更新。正式bitstream `2d18f88f…`、BOOT `13ef13af…`已离线核对；本次未上板。
+
+| 结果 | 21卷积 ms | 33算子 ms | 条件 |
+|---|---:|---:|---|
+| 第一轮行装载重叠 | 56.915904→54.247131 | 61.985364→59.324442 | A/B/A；普通样本24/12次 |
+| 第二轮显示同次对照 | 54.253900→52.567852 | 59.321953→57.633496 | 60→25 Hz；各12次 |
+| 最终固化软件复位复测 | 52.543651 | 57.607381 | 显示DMA活动；普通样本12次 |
+| 当前无采集/显示的PL | 51.493522 | 56.590492 | 10-27随机交错，PL主试验612次 |
+
+前两行的卷积耗时分别降低4.689%与3.108%；分别按配对试验评价。前三行命令计时为 `setup_ns+start_write_ns+wait_ns`，不是另含插桩观测开销的 `cpu_ns`。纯推理、实时FPS与显示25 Hz不是同一指标。历史10分钟观察和旧24输入试验不升级为最新版结果。
+
+[技术正文及当前图片](../temporary/content_revision_20261026/manuscript.md)、[本次离线复算](../temporary/document_update_20261027/evidence_check.json)。部分旧JSON清单当前缺失，现存CSV、stdout、正式报告及哈希为本次核查依据；不恢复或覆盖用户已有删除。
+
+## 第一轮：2026-10-26 行装载重叠版本
 
 源码：`hardware/hls/src/std_conv.cpp`，SHA-256 `56713764914f861a57d98f91e81ec0ccff6ed198a8d468985b589575df8bcac9`。
 已验证 bitstream：`d2727d5564862e6df74e5c2fc8f2a0d3fccec270bfc354deb091fd5bcd017526`。
@@ -114,32 +142,39 @@ ARM 使用既有 O3 单核标量直接卷积参考，自动向量化关闭、NEO
 
 完整 33 算子的等效纯推理吞吐为 ARM 0.0814 次/s、PL 17.671 次/s。完整采集/预览状态另测得约 16.24 FPS。测量后已恢复原 25 Hz HDMI、所有服务和 ondemand，模型/产品/计数及正式文件哈希一致，无新增 SD I/O 错误。
 
-[完整报告、数据与绘图方法引用](../temporary/headless_arm_pl_20261026/report.md)；[逐算子图](../temporary/headless_arm_pl_20261026/figures/layer_latency.svg)、[完整统计表](../temporary/headless_arm_pl_20261026/figures/statistics_table.svg)、[重复分布图](../temporary/headless_arm_pl_20261026/figures/repeat_distribution.svg)。原始数据在 `download/fixed_results.json`，数据表为 `comparison.csv`、`descriptive_statistics.csv`、`raw_timings.csv` 和 `raw_layer_timings.csv`；预先固定条件见 `plan.json`，分析与绘图代码为 `analyze_plot.py`、`render_figures.py`。PNG/SVG/PDF 和导出来源记录均保存在该任务 `figures/`。
+[现存对比数据](../temporary/headless_arm_pl_20261026/comparison.csv)；[逐算子图](../temporary/headless_arm_pl_20261026/figures/layer_latency.svg)、[完整统计表](../temporary/headless_arm_pl_20261026/figures/statistics_table.svg)、[重复分布图](../temporary/headless_arm_pl_20261026/figures/repeat_distribution.svg)。原始数据在 `download/fixed_results.json`，数据表为 `comparison.csv`、`descriptive_statistics.csv`、`raw_timings.csv` 和 `raw_layer_timings.csv`；预先固定条件见 `plan.json`，分析与绘图代码为 `analyze_plot.py`、`render_figures.py`。PNG/SVG/PDF 和导出来源记录均保存在该任务 `figures/`。
 
 ## 统计口径的 ARM 与 PL 对比：重复测量、随机交错与假设检验
 
-2026-10-27 在上一节同一固化版本、同一无头 PL 条件、同一出厂标量 ARM 参考上，重做了一次可作统计推断的对比。与上一节的区别是：不再只报中位数，而是 3 张输入 × 12 轮随机交错、每轮 17 次 PL 重复，共 714 次测量（ARM 42、PL 660），逐次对拍 8,085 字节 INT8 输出，无剔除、无截断。
+2026-10-27 在上一节同一固化版本、同一无头 PL 条件、同一出厂标量 ARM 参考上，重做了一次随机交错重复测量对比。与上一节的区别是：不再只报中位数，而是 3 张输入 × 12 轮随机交错、每轮 17 次 PL 重复，共 714 次测量（ARM 42、PL 660），逐次对拍 8,085 字节 INT8 输出，无剔除、无截断。
 
 | 口径 | ARM | PL | 中位延时之比 |
 | --- | ---: | ---: | ---: |
-| 完整 33 算子（标题，n=36 / 612） | 12,013.94 ms | 56.5905 ms | **212.30×**（BCa 95% CI 212.14–212.43） |
+| 完整 33 算子（标题，n=36 / 612） | 12,013.94 ms | 56.5905 ms | **212.30×**（逐输入中位数后等权汇总） |
 | 仅 21 条卷积 | 11,976.49 ms | 51.4935 ms | **232.58×** |
 | 最不利单点配对 | 12,000.05 ms | 56.918 ms | 210.8× |
 | `-O0` 构建（敏感性） | 47,195.38 ms | 56.5903 ms | 834.0× |
 | `-O3` 自动向量化（敏感性） | 12,105.35 ms | 56.5903 ms | 213.9× |
-| NEON 微内核天花板下的 ARM 界 | 1,262.58 ms | 51.49 ms | 24.52× |
+| 按 NEON 微内核速率推算的 ARM 卷积耗时 | 1,262.58 ms | 51.49 ms | 24.52× |
 
 统计检验：Mann–Whitney `p = 6.0e-24`，Welch（log10）`p = 1.8e-132`，Yuen 20% 截尾均值差 11,954.68 ms（`p = 3.3e-23`），置换检验 5.0e-5（分辨率下限），Cliff's δ = 1.00（两组分布零重叠）。Type II 双因素方差分解给出 η²_条件 = 0.9999998、η²_输入 = 8.5e-11（`p = 0.88`），当前样本量下的最小可检测比值为 1.00086。
 
 三项对报告口径有影响的发现：
 
-- GCC 13.4 在 `-O3 -mcpu=cortex-a9 -mfpu=neon` 下**没有**为这段标量卷积生成任何 NEON（三个 ARM 构建的 `conv_layer` 均为 0 条向量指令）。因此自动向量化构建只比禁向量化构建慢 0.785%，标题的 212× 不是"关掉向量化"造成的假象。
-- 手写 NEON 微内核实测 1.17 MAC/cycle（标量微内核 0.248 的 4.71 倍），即 ARM 网络达到其标量天花板的 49.7%；而 PL 达到 384 MAC/cycle 峰值的 39.8%（152.99 MAC/cycle）。把 ARM 提升到 NEON 天花板后，PL 仍快 24.5×；再考虑分块调优（2–4 倍），PL 仍有 6–12× 优势。
-- 上一节与本节的 ARM 中位数相差 −2.2%（12,284.42 → 12,013.94 ms），PL 完全相同（差 0.00%）。差异来自测试二进制的代码布局与内存分配顺序，两轮加速比（217.08× 与 212.30×）同量级。
+- GCC 13.4 在 `-O3 -mcpu=cortex-a9 -mfpu=neon` 下**没有**为这段标量卷积生成任何 NEON（三个 ARM 构建的 `conv_layer` 均为 0 条向量指令）。允许自动向量化构建的测得中位数慢约0.785%；这是当前源码与编译器的结果，不代表手写NEON或优化库的性能。
+- 手写NEON微内核实测1.17 MAC/cycle，标量微内核为0.248。PL卷积达到152.99 MAC/cycle，为384峰值的39.8%。按NEON微内核速率换算整个卷积MAC数得到1,262.58 ms及24.52×，只是假设相同有效速率的推算；没有NEON完整网络实测，不能称作严格性能上界，也不再引用无证据的“进一步调优2～4倍后6～12×”。
+- 上一节与本节ARM中位数相差约−2.2%，PL接近；测试二进制与内存布局不同，但未通过单因素实验确认差异原因，不能作硬件优化收益。
 
-![统计对比主图](../temporary/arm_pl_stats_20261027/figures/fig1_overview.svg)
+补充核对：合并全部主试验样本的ARM/PL中位比为212.287379×（212.29×），对应归档BCa 95%区间212.14～212.43；标题212.296174×（212.30×）则先逐输入取中位数再等权汇总。两种估计量分开标注。归档BCa以独立单次运行重采样，并未按轮次聚类；原p值和区间只作同会话探索性描述，不支持跨板、跨模型推断。
+
+![当前版本逐输入ARM与PL时延](../temporary/arm_pl_stats_20261027/figures_v2/fig1_latency.svg)
+
+![当前版本全部主试验时延分布](../temporary/arm_pl_stats_20261027/figures_v2/fig2_ecdf.svg)
+
+新版图片读取同一批原始数据；[合并样本统计表](../temporary/arm_pl_stats_20261027/figures_v2/table1_main.svg)采用212.29×。
+
+经验累积图横轴为各路径耗时相对该路径合并中位数的百分比偏差，用于展示归一化波动；绝对时延由上一张对数横轴图给出。
 
 测量后已恢复显示、采集、三个服务、inittab、governor 与全部持久文件哈希，`dmesg` 无新增 `mmc0`/I/O 错误，生产仍处停止。单板、3 张回放照片、1 个模型，结论不外推到其他板卡或其他网络；未做能耗测量与精度评估。
 
 [完整统计报告](../temporary/arm_pl_stats_20261027/report.md)、[逐算子图](../temporary/arm_pl_stats_20261027/figures/fig3_operators.svg)、[规模律](../temporary/arm_pl_stats_20261027/figures/fig4_scaling.svg)、[稳定性与方差分解](../temporary/arm_pl_stats_20261027/figures/fig5_stability.svg)、[编译敏感性](../temporary/arm_pl_stats_20261027/figures/fig6_sensitivity.svg)、[Roofline](../temporary/arm_pl_stats_20261027/figures/fig7_roofline.svg)、[统计表](../temporary/arm_pl_stats_20261027/figures/table1_statistics.svg)。原始数据 `download/raw_trials.csv`、`download/raw_layers.csv`、`download/raw_calibration.csv`；检验结果 `analysis/tests.json`；预先固定条件 `plan.json`、`schedule.json`；分析与绘图 `analyze.py`、`figures.py`；恢复核对 `download/restored_verify.txt`。
-

@@ -314,10 +314,12 @@ async function create() {
   <div class="page-heading">
     <div>
       <h1>
-        <Icon name="device" :size="22" />
-        {{
-          route.meta.tabs?.find((t) => t.tab === tab)?.label ?? route.meta.title
-        }}
+        设备诊断<span class="page-tab"
+          >/ {{
+            route.meta.tabs?.find((t) => t.tab === tab)?.label ??
+            route.meta.title
+          }}</span
+        >
       </h1>
       <p class="mono">
         {{ displayName(devices.current?.name ?? "（无设备）") }} ·

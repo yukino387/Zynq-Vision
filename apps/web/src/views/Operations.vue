@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { randomUUID } from "../uuid";
 import {
   chinese,
   displayName,
@@ -34,7 +35,8 @@ const auth = useAuthStore(),
   inspections = useInspectionStore(),
   notices = useNotificationStore(),
   busy = ref(false),
-  connecting = ref(false);
+  connecting = ref(false),
+  refreshing = ref(false);
 watch(
   () => route.query.setup,
   (setup) => {
@@ -62,7 +64,7 @@ function closeProductSetup() {
     },
   });
 }
-const clientId = crypto.randomUUID();
+const clientId = randomUUID();
 let sequence = 0;
 const device = computed(() => devices.current),
   terminalState = computed(() => device.value?.terminal?.state ?? null),
@@ -84,6 +86,9 @@ const localCounts = computed(() =>
   terminalState.value?.productionRunId
     ? terminalState.value.runCounts
     : terminalState.value?.counts,
+);
+const localTotal = computed(() =>
+  Object.values(localCounts.value ?? {}).reduce((sum, count) => sum + count, 0),
 );
 const inspecting = computed(() => terminalState.value?.production === true);
 const frames = ref<Preview[]>([]),
@@ -194,7 +199,7 @@ async function capture() {
         terminalState.value?.product?.id,
       clientId,
       localSequence: ++sequence,
-      idempotencyKey: crypto.randomUUID(),
+      idempotencyKey: randomUUID(),
     });
     notices.add("训练样本已保存，可在样本库标注；不计入检测件数");
     await load();
@@ -215,6 +220,17 @@ async function connect() {
     notices.error(e);
   } finally {
     connecting.value = false;
+  }
+}
+/** 空画面状态下手动拉一次设备快照，不等待实时推送。 */
+async function refreshState() {
+  refreshing.value = true;
+  try {
+    await devices.snapshot();
+  } catch (e) {
+    notices.error(e);
+  } finally {
+    refreshing.value = false;
   }
 }
 async function control(start: boolean) {
@@ -253,7 +269,7 @@ async function checkOne() {
   try {
     const key = `vision.check.${device.value.id}`;
     checkRequest.value ||=
-      terminalState.value?.pendingRequestId || crypto.randomUUID();
+      terminalState.value?.pendingRequestId || randomUUID();
     sessionStorage.setItem(key, checkRequest.value);
     await post(`/devices/${device.value.id}/check`, {
       requestId: checkRequest.value,
@@ -521,7 +537,55 @@ async function checkOne() {
           :region="previewProduct?.region"
           :regions="positionedRegions"
           :postprocess="shown?.postprocess"
-        />
+        >
+          <template #empty>
+            <div class="stage-empty">
+              <span class="stage-empty-code">NO SIGNAL</span>
+              <b>{{
+                device?.connectionState === "ONLINE"
+                  ? "等待图像帧"
+                  : "等待设备心跳"
+              }}</b>
+              <p>
+                {{
+                  device?.connectionState === "ONLINE"
+                    ? "设备已在线，完整帧到达后会在此显示。"
+                    : "检查 12V 供电、网线连接与板端服务状态。"
+                }}
+              </p>
+              <div class="stage-empty-actions">
+                <UiButton
+                  v-if="
+                    auth.engineer &&
+                    device &&
+                    device.connectionState !== 'ONLINE' &&
+                    device.executionMode !== 'LINUX_TERMINAL'
+                  "
+                  variant="primary"
+                  icon="network"
+                  :loading="connecting"
+                  @click="connect"
+                >
+                  连接设备
+                </UiButton>
+                <UiButton
+                  variant="secondary"
+                  icon="refresh"
+                  :loading="refreshing"
+                  @click="refreshState"
+                >
+                  刷新状态
+                </UiButton>
+                <UiButton
+                  v-if="auth.engineer"
+                  variant="ghost"
+                  :to="{ name: 'diagnostics' }"
+                  >设备诊断</UiButton
+                >
+              </div>
+            </div>
+          </template>
+        </ImageViewer>
         <div class="canvas-footer">
           <span>{{
             device?.connectionState !== "ONLINE"
@@ -716,92 +780,74 @@ async function checkOne() {
         </p>
       </div>
 
-      <section v-if="terminalState" class="side-card runtime-card">
+      <section v-if="terminalState" class="side-card count-card">
         <div class="side-card-title">
-          <span><Icon name="device" :size="15" /> 设备运行状态</span>
+          <span>{{ terminalState.productionRunId ? "本批计数" : "本机累计" }}</span>
           <span>{{ activity.label }}</span>
         </div>
-        <p class="mono runtime-line">
-          模型：{{ terminalState.model?.version || "未下发" }}
-        </p>
-        <p class="mono runtime-line">
-          产品：{{
-            terminalState.product?.product ||
-            terminalState.product?.name ||
-            "未分配"
-          }}
-        </p>
-        <p class="mono runtime-line">
-          {{ activity.label }} ·
-          {{ terminalState.productionRunId ? "本批次" : "本机累计" }}
-          {{
-            terminalState.productionRunId
-              ? terminalState.runTotal
-              : terminalState.total
-          }}
-          件
-        </p>
-        <p class="mono runtime-line">
-          全机待上传：{{ terminalState.pendingSync }} 条（含历史批次和补检） ·
-          最近原判：
-          {{
-            terminalState.last ? chinese(terminalState.last.result) : "尚无结果"
-          }}
-        </p>
-      </section>
-      <section v-if="terminalState" class="side-card">
-        <div class="side-card-title">
-          {{
-            terminalState.productionRunId ? "本批次自动检测" : "本机累计检测"
-          }}
+        <div class="count-readout">
+          <div class="count-total">
+            <em>总计</em><b>{{ localTotal }}</b>
+          </div>
+          <div>
+            <em>合格</em><b class="tone-ok">{{ localCounts?.PASS ?? 0 }}</b>
+          </div>
+          <div>
+            <em>不合格</em><b class="tone-crit">{{ localCounts?.FAIL ?? 0 }}</b>
+          </div>
+          <div>
+            <em>待确认</em><b class="tone-warn">{{ localCounts?.REVIEW ?? 0 }}</b>
+          </div>
+          <div>
+            <em>错误</em><b>{{ localCounts?.ERROR ?? 0 }}</b>
+          </div>
         </div>
-        <p>
-          总计
-          {{
-            Object.values(localCounts ?? {}).reduce(
-              (sum, count) => sum + count,
-              0,
-            )
-          }}
-          件 · 合格 {{ localCounts?.PASS ?? 0 }} · 不合格
-          {{ localCounts?.FAIL ?? 0 }} · 判定不确定
-          {{ localCounts?.REVIEW ?? 0 }} · 错误 {{ localCounts?.ERROR ?? 0 }}
-        </p>
-        <RouterLink
-          :to="{
-            name: 'production',
-            query: { run: terminalState.productionRunId || undefined },
-          }"
-          >查看批次统计</RouterLink
+        <div class="count-meta">
+          <span class="mono"
+            >模型 {{ terminalState.model?.version || "未下发" }}</span
+          >
+          <span class="mono"
+            >待上传 {{ terminalState.pendingSync }} 条</span
+          >
+          <RouterLink
+            :to="{
+              name: 'production',
+              query: { run: terminalState.productionRunId || undefined },
+            }"
+            >批次统计 →</RouterLink
+          >
+        </div>
+        <details
+          v-if="
+            terminalState.product?.checks?.length ||
+            terminalState.product?.instructions
+          "
+          class="requirements"
         >
-        <p class="note">
-          产品离场后自动计件；此处包含待上传记录，批次页统计已上传记录。
-        </p>
-        <div
-          v-if="terminalState.product?.checks?.length"
-          class="task-requirements"
-        >
-          <b>当前方案要求</b>
-          <p v-for="check in terminalState.product.checks" :key="check.classId">
+          <summary>方案要求与操作说明</summary>
+          <p
+            v-for="check in terminalState.product?.checks ?? []"
+            :key="check.classId"
+          >
             {{ check.label }}：{{
               check.min === check.max ? check.min : `${check.min}–${check.max}`
             }}
             个
             <template v-if="check.region"
-              >；中心 X {{ (check.region.x * 100).toFixed(0) }}–{{
+              >；X {{ (check.region.x * 100).toFixed(0) }}–{{
                 ((check.region.x + check.region.width) * 100).toFixed(0)
               }}%，Y {{ (check.region.y * 100).toFixed(0) }}–{{
                 ((check.region.y + check.region.height) * 100).toFixed(0)
               }}%</template
             >
           </p>
-        </div>
-        <p class="task-instructions">
-          {{
-            terminalState.product?.instructions ||
-            "请按当前产品方案摆放，产品离开后自动保存一件。"
-          }}
-        </p>
+          <p class="task-instructions">
+            {{
+              terminalState.product?.instructions ||
+              "请按当前产品方案摆放，产品离开后自动保存一件。"
+            }}
+          </p>
+        </details>
       </section>
       <div class="inspector-section">
         <h3>
@@ -1084,10 +1130,10 @@ async function checkOne() {
 .workbench-stage .vision-canvas :deep(.image-stage) {
   flex: none;
   width: 100%;
-  height: auto;
-  min-height: 0;
+  height: clamp(320px, calc(100dvh - 440px), 600px);
+  min-height: 320px;
   max-height: none;
-  aspect-ratio: 1 / 1;
+  aspect-ratio: auto;
 }
 /* 连续帧：标题独占一行，最近 8 帧在同一行内自适应，不再横向截断。 */
 .frame-filmstrip {

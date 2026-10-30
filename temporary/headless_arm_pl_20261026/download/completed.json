@@ -1,7 +1,0 @@
-{
-  "cases": 3,
-  "int8Equal": true,
-  "bytesPerOutput": 8085,
-  "headless": true,
-  "allMeasuredSamplesRetained": true
-}

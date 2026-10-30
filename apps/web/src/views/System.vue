@@ -651,12 +651,12 @@ const healthCards = computed(() => {
   color: var(--muted);
 }
 .health-body strong {
-  font-family: var(--mono);
-  font-size: 20px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-family: var(--font);
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 .health-body small {
   color: var(--muted);

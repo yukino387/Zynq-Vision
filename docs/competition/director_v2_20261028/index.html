@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>在这块板上 · 导演视觉工作台</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header><div><p class="eyebrow">FPGA FILM / DIRECTOR'S LAB 02</p><h1>在这块板上<span>导演故事板与动态预演</span></h1></div><div class="header-actions"><button id="sheetToggle">查看全片故事板</button><a href="plan.md">完整导演方案 ↗</a></div></header>
+<div class="notice"><span class="dot"></span>预演用于判断构图、动作与剪辑节奏。设备为绘制的机位示意，未拍摄运行录像；归档图片与测量另行标明。</div>
+<main id="workspace">
+<section class="theater"><div id="mainframe"></div><div class="transport"><button id="play" aria-label="播放预演">▶ 播放</button><button id="prev" aria-label="上一镜">← 上一镜</button><button id="next" aria-label="下一镜">下一镜 →</button><span id="time">00:00 / 02:56</span><select id="speed" aria-label="预演速度"><option value="1">1× 正常节奏</option><option value="2">2× 浏览</option><option value=".5">0.5× 看转场</option></select></div><input type="range" id="scrub" min="0" max="175.99" value="0" step="0.01" aria-label="预演时间轴"><div id="timeline"></div><div class="loops"><span>重点审看</span><button data-loop="0,26">开场：动作 → 露出设备</button><button data-loop="38,73">实物 → 计算 → 实物</button><button data-loop="73,105">供数 → 测量 → 实现</button><button id="clearLoop">取消循环</button></div><p class="micro">空格播放 / 暂停，左右方向键逐镜；无配音、无音乐，台词在右侧。镜内是动作预演，镜间目前硬切；最终声画转场见分镜说明。</p></section>
+<aside id="inspector"><div class="shot-label" id="shotlabel"></div><h2 id="shotTitle"></h2><p id="status" class="status"></p><dl><dt>导演意图 / 动作</dt><dd id="action"></dd><dt>镜头与转场</dt><dd id="cut"></dd><dt>旁白草稿</dt><dd id="vo" class="voice"></dd><dt>声音</dt><dd id="sound"></dd><dt>已有依据</dt><dd id="proof"></dd><dt>现场要满足的条件</dt><dd id="gate"></dd><dt>来源入口</dt><dd id="source" class="source"></dd></dl></aside>
+</main>
+<section id="boardSection" hidden><div class="section-heading"><h2>全片故事板 <span>16 镜 / 176 秒</span></h2><p>点击任意镜头，回到播放器细看。实拍画面是待执行的拍摄设计，不能当作已录制的演示。</p></div><div id="sheet"></div></section>
+<section class="notes"><div><p class="eyebrow">导演判断</p><h2>先看见回应，再理解计算。</h2><p>每次进入芯片，都从真实动作出发；每次解释结束，都回到同一设备。技术深度落在两件事：怎样并行，怎样持续供数。性能比较只占一个独立段落，完整应用由一次真实记录串起。</p></div><div><p class="eyebrow">素材策略</p><p><b>实拍主导：</b>动作与响应、整机露出、主案例、板卡拉焦、记录和手机采样。</p><p><b>已有资料：</b>原图、历史记录、DCP可视化、当前CSV。</p><p><b>新制动画：</b>实物功能剖面、双乘积展开、行读取/解包交叠。旧Three.js样片只取视觉经验。</p><a href="assets/manifest.json">查看素材原始路径与 SHA-256 ↗</a></div></section>
+<footer>本地导演研究 · 2026-10-28 · 未访问板卡，未制作完整成片 · 176秒预留4秒提交余量</footer>
+<script src="shots.js"></script><script src="art.js"></script><script src="player.js"></script></body></html>

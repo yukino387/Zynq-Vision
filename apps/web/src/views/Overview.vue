@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { terminalActivity } from "@vision/shared";
+import { chinese, terminalActivity } from "@vision/shared";
 import type { InspectionBatch, Page } from "@vision/contracts";
 import { api, errorText } from "../api";
 import { useDeviceStore } from "../stores/devices";
@@ -86,19 +86,105 @@ watch(() => state.value?.productionRunId, load);
       >
     </div>
   </div>
-  <UiCard padding="lg" class="current-device">
-    <div>
-      <UiBadge :tone="online ? 'forest' : 'warn'" chip dot>{{
-        online ? "设备在线" : "设备未连接"
-      }}</UiBadge>
-      <h2>{{ activity.label }}</h2>
-      <p>
-        {{ device?.name || "尚未选择设备" }} ·
-        {{ state?.product?.product || state?.product?.name || "尚未配置产品" }}
-      </p>
-      <p class="muted">{{ activity.hint }}</p>
+  <UiCard padding="none" class="current-device">
+    <div class="device-status">
+      <div class="device-copy">
+        <div class="device-kicker">
+          <span>边缘检测节点</span>
+          <UiBadge :tone="online ? 'success' : 'warn'" dot :pulse="!online">{{
+            online ? "设备在线" : "设备未连接"
+          }}</UiBadge>
+          <span class="mono device-code"
+            >ID / {{ device?.id?.slice(-8) || "UNBOUND" }}</span
+          >
+        </div>
+        <h2>{{ activity.label }}</h2>
+        <p class="device-name">
+          {{ device?.name || "尚未选择设备" }} ·
+          {{
+            state?.product?.product ||
+            state?.product?.name ||
+            "尚未配置产品"
+          }}
+        </p>
+        <p class="device-hint">{{ activity.hint }}</p>
+      </div>
+      <div class="device-context">
+        <div>
+          <span>运行模型</span>
+          <b class="mono">{{ state?.model?.version ?? "未下发" }}</b>
+        </div>
+        <div>
+          <span>设备协议</span>
+          <b class="mono">{{ device?.protocolVersion ?? "未上报" }}</b>
+        </div>
+        <div>
+          <span>最近心跳</span>
+          <b class="mono">{{
+            state?.receivedAt
+              ? new Date(state.receivedAt).toLocaleTimeString("zh-CN")
+              : "未上报"
+          }}</b>
+        </div>
+      </div>
+      <div class="device-action-col">
+        <dl class="device-kpis">
+          <div>
+            <dt>检测总数</dt>
+            <dd>{{ total ?? "—" }}<small>件</small></dd>
+          </div>
+          <div>
+            <dt>待上传</dt>
+            <dd>{{ state?.pendingSync ?? 0 }}<small>条</small></dd>
+          </div>
+          <div>
+            <dt>产品版本</dt>
+            <dd class="is-text">V{{ state?.product?.version ?? "—" }}</dd>
+          </div>
+        </dl>
+        <UiButton variant="primary" to="/workbench"
+          >进入现场检测 <span aria-hidden="true">→</span></UiButton
+        >
+      </div>
     </div>
-    <UiButton variant="primary" to="/workbench">进入现场检测</UiButton>
+    <div class="signal-chain" aria-label="检测链路状态">
+      <div class="chain-node" :class="{ 'is-on': online }">
+        <span class="chain-index mono">01</span>
+        <div class="chain-body">
+          <b>图像采集</b><em>OV5640 · RGB565 416×416</em>
+        </div>
+        <span class="chain-state">{{ online ? "运行" : "待机" }}</span>
+      </div>
+      <span class="chain-link" aria-hidden="true"></span>
+      <div class="chain-node" :class="{ 'is-on': online && !!state?.model }">
+        <span class="chain-index mono">02</span>
+        <div class="chain-body">
+          <b>边缘推理</b><em>PL 加速器 · INT8</em>
+        </div>
+        <span class="chain-state">{{ state?.model?.version ?? "未下发" }}</span>
+      </div>
+      <span class="chain-link" aria-hidden="true"></span>
+      <div class="chain-node" :class="{ 'is-on': online && !!state?.product }">
+        <span class="chain-index mono">03</span>
+        <div class="chain-body">
+          <b>规则判定</b
+          ><em>产品方案 V{{ state?.product?.version ?? "—" }}</em>
+        </div>
+        <span class="chain-state">{{
+          state?.last ? chinese(state.last.result) : "等待结果"
+        }}</span>
+      </div>
+      <span class="chain-link" aria-hidden="true"></span>
+      <div class="chain-node" :class="{ 'is-on': online }">
+        <span class="chain-index mono">04</span>
+        <div class="chain-body">
+          <b>记录追溯</b><em>平台批次与证据链</em>
+        </div>
+        <span class="chain-state">{{
+          state?.pendingSync ? `${state.pendingSync} 条待上传` : "已同步"
+        }}</span>
+      </div>
+    </div>
   </UiCard>
 
   <section class="section-space">
@@ -172,10 +258,15 @@ watch(() => state.value?.productionRunId, load);
               new Date(batch.createdAt).toLocaleString("zh-CN")
             }}</small>
           </div>
+          <span class="batch-metric">
+            <em>已检</em>
+            <b class="mono">{{ batch._count?.inspections ?? "—" }}</b>
+            <small>件</small>
+          </span>
           <span class="batch-state" :class="{ open: batch.status === 'OPEN' }">{{
             batch.status === "OPEN" ? "进行中" : "已结束"
           }}</span>
-          <span>查看结果 →</span>
+          <span class="batch-link">查看结果 <i aria-hidden="true">→</i></span>
         </RouterLink>
       </div>
       <p v-else class="muted">

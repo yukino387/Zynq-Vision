@@ -43,6 +43,9 @@ applyTab();
               : "全部检测记录"
         }}
       </h1>
+      <p class="mono">
+        共 {{ list.total.value }} 条记录 · 点击单件查看证据链与复核
+      </p>
     </div>
     <RouterLink :to="{ name: 'workbench' }">返回工作台</RouterLink>
   </div>
@@ -61,6 +64,13 @@ applyTab();
     >
       查询</button
     ><button
+      v-if="auth.engineer"
+      type="button"
+      :disabled="list.loading.value"
+      @click="list.load"
+    >
+      刷新</button
+    ><button
       v-else
       type="button"
       :disabled="list.loading.value"
@@ -76,8 +86,8 @@ applyTab();
     :empty="!list.items.value.length"
     hint="当前筛选下没有检测记录。"
     @retry="list.load"
-    ><div class="panel table-wrap">
-      <table>
+    ><div class="panel table-wrap records-wrap">
+      <table class="records-table">
         <thead>
           <tr>
             <th v-if="auth.engineer">检测编号</th>
@@ -95,15 +105,21 @@ applyTab();
         </thead>
         <tbody>
           <tr v-for="i in list.items.value" :key="i.id">
-            <td v-if="auth.engineer" class="mono" :title="i.id">
+            <td
+              v-if="auth.engineer"
+              class="mono record-id"
+              :title="i.id"
+            >
               {{ i.id.slice(-10) }}
             </td>
-            <td>{{ new Date(i.createdAt).toLocaleString() }}</td>
-            <td>
+            <td class="record-time">
+              {{ new Date(i.createdAt).toLocaleString() }}
+            </td>
+            <td class="record-result">
               <Status chip :value="i.reviewResult ?? i.result" />
               <small v-if="i.reviewResult">已更正</small>
             </td>
-            <td>
+            <td class="record-state">
               {{
                 i.result === "ERROR"
                   ? "检测执行失败"
@@ -112,7 +128,7 @@ applyTab();
                     : "检测完成"
               }}
             </td>
-            <td class="action-cell">
+            <td class="action-cell record-action">
               <div class="row-actions">
                 <RouterLink
                   class="table-action"

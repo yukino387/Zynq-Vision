@@ -5,6 +5,7 @@ import concurrent.futures
 import fcntl
 import hashlib
 import http.server
+import http.client
 import json
 import os
 from pathlib import Path
@@ -657,6 +658,31 @@ def install_product(command):
 class PreviewHandler(http.server.BaseHTTPRequestHandler):
     """Workbench bridge; control and sampling validate the bound platform session."""
 
+    protocol_version = 'HTTP/1.1'
+    disable_nagle_algorithm = True
+
+    def setup(self):
+        super().setup()
+        self.engine_connection = http.client.HTTPConnection('127.0.0.1', 8877, timeout=2)
+
+    def finish(self):
+        try:
+            super().finish()
+        finally:
+            self.engine_connection.close()
+
+    def fetch_frame(self, path):
+        try:
+            self.engine_connection.request('GET', path)
+            response = self.engine_connection.getresponse()
+            body = response.read()
+        except Exception:
+            self.engine_connection.close()
+            raise
+        if response.status != 200:
+            raise urllib.error.HTTPError(path, response.status, response.reason, response.headers, None)
+        return body
+
     def platform_actor(self):
         connection = json.loads(read(STATE/'connection.json', '{}'))
         authorization = self.headers.get('Authorization', '')
@@ -727,11 +753,11 @@ class PreviewHandler(http.server.BaseHTTPRequestHandler):
         if path in ('/capture', '/preview'):
             try:
                 if path == '/capture':self.platform_actor()
-                target = 'http://127.0.0.1:8877/frame'
+                target = '/frame'
                 if path == '/preview':
                     after = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('after', [''])[0]
                     if after.isdigit():target += '?after=' + after
-                with HTTP.open(target, timeout=2) as response:body = response.read()
+                body = self.fetch_frame(target)
                 self.reply(200, body)
             except urllib.error.HTTPError as exc:self.reply(exc.code if exc.code in (401,403) else 409, b'Capture unavailable')
             except Exception as exc:self.reply(409, json.dumps({'error': str(exc)}, ensure_ascii=False).encode())

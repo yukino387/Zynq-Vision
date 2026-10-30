@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-28",
+  "scope": "offline; no board access",
+  "total_rows": 714,
+  "main_rows": 648,
+  "median_ms": {
+    "arm_novec": 12013.944926,
+    "pl": 56.590492
+  },
+  "ratio": 212.29617381661924,
+  "per_input_output_hash_counts": {
+    "photo_02": 1,
+    "photo_23": 1,
+    "photo_15": 1
+  }
+}

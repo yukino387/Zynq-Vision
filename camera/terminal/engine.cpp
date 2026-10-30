@@ -1,12 +1,15 @@
 #include "core.h"
 #include "hardware.h"
 #include "passage.h"
+#include "belt_counter.h"
 #include "nlohmann/json.hpp"
 #include "httplib.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
+#include <memory>
 #include <csignal>
 #include <cctype>
 #include <cmath>
@@ -147,19 +150,12 @@ class Engine {
     std::array<unsigned,4> total_counts{};
     std::array<unsigned,4> run_counts{};
     unsigned pending_count=0;
-    // Conveyor count: every confirmed track of the primary class is counted once per run.
-    std::set<unsigned> belt_ids;
-    unsigned belt_caps=0;
+    BeltCounter belt;
     // 清零基线保存清零时已存在的记录文件名；此后新增的记录才计入，不依赖文件时间。
     std::set<std::string> counts_baseline_ids;
     bool has_baseline=false;
     void count_belt() {
-        unsigned primary=6;for(const auto& c:rules.checks)if(c.minimum>0)primary=std::min(primary,c.class_id);
-        for(const auto& box:frame_boxes) {
-            const auto x=(box.x1+box.x2)/832.0,y=(box.y1+box.y2)/832.0;
-            if(box.class_id!=primary || !box.track_confirmed || box.confidence<rules.confidence || x<rules.region[0] || x>rules.region[0]+rules.region[2] || y<rules.region[1] || y>rules.region[1]+rules.region[3])continue;
-            if(belt_ids.insert(box.track_id).second){++belt_caps;if(belt_ids.size()>4096)belt_ids.erase(belt_ids.begin());}
-        }
+        if(product.at("rules").value("purpose",std::string())=="COUNT")belt.update(frame_boxes,frame.monotonic_ns,rules);
     }
     void count_record(const Record& record,bool include=true) {
         const std::string result=record.payload.at("localResult");
@@ -184,6 +180,7 @@ class Engine {
     }
     void reset_runtime() {
         tracker.reset();frame_filter=FilterResult{};frame_boxes.clear();frame_display.clear();frame_decoded=false;
+        belt.reset();
         frame=Frame{};last=nullptr;production=false;production_run.clear();run_counts={};passage.reset();paused=model.is_null();
         preview_bytes.clear();preview_frame_ns=0;frame_ready.notify_all();
     }
@@ -240,6 +237,8 @@ public:
     json state() {
         std::lock_guard<std::mutex> lock(mutex);unsigned total=0;
         const auto counts=counts_json(total_counts);for(const auto& value:counts.items())total+=value.value().get<unsigned>();
+        const auto exposure=hardware.camera_exposure();
+        const json exposure_state={{"algorithm","WORKSPACE_AEC_V1"},{"target",exposure.target},{"samples",exposure.samples},{"updates",exposure.updates},{"workspaceP60",exposure.corrected.p60},{"workspaceP95",exposure.corrected.p95},{"darkPermille",exposure.corrected.dark},{"highlightPermille",exposure.corrected.high},{"rawHighlightPermille",exposure.raw.high},{"manual",exposure.manual},{"aecControl",exposure.aec_control},{"vts",exposure.vts},{"maximumExposureLines",exposure.maximum},{"gainCeilingQ4",exposure.gain_ceiling},{"startupGainQ4",exposure.gain},{"startupExposureQ4",exposure.exposure_q4},{"error",exposure.error}};
         json model_state=nullptr,product_state=nullptr;
         if(!model.is_null())model_state={{"id",model.at("id")},{"version",model.at("version")},{"payloadSha256",model.at("payloadSha256")},{"weightsSha256",model.at("weightsSha256")},{"classes",model.at("classes")}};
         if(!product.is_null()) {
@@ -247,7 +246,7 @@ public:
             for(const auto& c:r.at("checks")){auto check=c;check["label"]=r.at("classes").at(c.at("classId").get<unsigned>());checks.push_back(check);}
             product_state={{"id",product.at("id")},{"name",product.at("name")},{"version",product.at("version")},{"product",r.at("product")},{"purpose",r.at("purpose")},{"region",r.at("region")},{"instructions",r.at("instructions")},{"checks",checks},{"postprocess",postprocess_json(rules.postprocess)},{"acceptance",product.at("acceptance")}};
         }
-        return {{"model",model_state},{"product",product_state},{"total",total},{"counts",counts},{"pendingSync",pending_count},{"last",last},{"error",error},{"syncError",sync_error},{"paused",paused},{"production",production},{"productionRunId",production_run.empty()?json(nullptr):json(production_run)},{"runCounts",counts_json(run_counts)},{"runTotal",run_counts[0]+run_counts[1]+run_counts[2]+run_counts[3]},{"beltCaps",belt_caps},{"passagePhase",production?passage.phase():"STOPPED"},{"inspectionRequestId",inspection_request.empty()?json(nullptr):json(inspection_request)},{"passageSamples",passage.samples()},{"pendingRequestId",pending_storage.empty()?json(nullptr):json(pending_storage)},{"frameId",frame.id},{"fresh",frame.monotonic_ns && clock_ns()-frame.monotonic_ns<3000000000ULL},{"diagnostics",{{"capturedFrames",captured_frames},{"lastCaptureMs",captured_frames?json(capture_ms):json(nullptr)},{"hwPrepareMs",prepare_ms},{"hwConvMs",conv_ms},{"hwForwardMs",forward_ms},{"hwPostMs",post_ms},{"hwExtractMs",extract_ms},{"cameraInitialized",true},{"modelVersion",model.is_null()?json(nullptr):model.at("version")}}}};
+        return {{"model",model_state},{"product",product_state},{"total",total},{"counts",counts},{"pendingSync",pending_count},{"last",last},{"error",error},{"syncError",sync_error},{"paused",paused},{"production",production},{"productionRunId",production_run.empty()?json(nullptr):json(production_run)},{"runCounts",counts_json(run_counts)},{"runTotal",run_counts[0]+run_counts[1]+run_counts[2]+run_counts[3]},{"beltCaps",belt.total()},{"passagePhase",production?passage.phase():"STOPPED"},{"inspectionRequestId",inspection_request.empty()?json(nullptr):json(inspection_request)},{"passageSamples",passage.samples()},{"pendingRequestId",pending_storage.empty()?json(nullptr):json(pending_storage)},{"frameId",frame.id},{"fresh",frame.monotonic_ns && clock_ns()-frame.monotonic_ns<3000000000ULL},{"diagnostics",{{"cameraExposure",exposure_state},{"beltCounting",{{"algorithm","TRACK_CROSSING_V1"},{"unresolvedTracks",belt.lost()}}},{"capturedFrames",captured_frames},{"lastCaptureMs",captured_frames?json(capture_ms):json(nullptr)},{"hwPrepareMs",prepare_ms},{"hwConvMs",conv_ms},{"hwForwardMs",forward_ms},{"hwPostMs",post_ms},{"hwExtractMs",extract_ms},{"cameraInitialized",true},{"modelVersion",model.is_null()?json(nullptr):model.at("version")}}}};
     }
     json history(unsigned page,const std::string& filter) {
         std::lock_guard<std::mutex> lock(mutex);std::vector<const Record*> selected;
@@ -270,7 +269,7 @@ public:
         const bool fresh=clock_ns()-snapshot.monotonic_ns<3000000000ULL;
         if(!decoded){filtered=frame_detections(snapshot,policy);decoded_boxes=snapshot.level.active?filtered.display:filtered.boxes;}
         json boxes=json::array();for(const auto& b:decoded_boxes)boxes.push_back({{"classId",b.class_id},{"confidence",b.confidence},{"x1",b.x1},{"y1",b.y1},{"x2",b.x2},{"y2",b.y2},{"trackId",b.track_id},{"trackConfirmed",b.track_confirmed}});
-        auto metadata=json({{"postprocess",filter_json(filtered,policy)},{"frameId",snapshot.id},{"fresh",fresh},{"boxes",boxes},{"modelId",model_state.at("id")},{"modelVersion",model_state.at("version")},{"modelPayloadSha256",model_state.at("payloadSha256")},{"modelClasses",model_state.at("classes")},{"planId",product_state.is_null()?json(nullptr):product_state.at("id")},{"planVersion",product_state.is_null()?json(nullptr):product_state.at("version")}});
+        auto metadata=json({{"postprocess",filter_json(filtered,policy)},{"frameId",snapshot.id},{"capturedMonotonicNs",std::to_string(snapshot.monotonic_ns)},{"fresh",fresh},{"boxes",boxes},{"modelId",model_state.at("id")},{"modelVersion",model_state.at("version")},{"modelPayloadSha256",model_state.at("payloadSha256")},{"modelClasses",model_state.at("classes")},{"planId",product_state.is_null()?json(nullptr):product_state.at("id")},{"planVersion",product_state.is_null()?json(nullptr):product_state.at("version")}});
         if(snapshot.level.active)metadata["level"]=level_json(snapshot,product_state.is_null()?.5:product_state.at("acceptance").at("confidence").get<double>());
         const auto meta=metadata.dump();
         const uint32_t size=meta.size();std::string bytes(reinterpret_cast<const char*>(&size),4);bytes+=meta;bytes.append(reinterpret_cast<const char*>(snapshot.pixels.data()),snapshot.pixels.size()*2);
@@ -328,7 +327,7 @@ public:
             if(paused || !frame.monotonic_ns || clock_ns()-frame.monotonic_ns>=3000000000ULL)throw std::runtime_error("等待有效图像后再开始自动检测");
             if(std::none_of(rules.checks.begin(),rules.checks.end(),[](const Check& check){return check.minimum>0;}))throw std::runtime_error("视觉计件需要至少一个必需目标；请将产品主体加入识别类别");
             production_run=read_text("/proc/sys/kernel/random/uuid",64);while(!production_run.empty() && std::isspace(production_run.back()))production_run.pop_back();
-            passage.reset();run_counts={};belt_ids.clear();belt_caps=0;paused=false;production=true;
+            passage.reset();run_counts={};belt.reset();paused=false;production=true;
         } else stop_production();
     }
     void reset_counts() {
@@ -336,7 +335,7 @@ public:
         std::lock_guard<std::mutex> lock(mutex);
         if(!inspection_request.empty())throw std::runtime_error("外部触发检测中");
         stop_production();
-        total_counts={};run_counts={};belt_ids.clear();belt_caps=0;last=nullptr;
+        total_counts={};run_counts={};belt.reset();last=nullptr;
         counts_baseline_ids.clear();
         std::string manifest;
         for(const auto& entry:fs::directory_iterator(root/"records"))if(entry.path().extension()==".json") {
@@ -515,6 +514,61 @@ private:
         passage.reset();
     }
 };
+class PreviewStream {
+    struct BufferedFrame {
+        uint64_t sequence,queued_ns;
+        std::shared_ptr<const std::string> bytes;
+    };
+    Engine& engine;
+    std::mutex mutex;
+    std::condition_variable ready;
+    std::deque<BufferedFrame> frames;
+    uint64_t sequence=0;
+    unsigned subscribers=0;
+    bool stopped=false,failed=false;
+    std::thread producer;
+    void produce(){
+        uint32_t after=0;
+        for(;;){
+            {std::unique_lock<std::mutex> lock(mutex);ready.wait(lock,[&]{return stopped || subscribers;});if(stopped)return;}
+            try{
+                auto body=std::make_shared<const std::string>(engine.preview(after));
+                uint32_t length=0;std::memcpy(&length,body->data(),4);
+                const auto metadata=json::parse(body->substr(4,length));
+                if(!metadata.at("fresh").get<bool>())throw std::runtime_error("Stale preview");
+                const auto identifier=metadata.at("frameId").get<uint32_t>();
+                if(identifier==after)continue;
+                after=identifier;
+                {std::lock_guard<std::mutex> lock(mutex);if(subscribers){frames.push_back({++sequence,clock_ns(),std::move(body)});if(frames.size()>8)frames.pop_front();failed=false;}}
+                ready.notify_all();
+            }catch(const std::exception&){
+                std::unique_lock<std::mutex> lock(mutex);failed=true;ready.notify_all();ready.wait_for(lock,std::chrono::milliseconds(500),[&]{return stopped || !subscribers;});if(stopped)return;
+            }
+        }
+    }
+public:
+    explicit PreviewStream(Engine& engine):engine(engine),producer([this]{produce();}){}
+    ~PreviewStream(){stop();producer.join();}
+    void stop(){std::lock_guard<std::mutex> lock(mutex);stopped=true;ready.notify_all();}
+    uint64_t subscribe(){std::lock_guard<std::mutex> lock(mutex);++subscribers;failed=false;ready.notify_all();return sequence;}
+    void unsubscribe(){std::lock_guard<std::mutex> lock(mutex);if(!--subscribers)frames.clear();ready.notify_all();}
+    bool send(uint64_t& cursor,httplib::DataSink& sink){
+        std::vector<BufferedFrame> batch;
+        {
+            std::unique_lock<std::mutex> lock(mutex);
+            ready.wait_for(lock,std::chrono::milliseconds(250),[&]{return stopped || failed || sequence-cursor>=3;});
+            if(stopped || failed || (!frames.empty() && cursor+1<frames.front().sequence))return false;
+            for(const auto& frame:frames)if(frame.sequence>cursor){batch.push_back(frame);if(batch.size()==3)break;}
+        }
+        for(const auto& frame:batch){
+            const uint32_t header[]={uint32_t(frame.bytes->size()),uint32_t((clock_ns()-frame.queued_ns)/1000000)};
+            if(!sink.write(reinterpret_cast<const char*>(header),sizeof(header)) || !sink.write(frame.bytes->data(),frame.bytes->size()))return false;
+            cursor=frame.sequence;
+        }
+        return true;
+    }
+};
+
 }
 int main(int argc,char** argv) {
     if(argc<2 || argc>3){std::cerr<<"Usage: vision-engine STATE_DIRECTORY [JOB_DIRECTORY]\n";return 2;}
@@ -523,7 +577,12 @@ int main(int argc,char** argv) {
         if(sched_setaffinity(0,sizeof(service_cpu),&service_cpu))throw std::runtime_error("Cannot assign service CPU");
         fs::create_directories(argv[1]);const int lock_fd=open((fs::path(argv[1])/"engine.lock").c_str(),O_RDWR|O_CREAT|O_CLOEXEC,0600);
         if(lock_fd<0 || flock(lock_fd,LOCK_EX|LOCK_NB))throw std::runtime_error("A terminal engine already owns this state directory");
-        Engine engine(argv[1]);httplib::Server server;server.new_task_queue=[] { return new httplib::ThreadPool(2); };server.set_payload_max_length(1024*1024);
+        Engine engine(argv[1]);PreviewStream preview(engine);httplib::Server preview_server;preview_server.new_task_queue=[] {return new httplib::ThreadPool(2);};preview_server.set_tcp_nodelay(true);
+        preview_server.Get("/preview-stream",[&](const auto&,auto& response){
+            auto cursor=preview.subscribe();response.set_header("Cache-Control","no-store");
+            response.set_chunked_content_provider("application/x-vision-frame-stream",[&,cursor](size_t,httplib::DataSink& sink) mutable {return preview.send(cursor,sink);},[&](bool){preview.unsubscribe();});
+        });
+        httplib::Server server;server.new_task_queue=[] { return new httplib::ThreadPool(2); };server.set_payload_max_length(1024*1024);
         auto guard=[](auto action,httplib::Response& response){try{response.set_content(action().dump(),"application/json");}catch(const std::exception& e){response.status=409;response.set_content(json({{"error",e.what()}}).dump(),"application/json");}};
         server.Get("/state",[&](const auto&,auto& r){guard([&]{return engine.state();},r);});
         server.Post("/inspect",[&](const auto& q,auto& r){guard([&]{return engine.inspect(json::parse(q.body));},r);});
@@ -560,7 +619,8 @@ int main(int argc,char** argv) {
             try{engine.set_production(false);}catch(const std::exception& e){std::cerr<<e.what()<<'\n';}
         });
         std::thread syncing([&]{while(running){engine.sync();for(unsigned i=0;i<100 && running;++i){if(sync_requested.exchange(false))break;std::this_thread::sleep_for(std::chrono::milliseconds(100));}}});
-        std::thread stopping([&]{while(running)std::this_thread::sleep_for(std::chrono::milliseconds(100));server.stop();});
-        const bool listened=server.listen("127.0.0.1",8877);running=false;worker.join();syncing.join();stopping.join();close(lock_fd);return listened?0:1;
+        std::thread preview_serving([&]{if(!preview_server.listen("0.0.0.0",8880))running=false;});
+        std::thread stopping([&]{while(running)std::this_thread::sleep_for(std::chrono::milliseconds(100));preview.stop();preview_server.stop();server.stop();});
+        const bool listened=server.listen("127.0.0.1",8877);running=false;worker.join();syncing.join();stopping.join();preview_serving.join();close(lock_fd);return listened?0:1;
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

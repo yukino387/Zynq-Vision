@@ -1,2 +1,0 @@
-from pathlib import Path
-p=Path('apps/web/src/views/Data.vue');s=p.read_text(encoding='utf-8');s=s.replace('''    ><select v-model="datasetId" aria-label="目标数据集">''','''    ><template v-if="missingAnnotation"><span class="tone-warn">所选样本尚未完成标注</span><button @click="open(missingAnnotation, true)">先完成标注</button></template><select v-model="datasetId" aria-label="目标数据集">''');p.write_text(s,encoding='utf-8')

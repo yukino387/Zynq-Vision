@@ -51,12 +51,12 @@ const displayBoxes = computed(
   () => mode.value === "PREVIEW" && showBoxes.value,
 );
 const boxColors = [
-  "#60c5ff",
-  "#ffc857",
-  "#d495ff",
-  "#75d69c",
-  "#ff9292",
-  "#5fdfd4",
+  "#c44921",
+  "#8f5f00",
+  "#2f6b4a",
+  "#3a5f86",
+  "#7a5a44",
+  "#5c6b52",
 ];
 function boxCaption(box: DetectionBox) {
   const chars = Array.from(displayName(box.label));
@@ -302,10 +302,12 @@ onUnmounted(() => {
         </svg>
       </div>
       <div v-else class="image-empty">
-        <b>{{ error ? "图像读取失败" : assets ? "暂无预览图" : "等待图像" }}</b
-        ><small>{{
-          error || (assets ? "该记录没有可用的预览图" : "连接设备以接收完整帧")
-        }}</small>
+        <slot name="empty">
+          <b>{{ error ? "图像读取失败" : assets ? "暂无预览图" : "等待图像" }}</b
+          ><small>{{
+            error || (assets ? "该记录没有可用的预览图" : "连接设备以接收完整帧")
+          }}</small>
+        </slot>
       </div>
     </div>
   </div>

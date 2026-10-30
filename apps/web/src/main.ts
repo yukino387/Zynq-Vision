@@ -10,6 +10,7 @@ import "./style.css";
 import "./workspace.css";
 import "./instrument.css";
 import "./demo.css";
+import "./atelier.css";
 
 const pinia = createPinia();
 const router = createRouter({

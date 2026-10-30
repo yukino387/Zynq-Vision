@@ -258,8 +258,8 @@ export function canAccess(
 }
 
 /** 登录后的落地页：管理员看总览，操作工直接进板端检测作业。 */
-export function landingFor(_role: Role | null | undefined) {
-  return "workbench";
+export function landingFor(role: Role | null | undefined) {
+  return role === "OPERATOR" ? "workbench" : "overview";
 }
 
 /** 侧栏项，按 order 排。 */

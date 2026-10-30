@@ -198,7 +198,11 @@ async function raw() {
     <p v-if="inspection.result === 'ERROR'" class="note">
       此次检测执行失败。请查看错误原因，排除故障后重新检测。
     </p>
-    <details v-else class="review-panel">
+    <details
+      v-else
+      class="review-panel"
+      :open="inspection.result === 'REVIEW'"
+    >
       <summary>纠正误判 / 补充说明</summary>
       <p class="note">
         开发时发现误判可在此更正结果。原始判定保留，正常检测无需逐件确认。

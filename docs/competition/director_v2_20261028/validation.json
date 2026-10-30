@@ -1,0 +1,13 @@
+{
+  "shots": 16,
+  "duration_seconds": 176,
+  "continuous_timeline": true,
+  "verified_source_assets": 6,
+  "valid_svg_keyframes": 22,
+  "browser_checks": [
+    "HTTP and file entry opened",
+    "play/pause and next-shot controls",
+    "all 16 shot boundaries match active scene"
+  ],
+  "scope": "Offline planning validation only; no new board test or footage."
+}

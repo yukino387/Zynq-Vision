@@ -2,21 +2,58 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <arm_neon.h>
 
 namespace terminal {
 namespace {
 using Image=std::vector<uint8_t>;
 int rounded(double value){return int(std::lrint(value));}
 void morph_axis(const Image& src,Image& dst,int width,int height,int radius,bool maximum,bool vertical) {
-    const int length=vertical?height:width,lines=vertical?width:height;
-    for(int line=0;line<lines;++line){
-        auto at=[&](int index){return vertical?index*width+line:line*width+index;};
-        int sum=0;for(int i=0;i<=std::min(radius,length-1);++i)sum+=src[at(i)]!=0;
-        for(int x=0;x<length;++x){
-            const int count=std::min(length-1,x+radius)-std::max(0,x-radius)+1;
-            dst[at(x)]=(maximum?sum>0:sum==count)?255:0;
-            if(x-radius>=0)sum-=src[at(x-radius)]!=0;
-            if(x+radius+1<length)sum+=src[at(x+radius+1)]!=0;
+    if(vertical){
+        // Update all columns together so each source row is read contiguously.
+        std::vector<uint8_t> sums(width,0),zeros(width,0);
+        for(int y=0;y<=std::min(radius,height-1);++y)
+            for(int x=0;x<width;++x)sums[x]+=src[y*width+x]!=0;
+        for(int y=0;y<height;++y){
+            const auto count=vdupq_n_u8(std::min(height-1,y+radius)-std::max(0,y-radius)+1);
+            const auto remove=y>=radius?src.data()+(y-radius)*width:zeros.data();
+            const auto add=y+radius+1<height?src.data()+(y+radius+1)*width:zeros.data();
+            int x=0;
+            for(;x+16<=width;x+=16){
+                auto sum=vld1q_u8(sums.data()+x);
+                vst1q_u8(dst.data()+y*width+x,maximum?vcgtq_u8(sum,vdupq_n_u8(0)):vceqq_u8(sum,count));
+                sum=vsubq_u8(sum,vshrq_n_u8(vld1q_u8(remove+x),7));
+                sum=vaddq_u8(sum,vshrq_n_u8(vld1q_u8(add+x),7));
+                vst1q_u8(sums.data()+x,sum);
+            }
+            const int required=std::min(height-1,y+radius)-std::max(0,y-radius)+1;
+            for(;x<width;++x){dst[y*width+x]=(maximum?sums[x]>0:sums[x]==required)?255:0;sums[x]-=remove[x]!=0;sums[x]+=add[x]!=0;}
+        }
+        return;
+    }
+    Image padded(width+2*radius,maximum?0:255);
+    for(int y=0;y<height;++y){
+        std::copy_n(src.data()+y*width,width,padded.data()+radius);
+        int x=0;
+        if(radius==4 || radius==7)for(;x+16<=width && x+32<=int(padded.size());x+=16){
+            auto a=vld1q_u8(padded.data()+x),b=vld1q_u8(padded.data()+x+16);
+            auto combine=[&](uint8x16_t u,uint8x16_t v){return maximum?vorrq_u8(u,v):vandq_u8(u,v);};
+            a=combine(a,vextq_u8(a,b,1));b=combine(b,vextq_u8(b,b,1));
+            a=combine(a,vextq_u8(a,b,2));b=combine(b,vextq_u8(b,b,2));
+            a=combine(a,vextq_u8(a,b,4));b=combine(b,vextq_u8(b,b,4));
+            const auto shifted=radius==4?vextq_u8(a,b,1):vextq_u8(a,b,7);
+            vst1q_u8(dst.data()+y*width+x,combine(a,shifted));
+        }
+        for(;x+16<=width;x+=16){
+            auto value=vld1q_u8(padded.data()+x);
+            if(maximum)for(int k=1;k<=2*radius;++k)value=vorrq_u8(value,vld1q_u8(padded.data()+x+k));
+            else for(int k=1;k<=2*radius;++k)value=vandq_u8(value,vld1q_u8(padded.data()+x+k));
+            vst1q_u8(dst.data()+y*width+x,value);
+        }
+        for(;x<width;++x){
+            uint8_t value=padded[x];
+            for(int k=1;k<=2*radius;++k)value=maximum?(value|padded[x+k]):(value&padded[x+k]);
+            dst[y*width+x]=value;
         }
     }
 }
@@ -62,7 +99,7 @@ bool red_pixel(int b,int g,int r){
     const int v=std::max({r,g,b}),delta=v-std::min({r,g,b});
     const int s=(delta*tables.saturation[v]+2048)>>12;
     int h=(v==r?g-b:v==g?b-r+2*delta:r-g+4*delta);h=(h*tables.hue[delta]+2048)>>12;if(h<0)h+=180;
-    return (h<=8 || h>=170) && s>=110 && v>=60;
+    return (h<=8 || h>=170) && s>=110 && v>=40;
 }
 struct PixelTables {
     std::array<std::array<uint8_t,4>,65536> values{};
@@ -98,7 +135,7 @@ LevelFrame prepare_level(const uint8_t* bgr,const uint16_t* pixels,unsigned widt
             for(int yy=std::max(0,y-1);yy<=std::min(int(height)-1,y+1);++yy)for(int xx=std::max(0,x-1);xx<=std::min(int(width)-1,x+1);++xx){const int next=yy*width+xx;if(mask[next] && !visited[next]){visited[next]=1;component.push_back(next);}}
         }
         const int w=xmax-xmin+1,h=ymax-ymin+1;
-        if(component.size()<.0015*width*height || std::abs(xmin+w*.5-width*.5)>.3*width || h>1.6*w)continue;
+        if(component.size()<.0015*width*height || std::abs(xmin+w*.5-width*.5)>.3*width || h>1.6*w || h*20<9*w)continue;
         const double area=contour_area(mask,width,height,start,component.size());
         if(area>=.0015*width*height && area>best){best=area;result.bbox={xmin,ymin,w,h};}
     }

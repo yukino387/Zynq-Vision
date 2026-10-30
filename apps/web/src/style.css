@@ -1048,44 +1048,6 @@ pre {
 .form-grid label {
   margin: 0;
 }
-.login-screen {
-  min-height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 32px;
-  background: var(--paper);
-}
-/* 登录页是第一印象，也是唯一一屏可以稍微从容一点的地方 */
-.login-form {
-  width: 420px;
-  max-width: 100%;
-  padding: 38px 40px 30px;
-  border: 1px solid var(--line-strong);
-  border-top: 3px solid var(--forest);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-.login-form h1 {
-  font-size: 22px;
-}
-.login-form .server {
-  margin-top: 20px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
-  font-size: 11px;
-  color: var(--muted);
-  text-align: center;
-  overflow-wrap: anywhere;
-}
-.login-form input {
-  width: 100%;
-}
-.login-form .primary {
-  width: 100%;
-  margin-top: 16px;
-  padding: 11px;
-}
 .check-row {
   display: flex;
   gap: 8px;
@@ -1305,12 +1267,6 @@ details > summary {
   }
   .pipeline > div {
     flex: 1 1 30%;
-  }
-  .login-screen {
-    padding: 20px;
-  }
-  .login-form {
-    padding: 32px 24px;
   }
 }
 
