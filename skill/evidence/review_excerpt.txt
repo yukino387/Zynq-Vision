@@ -1,0 +1,15 @@
+# 2026-10-27文档更新核查
+
+范围：离线复算与文档更新；未访问板卡、改数据库或构建硬件。原始日志和图片不改值；本次生成结果在document_update_20261027。
+
+| 编号 | 依据 | 支持范围 |
+|---|---|---|
+| E89 | load_overlap_20261026/download/trial-da46cc1fc5e5-*.timing.csv、stdout；load_overlap_deploy_20261026/download/postboot.timing.csv | 行重叠A/B/A、普通/插桩分离、启动后固定输入复算 |
+| E90 | hdmi25_20261026/summary.stdout.txt；hdmi25_deploy_20261026/download/postboot.timing.csv、stdout；既有performance.md部署记录 | 显示临时对照与固化复测；历史软件复位/SD检查记载不升级为本轮板测 |
+| E91 | hardware/camera/build/terminal/{utilization,timing,clocks}.rpt；qualified/routed.dcp与bitstream SHA | 当前资源时序与文件身份，不代表现场仍加载相同版本 |
+| E92 | vivado_final_20261026/图片索引.md、data/identity.txt、PNG/SVG | 当前DCP导出图片及方法声明；verification.json缺失，未重跑导出 |
+| E93 | arm_pl_stats_20261027/download/raw_trials.csv、raw_layers.csv、run_meta.json、restored_verify.txt；plan/build_manifest | 样本数、时延、记录内输出SHA、条件与恢复记载 |
+| E94 | document_update_20261027/verify_evidence.py、evidence_check.json；原analyze.py | 独立复算、哈希、计时公式、两种估计量与重采样边界 |
+| E95 | arm_pl_stats_20261027/figures_v2.py、figures_v2/；analysis/summary.json、tests.json | 图与表读取相同试验数据，不是新试验 |
+
+主要修正：旧资源/关键路径替换；旧FPS与十分钟观察标历史；212.30倍与合并212.29倍分列；删除NEON整网24.5倍实测及额外6～12倍优势的无证据推断；跨会话差异原因不归因定论。旧manifest缺失清单保留在evidence_check.json，不擅自恢复用户删除。审核签核由团队完成。

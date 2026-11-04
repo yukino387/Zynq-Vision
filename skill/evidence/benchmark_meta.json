@@ -1,0 +1,88 @@
+{
+  "budgetMs": 1500000,
+  "commandCount": 33,
+  "counts": {
+    "arm_novec": 42,
+    "arm_o0": 6,
+    "arm_vec": 6,
+    "pl": 660
+  },
+  "cpuFreqKHzEnd": "666667",
+  "cpuFreqKHzStart": "666667",
+  "cpuPin": 1,
+  "inputChannels": 3,
+  "macs": 984729088,
+  "modelSha256": "2658b41a492ab4879a36e38225d0d90d2d41636ec0422f84f78955e958cdbdaa",
+  "modelVersion": "CAPS-RGB-v1-20261022",
+  "outputBytes": 8085,
+  "schedule": {
+    "budgetMs": 1500000,
+    "cpuPin": 1,
+    "design": "Randomised interleaved rounds. Within every round the ARM trial(s) and the PL repetitions are shuffled together, so both paths sample the same thermal/clock window. Input order is permuted with the recorded seed.",
+    "phases": [
+      {
+        "inputs": [],
+        "kind": "calibration",
+        "n": 1024,
+        "name": "calibration",
+        "repsNeon": 3000,
+        "repsScalar": 300,
+        "rounds": 15
+      },
+      {
+        "armConditions": [
+          "arm_novec"
+        ],
+        "inputs": [
+          "photo_23",
+          "photo_02",
+          "photo_15"
+        ],
+        "name": "main",
+        "permuteInputs": true,
+        "plPerRound": 17,
+        "rounds": 12,
+        "warmup": {
+          "arm_novec": 1,
+          "arm_o0": 0,
+          "arm_vec": 0,
+          "pl": 3
+        }
+      },
+      {
+        "armConditions": [
+          "arm_o0",
+          "arm_novec",
+          "arm_vec"
+        ],
+        "inputs": [
+          "photo_23"
+        ],
+        "name": "sensitivity",
+        "permuteInputs": false,
+        "plPerRound": 8,
+        "rounds": 6,
+        "warmup": {
+          "arm_novec": 0,
+          "arm_o0": 0,
+          "arm_vec": 0,
+          "pl": 1
+        }
+      }
+    ],
+    "seed": 20261027
+  },
+  "scope": "33 operators; PL includes PS register programming and completion polling; both paths exclude model load, input preparation and output extraction",
+  "seed": 20261027,
+  "thermalEnd": "",
+  "thermalStart": "",
+  "truncated": false,
+  "variants": {
+    "arm_novec": "shipped scalar reference source, -O3, autovectorisation disabled",
+    "arm_o0": "shipped scalar reference source, -O0, no optimisation",
+    "arm_vec": "same source, -O3, autovectorisation enabled (NEON allowed)",
+    "pl": "48x8 INT8 accelerator, deployed bitstream"
+  },
+  "wallEndNs": 36507362089618,
+  "wallStartNs": 35570372057834
+}

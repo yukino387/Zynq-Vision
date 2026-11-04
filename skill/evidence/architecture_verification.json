@@ -1,0 +1,15 @@
+{
+  "top_module_coverage": "15/15",
+  "top_network_coverage": "47/47",
+  "internal_network_coverage": "99/99",
+  "cnn_port_coverage": "380/380",
+  "all_implemented_boundary_pins_catalogued": true,
+  "text_box_overflow": 0,
+  "pdf_pages": {
+    "main": 92,
+    "reference": 172
+  },
+  "source_hashes_unchanged": true,
+  "black_white_only": true,
+  "embedded_pdf_fonts": true
+}

@@ -601,6 +601,8 @@ def install_model(command):
     if not connection.get('server'):
         raise ValueError('请先绑定平台')
     current = engine()
+    if current.get('demo'):
+        raise ValueError('请先在板端退出演示模式')
     if current.get('production') and command.get('confirm') is not True:
         raise ValueError('请先停止自动检测并确认当前件已处理')
     if current.get('pendingRequestId') or read(STATE/'panel-request'):
@@ -642,6 +644,8 @@ def install_model(command):
 
 def install_product(command):
     current = engine()
+    if current.get('demo'):
+        raise ValueError('请先在板端退出演示模式')
     if current.get('production') and command.get('confirm') is not True:
         raise ValueError('请先停止自动检测并确认当前件已处理')
     if current.get('pendingRequestId') or read(STATE/'panel-request'):

@@ -3,6 +3,7 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <memory>
 #include "exposure.h"
 #include <cstdint>
 #include <string>
@@ -56,6 +57,13 @@ class Hardware {
     bool write_register(uint16_t,uint8_t);
     bool read_register(uint16_t,uint8_t&);
 public:
+    class Model {
+        friend class Hardware;
+        std::vector<uint8_t> bytes;
+        unsigned channels=0;
+        bool level=false;
+        explicit Model(std::vector<uint8_t>&& data):bytes(std::move(data)){}
+    };
     std::atomic<uint64_t> prepare_ns{0},conv_ns{0},forward_ns{0},post_ns{0},extract_ns{0};
     Hardware();~Hardware();
     Hardware(const Hardware&)=delete;
@@ -63,7 +71,8 @@ public:
     void initialize_camera();
     CameraExposure camera_exposure();
     void set_shading(std::vector<uint16_t>);
-    void load_model(const std::vector<uint8_t>&,const std::string&,const std::string&,const std::string&);
+    static std::shared_ptr<const Model> validate_model(std::vector<uint8_t>,const std::string&,const std::string&,const std::string&);
+    void load_model(const Model&);
     Frame capture();
 };
 }

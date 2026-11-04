@@ -141,6 +141,12 @@ class Engine {
     uint64_t captured_frames=0;
     double capture_ms=0,prepare_ms=0,conv_ms=0,forward_ms=0,post_ms=0,extract_ms=0;
     bool paused=true,production=false;
+    std::string demo_id;
+    json demo_profiles=json::array(),saved_model,saved_product;
+    struct DemoProfile {json model,product;Rules rules;std::shared_ptr<const Hardware::Model> weights;};
+    std::map<std::string,DemoProfile> demo_library;
+    std::shared_ptr<const Hardware::Model> active_weights,saved_weights;
+    bool saved_paused=true;
     Passage passage;
     Passage inspection_window;
     std::string inspection_request,inspection_piece;
@@ -233,6 +239,44 @@ public:
             if(fs::exists(this->root/"product.json"))set_product(json::parse(read_text(this->root/"product.json")));
         }catch(const std::exception& e){if(error.empty())error=e.what();product=nullptr;rules=Rules{};clear_product_file();paused=true;}
         if(!model.is_null())paused=product.is_null();
+        if(fs::exists(this->root/"demo"))for(const auto& entry:fs::directory_iterator(this->root/"demo")) {
+            const auto id=entry.path().filename().string();
+            if(!entry.is_directory() || id.empty() || id.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789-_")!=std::string::npos)continue;
+            try {
+                const auto m=json::parse(read_text(entry.path()/"model.json"));
+                const auto p=json::parse(read_text(entry.path()/"product.json"));
+                if(m.at("formatVersion")!=1)throw std::runtime_error("Invalid model descriptor");
+                validate_manifest(m.at("manifest"));auto next_rules=load_rules(p);
+                if(!product_classes_match(p.at("rules").at("classes").get<std::vector<std::string>>(),m.at("classes").get<std::vector<std::string>>()) || !fs::is_regular_file(entry.path()/"model.bin"))continue;
+                std::shared_ptr<const Hardware::Model> weights;
+                if(!model.is_null() && m.at("weightsSha256")==model.at("weightsSha256") && m.at("payloadSha256")==model.at("payloadSha256") && m.at("version")==model.at("version"))weights=active_weights;
+                else {const auto binary=read_text(entry.path()/"model.bin",6416360);weights=Hardware::validate_model(std::vector<uint8_t>(binary.begin(),binary.end()),m.at("version"),m.at("payloadSha256"),m.at("weightsSha256"));}
+                demo_library.emplace(id,DemoProfile{m,p,std::move(next_rules),std::move(weights)});
+                demo_profiles.push_back({{"id",id},{"name",p.at("name")},{"version",m.at("version")}});
+            }catch(const std::exception& e){std::cerr<<"Demo profile "<<id<<": "<<e.what()<<'\n';}
+        }
+        std::sort(demo_profiles.begin(),demo_profiles.end(),[](const json& a,const json& b){return a.at("id").get<std::string>()<b.at("id").get<std::string>();});
+    }
+    void set_demo(const json& command) {
+        std::lock_guard<std::mutex> hardware_lock(hardware_mutex);
+        std::lock_guard<std::mutex> lock(mutex);
+        if(!inspection_request.empty() || !pending_storage.empty() || (fs::exists(root/"panel-request") && !read_text(root/"panel-request",128).empty()))throw std::runtime_error("请先核对未完成的检查");
+        if(!command.at("enabled").get<bool>()) {
+            if(demo_id.empty())return;
+            if(saved_weights && active_weights!=saved_weights)hardware.load_model(*saved_weights);
+            active_weights=saved_weights;
+            model=saved_model;product=saved_product;rules=product.is_null()?Rules{}:load_rules(product);
+            reset_runtime();paused=saved_paused;error.clear();demo_id.clear();saved_weights.reset();saved_model=nullptr;saved_product=nullptr;
+            return;
+        }
+        const std::string id=command.at("profileId");
+        const auto found=demo_library.find(id);if(found==demo_library.end())throw std::runtime_error("演示模型不存在");
+        if(demo_id==id)return;
+        const auto& next=found->second;
+        if(production)stop_production();
+        if(active_weights!=next.weights)hardware.load_model(*next.weights);
+        if(demo_id.empty()){saved_model=model;saved_product=product;saved_paused=paused;saved_weights=active_weights;}
+        active_weights=next.weights;model=next.model;product=next.product;rules=next.rules;demo_id=id;reset_runtime();paused=false;error.clear();
     }
     json state() {
         std::lock_guard<std::mutex> lock(mutex);unsigned total=0;
@@ -246,7 +290,9 @@ public:
             for(const auto& c:r.at("checks")){auto check=c;check["label"]=r.at("classes").at(c.at("classId").get<unsigned>());checks.push_back(check);}
             product_state={{"id",product.at("id")},{"name",product.at("name")},{"version",product.at("version")},{"product",r.at("product")},{"purpose",r.at("purpose")},{"region",r.at("region")},{"instructions",r.at("instructions")},{"checks",checks},{"postprocess",postprocess_json(rules.postprocess)},{"acceptance",product.at("acceptance")}};
         }
-        return {{"model",model_state},{"product",product_state},{"total",total},{"counts",counts},{"pendingSync",pending_count},{"last",last},{"error",error},{"syncError",sync_error},{"paused",paused},{"production",production},{"productionRunId",production_run.empty()?json(nullptr):json(production_run)},{"runCounts",counts_json(run_counts)},{"runTotal",run_counts[0]+run_counts[1]+run_counts[2]+run_counts[3]},{"beltCaps",belt.total()},{"passagePhase",production?passage.phase():"STOPPED"},{"inspectionRequestId",inspection_request.empty()?json(nullptr):json(inspection_request)},{"passageSamples",passage.samples()},{"pendingRequestId",pending_storage.empty()?json(nullptr):json(pending_storage)},{"frameId",frame.id},{"fresh",frame.monotonic_ns && clock_ns()-frame.monotonic_ns<3000000000ULL},{"diagnostics",{{"cameraExposure",exposure_state},{"beltCounting",{{"algorithm","TRACK_CROSSING_V1"},{"unresolvedTracks",belt.lost()}}},{"capturedFrames",captured_frames},{"lastCaptureMs",captured_frames?json(capture_ms):json(nullptr)},{"hwPrepareMs",prepare_ms},{"hwConvMs",conv_ms},{"hwForwardMs",forward_ms},{"hwPostMs",post_ms},{"hwExtractMs",extract_ms},{"cameraInitialized",true},{"modelVersion",model.is_null()?json(nullptr):model.at("version")}}}};
+        json demo_result=nullptr;
+        if(!demo_id.empty() && !paused && error.empty() && frame.monotonic_ns && clock_ns()-frame.monotonic_ns<3000000000ULL)demo_result=decision_json(filtered_decision(rules,frame_filter,frame),product);
+        return {{"demo",!demo_id.empty()},{"demoProfileId",demo_id},{"demoProfiles",demo_profiles},{"demoResult",demo_result},{"demoTargets",frame_boxes.size()},{"demoConfirmed",std::count_if(frame_boxes.begin(),frame_boxes.end(),[&](const Box& b){return b.confidence>=rules.confidence;})},{"model",model_state},{"product",product_state},{"total",total},{"counts",counts},{"pendingSync",pending_count},{"last",last},{"error",error},{"syncError",sync_error},{"paused",paused},{"production",production},{"productionRunId",production_run.empty()?json(nullptr):json(production_run)},{"runCounts",counts_json(run_counts)},{"runTotal",run_counts[0]+run_counts[1]+run_counts[2]+run_counts[3]},{"beltCaps",belt.total()},{"passagePhase",production?passage.phase():"STOPPED"},{"inspectionRequestId",inspection_request.empty()?json(nullptr):json(inspection_request)},{"passageSamples",passage.samples()},{"pendingRequestId",pending_storage.empty()?json(nullptr):json(pending_storage)},{"frameId",frame.id},{"fresh",frame.monotonic_ns && clock_ns()-frame.monotonic_ns<3000000000ULL},{"diagnostics",{{"cameraExposure",exposure_state},{"beltCounting",{{"algorithm","TRACK_CROSSING_V1"},{"unresolvedTracks",belt.lost()}}},{"capturedFrames",captured_frames},{"lastCaptureMs",captured_frames?json(capture_ms):json(nullptr)},{"hwPrepareMs",prepare_ms},{"hwConvMs",conv_ms},{"hwForwardMs",forward_ms},{"hwPostMs",post_ms},{"hwExtractMs",extract_ms},{"cameraInitialized",true},{"modelVersion",model.is_null()?json(nullptr):model.at("version")}}}};
     }
     json history(unsigned page,const std::string& filter) {
         std::lock_guard<std::mutex> lock(mutex);std::vector<const Record*> selected;
@@ -276,23 +322,24 @@ public:
         std::lock_guard<std::mutex> lock(mutex);
         // 帧在拼装期间前进是连续流的正常情况，返回已取好的快照即可；
         // 只有暂停、故障或换模型这类真正的失效状态才拒绝。
-        if(frame.pixels.empty() || paused || !error.empty() || model.is_null())throw std::runtime_error("No current frame");
+        if(frame.pixels.empty() || paused || !error.empty() || model.is_null() || model.at("weightsSha256")!=model_state.at("weightsSha256") || product!=product_state)throw std::runtime_error("No current frame");
         if(frame.monotonic_ns==snapshot.monotonic_ns){preview_bytes=bytes;preview_frame_ns=snapshot.monotonic_ns;}
         return bytes;
     }
     bool set_model(const json& descriptor) {
         std::lock_guard<std::mutex> hardware_lock(hardware_mutex);
         std::lock_guard<std::mutex> lock(mutex);
+        if(!demo_id.empty())throw std::runtime_error("请先退出演示模式");
         if(!inspection_request.empty())throw std::runtime_error("外部触发检测中");
         if(production)throw std::runtime_error("请先停止自动检测，再切换模型");
         if(!pending_storage.empty())throw std::runtime_error("请先核对未确认保存的记录");
         if(descriptor.at("formatVersion")!=1)throw std::runtime_error("Invalid model descriptor");
         const auto manifest=descriptor.at("manifest");validate_manifest(manifest);
         const auto binary=read_text(root/"model"/"model.bin",6416360);std::vector<uint8_t> weights(binary.begin(),binary.end());
-        if(sha256(weights.data(),weights.size())!=descriptor.at("weightsSha256").get<std::string>())throw std::runtime_error("Model file checksum mismatch");
-        hardware.load_model(weights,descriptor.at("version"),descriptor.at("payloadSha256"),descriptor.at("weightsSha256"));
+        auto next_weights=Hardware::validate_model(std::move(weights),descriptor.at("version"),descriptor.at("payloadSha256"),descriptor.at("weightsSha256"));
+        hardware.load_model(*next_weights);
         durable_write(root/"model"/"model.json",descriptor.dump());
-        model=descriptor;if(descriptor.at("weightsSha256")==level_model_sha256)model["compatibilityProfile"]="LEVEL_V3_20261022";reset_runtime();
+        active_weights=std::move(next_weights);model=descriptor;if(descriptor.at("weightsSha256")==level_model_sha256)model["compatibilityProfile"]="LEVEL_V3_20261022";reset_runtime();
         bool cleared=false;
         if(!product.is_null() && !product_classes_match(product.at("rules").at("classes").get<std::vector<std::string>>(),model.at("classes").get<std::vector<std::string>>())) {
             product=nullptr;rules=Rules{};clear_product_file();paused=true;cleared=true;
@@ -302,6 +349,7 @@ public:
     }
     void set_product(const json& descriptor) {
         std::lock_guard<std::mutex> lock(mutex);
+        if(!demo_id.empty())throw std::runtime_error("请先退出演示模式");
         if(!inspection_request.empty())throw std::runtime_error("外部触发检测中");
         if(production)throw std::runtime_error("请先停止自动检测，再切换产品");
         if(model.is_null())throw std::runtime_error("请先下发模型");
@@ -313,6 +361,7 @@ public:
     }
     void clear_product() {
         std::lock_guard<std::mutex> lock(mutex);
+        if(!demo_id.empty())throw std::runtime_error("请先退出演示模式");
         if(!inspection_request.empty())throw std::runtime_error("外部触发检测中");
         if(production)stop_production();
         product=nullptr;rules=Rules{};clear_product_file();reset_runtime();paused=true;
@@ -321,6 +370,7 @@ public:
         std::lock_guard<std::mutex> hardware_lock(hardware_mutex);
         std::lock_guard<std::mutex> lock(mutex);
         if(enabled) {
+            if(!demo_id.empty())throw std::runtime_error("请先退出演示模式");
             if(!inspection_request.empty())throw std::runtime_error("外部触发检测中");
             if(production)return;
             if(model.is_null() || product.is_null() || !error.empty() || !pending_storage.empty())throw std::runtime_error("请先在平台部署模型并分配产品");
@@ -333,6 +383,7 @@ public:
     void reset_counts() {
         std::lock_guard<std::mutex> hardware_lock(hardware_mutex);
         std::lock_guard<std::mutex> lock(mutex);
+        if(!demo_id.empty())throw std::runtime_error("请先退出演示模式");
         if(!inspection_request.empty())throw std::runtime_error("外部触发检测中");
         stop_production();
         total_counts={};run_counts={};belt.reset();last=nullptr;
@@ -414,6 +465,7 @@ public:
     }
     json inspect(const json& command) {
         std::lock_guard<std::mutex> lock(mutex);
+        if(!demo_id.empty())throw std::runtime_error("请先退出演示模式");
         const std::string request=command.at("requestId");
         if(request.size()!=36 || request.find_first_not_of("0123456789abcdef-")!=std::string::npos)throw std::runtime_error("Invalid requestId");
         const auto path=root/"inspection-requests"/(request+".json");
@@ -435,6 +487,7 @@ public:
     json check(const std::string& request) {
         std::lock_guard<std::mutex> hardware_lock(hardware_mutex);
         std::lock_guard<std::mutex> lock(mutex);
+        if(!demo_id.empty())throw std::runtime_error("请先退出演示模式");
         if(!inspection_request.empty())throw std::runtime_error("外部触发检测中");
         const auto found=records.find(request);if(found!=records.end()) {
             auto& record=found->second;
@@ -604,6 +657,7 @@ int main(int argc,char** argv) {
             try {request=json::parse(q.body).at("requestId");r.set_content(engine.check(request).dump(),"application/json");}
             catch(const std::exception& e){r.status=409;r.set_content(json({{"error",e.what()},{"mayHaveSaved",engine.known_request(request)}}).dump(),"application/json");}
         });
+        server.Post("/demo",[&](const auto& q,auto& r){guard([&]{engine.set_demo(json::parse(q.body));return engine.state();},r);});
         server.Post("/production",[&](const auto& q,auto& r){guard([&]{engine.set_production(json::parse(q.body).at("enabled"));return engine.state();},r);});
         server.Post("/reset",[&](const auto&,auto& r){guard([&]{engine.reset_counts();return engine.state();},r);});
         server.Post("/pause",[&](const auto& q,auto& r){guard([&]{engine.pause(json::parse(q.body).at("paused"));return engine.state();},r);});

@@ -1,0 +1,62 @@
+{
+  "created": "2026-11-04",
+  "meaning": "Source paths relative to source project; bundled files suffice for the documented offline examples. Hashes identify files read now, not historical creation timestamps.",
+  "files": [
+    {
+      "source": "temporary/arm_pl_stats_20261027/download/raw_trials.csv",
+      "source_sha256": "a0e607f69e6e648cf44efb556fec49f6c353a2bc489a255cc222539176ccbe31",
+      "bundled": "evidence/raw_trials.csv",
+      "bundled_sha256": "a0e607f69e6e648cf44efb556fec49f6c353a2bc489a255cc222539176ccbe31",
+      "mode": "verbatim copy"
+    },
+    {
+      "source": "temporary/arm_pl_stats_20261027/download/run_meta.json",
+      "source_sha256": "5f70d2e05f24bd32e01508916f384d52e08f942c74a1117463dd4d04fc3912b8",
+      "bundled": "evidence/benchmark_meta.json",
+      "bundled_sha256": "5f70d2e05f24bd32e01508916f384d52e08f942c74a1117463dd4d04fc3912b8",
+      "mode": "verbatim copy"
+    },
+    {
+      "source": "temporary/arm_pl_stats_20261027/report.md",
+      "source_sha256": "caed2213def1ccfa2b04be839dc814219094a47b5f41ca50dfdeeedcd6dfbfa1",
+      "bundled": "evidence/benchmark_report_excerpt.txt",
+      "bundled_sha256": "b43f8c0426745abab43c2255975ef7f9c0e6fa43990d24d8f90cd4e3d97ea7d8",
+      "mode": "selected excerpt; not complete source"
+    },
+    {
+      "source": "temporary/document_update_20261027/review.md",
+      "source_sha256": "6e1f1aba67eb8d791236e66ecf9b7ec79261c65925badd9e4010cef1c1f73ff2",
+      "bundled": "evidence/review_excerpt.txt",
+      "bundled_sha256": "633e137f1d13aa5c238a7b8fd2b99217966f2faf5620b1e2552e4d3b2fab26c1",
+      "mode": "selected excerpt; not complete source"
+    },
+    {
+      "source": "temporary/demo_buttons_20261103/download/deployed-result.json",
+      "source_sha256": "109c62a715f131bb639a7627b109b041cb28dfdd244da54218f06f2a6ede39db",
+      "bundled": "evidence/deploy_result.json",
+      "bundled_sha256": "109c62a715f131bb639a7627b109b041cb28dfdd244da54218f06f2a6ede39db",
+      "mode": "verbatim copy"
+    },
+    {
+      "source": "temporary/ip_architecture_20261101_complete/verification.json",
+      "source_sha256": "dff67f7afa9ecc82aff7ef4615b3021d14e730090b769b4e0d6d816a2d9ec715",
+      "bundled": "evidence/architecture_verification.json",
+      "bundled_sha256": "dff67f7afa9ecc82aff7ef4615b3021d14e730090b769b4e0d6d816a2d9ec715",
+      "mode": "verbatim copy"
+    },
+    {
+      "source": "temporary/milk_model_import/MODEL_DELIVERY_STANDARD.md",
+      "source_sha256": "103177160ccea0f139a3afda22c7969b25f8ea078172f38bbc48823f323a1641",
+      "bundled": "evidence/model_review_20261017.md",
+      "bundled_sha256": "103177160ccea0f139a3afda22c7969b25f8ea078172f38bbc48823f323a1641",
+      "mode": "verbatim copy"
+    },
+    {
+      "source": "temporary/ip_architecture_20261101_complete/coverage.json",
+      "source_sha256": "7840d788b2e848a40232ebdd695d41dfaaa2136484909ead453c975a6bc4514c",
+      "bundled": "evidence/architecture_coverage_excerpt.json",
+      "bundled_sha256": "54a14206416ab58731c103ec7d60748eb0a17725e1e64861660b5287cd4f04e6",
+      "mode": "selected excerpt; not complete source"
+    }
+  ]
+}

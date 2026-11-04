@@ -1,0 +1,39 @@
+{
+  "date": "2026-11-04",
+  "mode": "offline only",
+  "python": "3.13.5",
+  "checks": [
+    {
+      "name": "historical_csv_recompute_in_isolated_copy",
+      "passed": true,
+      "counts": {
+        "arm_novec": 36,
+        "pl": 612
+      },
+      "equal_input_ratio": 212.30099003486427,
+      "pooled_ratio": 212.28737930111637
+    },
+    {
+      "name": "benchmark_other_task_and_reject_hash_zero_unpaired_same_condition",
+      "passed": true
+    },
+    {
+      "name": "tensor_equal_signed_boundary_mismatch_and_length_rejection",
+      "passed": true
+    },
+    {
+      "name": "existing_report_parser_selftest_in_isolated_copy",
+      "passed": true
+    },
+    {
+      "name": "new_skill_frontmatter_links_english_filenames_and_evidence_hashes",
+      "passed": true
+    }
+  ],
+  "limitations": [
+    "No new board test, build, cold boot or full model replay.",
+    "Isolated copy ran on the same Windows host and Python, not a clean OS or another team.",
+    "Synthetic examples test tool behavior, not cross-board performance or workflow gains.",
+    "Historical JSON and document observations are not independently revalidated hardware results."
+  ]
+}

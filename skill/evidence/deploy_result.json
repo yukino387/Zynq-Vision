@@ -1,0 +1,33 @@
+{
+  "installed": true,
+  "defaultDemoOnPanelStart": true,
+  "profiles": [
+    {
+      "id": "01-desktop",
+      "name": "桌面小物 6 类演示",
+      "version": "TINY6-DESK-20261029-v4"
+    },
+    {
+      "id": "02-caps",
+      "name": "瓶盖计数",
+      "version": "CAPS-RGB-v1-20261022"
+    },
+    {
+      "id": "03-level",
+      "name": "可乐液位检测",
+      "version": "LEVEL-BAND-v1"
+    },
+    {
+      "id": "04-milk",
+      "name": "牛奶包装缺陷检测",
+      "version": "MILK-RGB-v3-20261018"
+    }
+  ],
+  "sha256": "b223dfdcd59c06e9e9728fab7451c5f1c1eb677f70603d972e423b59d0e9b13e",
+  "zeroNewRecords": true,
+  "formalFilesUnchanged": true,
+  "slcr": 0,
+  "ioErrors": [],
+  "fsyncReadbackBytes": 4194304,
+  "coldBootVerified": false
+}

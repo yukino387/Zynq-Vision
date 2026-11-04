@@ -131,8 +131,7 @@ void Hardware::exposure_loop() {
 }
 CameraExposure Hardware::camera_exposure() {std::lock_guard<std::mutex> lock(exposure_mutex);return exposure_status;}
 void Hardware::set_shading(std::vector<uint16_t> gains) {shading=std::move(gains);}
-void Hardware::load_model(const std::vector<uint8_t>& file,const std::string& version,const std::string& expected_payload,const std::string& expected_file) {
-    if(!(conv[0]&4))throw std::runtime_error("Accelerator is busy; reset the PL before loading a model");
+std::shared_ptr<const Hardware::Model> Hardware::validate_model(std::vector<uint8_t> file,const std::string& version,const std::string& expected_payload,const std::string& expected_file) {
     if(file.size()!=128+weight_bytes+metadata_words*4 || sha256(file.data(),file.size())!=expected_file)throw std::runtime_error("Model file checksum mismatch");
     auto word=[&](unsigned offset){uint32_t value;std::memcpy(&value,file.data()+offset,4);return value;};
     if(word(0)!=0x314e4e43 || word(4)!=1 || word(8)!=weight_bytes || word(12)!=metadata_words*4 || word(16)||word(20)||word(124)||word(120)!=crc32(file.data(),120))throw std::runtime_error("Invalid model header");
@@ -141,8 +140,16 @@ void Hardware::load_model(const std::vector<uint8_t>& file,const std::string& ve
     auto graph=reinterpret_cast<const int32_t*>(file.data()+128+weight_bytes);
     if(graph[4]!=1 && graph[4]!=3)throw std::runtime_error("Unsupported input channels");
     for(unsigned i=0;i<33;++i)for(unsigned j=0;j<10;++j)if(!(i==0 && j==4) && graph[i*10+j]!=model_commands[i][j])throw std::runtime_error("Model graph mismatch");
-    channels=graph[4];
-    level_enabled=expected_file==level_model_sha256;
+    const unsigned channels=graph[4];
+    auto model=std::shared_ptr<Model>(new Model(std::move(file)));
+    model->channels=channels;model->level=expected_file==level_model_sha256;
+    return model;
+}
+void Hardware::load_model(const Model& model) {
+    if(!(conv[0]&4))throw std::runtime_error("Accelerator is busy; reset the PL before loading a model");
+    const auto& file=model.bytes;const auto graph=reinterpret_cast<const int32_t*>(file.data()+128+weight_bytes);
+    channels=model.channels;
+    level_enabled=model.level;
     captured_level=LevelFrame{};
     have_frame=false;current=0;captured_ns=0;
     std::memcpy(commands,graph,sizeof(commands));

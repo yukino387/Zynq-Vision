@@ -1,0 +1,13 @@
+{
+  "top_modules": 15,
+  "interface_nets": 24,
+  "scalar_nets": 23,
+  "all_top_nets_have_drawings": true,
+  "implemented_cells": 136728,
+  "implemented_hierarchy_cells": 2103,
+  "signal_entries": 1420,
+  "hls_functions": 27,
+  "main_pages": 92,
+  "reference_pages": 172,
+  "internal_networks": 99
+}
