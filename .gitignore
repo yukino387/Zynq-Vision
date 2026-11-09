@@ -101,3 +101,12 @@ node_modules/
 /temporary/frontend_workflow_20261016/*.zip
 /temporary/frontend_workflow_20261016/screenshots/
 /temporary/frontend_refinement/*.png
+
+# Competition deliverables: design report text and synthesis/implementation reports
+!/build/
+!/build/report/
+!/build/report/**
+!/report/**
+
+# Local PDF/text extraction scratch used while preparing the reports
+/temporary/pdf_probe/
