@@ -77,7 +77,7 @@ flowchart LR
 | | `vitis_live/` | 裸机 JTAG 路径（XSDB 加载） |
 | | `hardware/camera/build/` | 本地生成的 `.bit`（不入库，见第 5 节） |
 | `data/` | `camera/int8/weights.bin`、`camera/training/graph.json` | 权重与算子图 |
-| | `temporary/arm_pl_stats_20261027/` | 基准原始 CSV 与复算脚本 |
+| | `skill/evidence/` | 基准原始 CSV 与复算证据 |
 | `skill/` | `skill/` | 7 个可复用技能包 + 证据 |
 | `report/` | `report/REPORT.md` | 设计报告 |
 | | `docs/` | 详细技术文档与证据索引 |

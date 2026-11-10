@@ -110,3 +110,6 @@ node_modules/
 
 # Local PDF/text extraction scratch used while preparing the reports
 /temporary/pdf_probe/
+
+# Scratch area: development logs, raw captures and build leftovers stay local.
+/temporary/
